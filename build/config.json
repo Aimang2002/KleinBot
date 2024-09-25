@@ -15,8 +15,8 @@
     },
     "消息回复白名单": {
         "OPEN_GROUPCHAT_MESSAGE": true,
-        "MANAGER_QQ": 1472807646,
-        "BOT_QQ": 3245305826
+        "MANAGER_QQ": 123456,
+        "BOT_QQ": 123456
     },
     "QQ通信端口": {
         "WEBSOCKET_MESSAGE_IP": "127.0.0.1",
@@ -45,47 +45,47 @@
         "MESSAGE_SURVIVAL_TIME": 3600
     },
     "下载管理": {
-        "IMAGE_DOWNLOAD_PATH": "/home/aimang/桌面/QBot/BOT/QBot2.3.0_Beta/build/source/image/"
+        "IMAGE_DOWNLOAD_PATH": ""
     },
     "DefaultChatModel": {
-        "DEFAULT_MODEL_API_KEY": "sk-nKLaKijGmRSLA71V1027CaAdFaB24f30B7E541B217D29dCf",
-        "DEFAULT_MODEL_ENDPOINT": "https://api.pumpkinaigc.online/v1/chat/completions",
+        "DEFAULT_MODEL_API_KEY": "sk-",
+        "DEFAULT_MODEL_ENDPOINT": "https://api..online/v1/chat/completions",
         "DEFAULT_MODEL": "gpt-4o",
         "DEFAULT_MODEL_APISTANDARD": "OpenAI"
     },
     "OtherChatModel": {
-        "OTHER_MODEL_API_KEY": "sk-72d10096d00344648952047ef850daaf",
-        "OTHER_MODEL_ENDPOINT": "https://api.deepseek.com/v1/chat/completions",
+        "OTHER_MODEL_API_KEY": "sk-",
+        "OTHER_MODEL_ENDPOINT": "/v1/chat/completions",
         "OTHER_MODEL": "deepseek-coder",
         "OTHER_MODEL_APISTANDARD": "OpenAI"
     },
     "DrawModel": {
-        "DRAW_MODEL_API_KEY": "sk-nKLaKijGmRSLA71V1027CaAdFaB24f30B7E541B217D29dCf",
-        "DRAW_MODEL_ENDPOINT": "https://api.pumpkinaigc.online/v1/images/generations",
+        "DRAW_MODEL_API_KEY": "sk-",
+        "DRAW_MODEL_ENDPOINT": "/v1/images/generations",
         "DRAW_MODEL": "dall-e-3",
         "DRAW_MODEL_APISTANDARD": "OpenAI"
     },
     "VisionModel": {
-        "VISION_MODEL_API_KEY": "sk-nKLaKijGmRSLA71V1027CaAdFaB24f30B7E541B217D29dCf",
-        "VISION_MODEL_ENDPOINT": "https://api.pumpkinaigc.online/v1/chat/completions",
+        "VISION_MODEL_API_KEY": "sk-",
+        "VISION_MODEL_ENDPOINT": "/v1/chat/completions",
         "VISION_MODEL": "gpt-4-vision-preview",
         "VISION_MODEL_APISTANDARD": "OpenAI"
     },
     "TextTranslateModel": {
-        "TEXTTRANSLATE_MODEL_API_KEY": "sk-nKLaKijGmRSLA71V1027CaAdFaB24f30B7E541B217D29dCf",
-        "TEXTTRANSLATE_MODEL_ENDPOINT": "https://api.pumpkinaigc.online/v1/chat/completions",
+        "TEXTTRANSLATE_MODEL_API_KEY": "sk-",
+        "TEXTTRANSLATE_MODEL_ENDPOINT": "/v1/chat/completions",
         "TEXTTRANSLATE_MODEL": "gpt-3.5-turbo",
         "TEXTTRANSLATE_MODEL_APISTANDARD": "OpenAI"
     },
     "SDChatModel": {
-        "STABLEDIFFUSION_ENDPOINT": "http://125.119.50.228:7860/sdapi/v1/txt2img",
+        "STABLEDIFFUSION_ENDPOINT": "",
         "STABLEDIFFUSION_DEFAULT_MODEL": ""
     },
     "GPT_soVIST": {
-        "VIST_API_URL": "http://192.168.1.4",
+        "VIST_API_URL": "",
         "VIST_API_PORT": "9880",
-        "VIST_REFERVOICE_PATH": "/home/aimang/OpenSourceProject/GPT-SoVITS-0211/ReferenceAudio/Klein.wav",
-        "VIST_REFERVOICE_TEXT": "卖泡面这类垃圾食品终究还是太局限了，而且容易被人投诉。",
-        "VIST_FILE_SAVE_PATH": "/home/aimang/OpenSourceProject/GPT-SoVITS-0211/tmp/"
+        "VIST_REFERVOICE_PATH": "",
+        "VIST_REFERVOICE_TEXT": "",
+        "VIST_FILE_SAVE_PATH": ""
     }
 }
