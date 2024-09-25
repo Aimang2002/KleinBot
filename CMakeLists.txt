@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.11)
-project("Qbot2.3.0")
+project("Qbot2.3.1")
 
 # 添加宏定义
 option(DEBUG "Build the debug version" OFF)
 if(DEBUG)
   add_compile_definitions(DEBUG)
-  set(EXECUTABLE_NAME KleinQBot2.3.0_DEBUG)
+  set(EXECUTABLE_NAME KleinQBot2.3.1_DEBUG)
 else()
-  set(EXECUTABLE_NAME KleinQBot2.3.0)
+  set(EXECUTABLE_NAME KleinQBot2.3.1)
 endif()
 
 file(GLOB_RECURSE SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)# 项目源文件所在位置

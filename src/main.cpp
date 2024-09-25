@@ -12,7 +12,7 @@
 #include "src/Network/MyWebSocket.h"
 #include "TimingTast/TimingTast.h"
 
-#define __KLEIN_VERSION__ "v2.3.0"
+#define __KLEIN_VERSION__ "v2.3.1"
 
 using namespace std;
 
@@ -59,7 +59,10 @@ void pollingThread()
 			message += content;
 			JsonFormatData = "[\n\t";
 			JsonFormatData += R"({"role": "user", "content": ")" + message + "\"}\n]";
-			Dock::RequestGPT(JsonFormatData, CManager.configVariable("OPENAI_DEFAULT_MODEL"));
+			pair<string, string> p;
+			p.first = CManager.configVariable("DEFAULT_MODEL");
+			p.second = CManager.configVariable("DEFAULT_MODEL_SERVICE");
+			Dock::RequestGPT(JsonFormatData, p);
 			if (JsonFormatData.size() > 100)
 			{
 				JsonFormatData = JParsingClass.getAttributeFromChoices(JsonFormatData, "content");

@@ -16,8 +16,10 @@
 #include <unistd.h>
 #include <curl/curl.h>
 #include "../../ConfigManager/ConfigManager.h"
+// #include "../../JsonParse/JsonParse.h"
 
 extern ConfigManager &CManager;
+// extern JsonParse &JParsingClass;
 
 // OpenAIStandard类
 class OpenAIStandard
@@ -28,8 +30,8 @@ public:
     // 文本翻译
     static bool text_translate(std::string &text, const std::string model, std::string language, const string endpoint, const string api_key);
 
-    // 调用API
-    static bool GPT(string &data, string models, const string endpoint, string api_key);
+    // 调用聊天模型
+    static bool send_to_chat(string &data, string models, const string endpoint, string api_key);
 
     // 调用视觉模型
     static bool send_to_vision(std::string &data, std::string &base64, string model, const string endpoint, const string api_key);

@@ -9,7 +9,7 @@ bool OpenAIStandard::text_translate(std::string &text, const std::string model, 
     if (language == "EN")
     {
         ss = R"({"model":")" + model + "\",\"messages\":[";
-        ss += R"({"role": "system", "content": "Translate non-English characters into English"},
+        ss += R"({"role": "system", "content": "You will be provided with a sentence in English, and your task is to translate it into English."},
         {"role": "assistant", "content": "OK"},
         {"role": "user", "content": ")" +
               text + "\"}]";
@@ -28,7 +28,7 @@ bool OpenAIStandard::text_translate(std::string &text, const std::string model, 
 
     text = ss;
 
-    GPT(text, model, endpoint, api_key);
+    send_to_chat(text, model, endpoint, api_key);
 
     // json解析
     if (text.find("choices") != text.npos)
@@ -44,7 +44,7 @@ bool OpenAIStandard::text_translate(std::string &text, const std::string model, 
     return true;
 }
 
-bool OpenAIStandard::GPT(string &data, string models, string endpoint, string api_key)
+bool OpenAIStandard::send_to_chat(string &data, string models, string endpoint, string api_key)
 {
     /*
      * data参数里必须构建好Json数据以及prompt，本函数不提供Json数据封装
@@ -73,6 +73,7 @@ bool OpenAIStandard::GPT(string &data, string models, string endpoint, string ap
         headers = curl_slist_append(headers, header_auth.c_str());
 
         string json_data = data;
+        // LOG_DEBUG("发送内容：" + json_data);
         data = "";
         // 封装HTTP POST数据报 + 设置libcurl选项
         curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str()); // 添加端点
@@ -293,7 +294,6 @@ bool OpenAIStandard::isTimeOut(string &message)
             return true;
         }
     }
-
     return false;
 }
 

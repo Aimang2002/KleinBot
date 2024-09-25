@@ -260,10 +260,10 @@ private:
 	vector<std::pair<string, string>> LightweightPersonalityList; // 轻量型人格
 
 private:
-	map<UINT64, Person> *user_messages; // key = QQ,second = 用户信息
-	std::mutex mutex_message;			// message类的锁
-	ComputerStatus *PCStatus;			// 监控计算机状态
-	vector<string> chatModels;			// 存储模型名称
+	map<UINT64, Person> *user_messages;		 // key = QQ,second = 用户信息
+	std::mutex mutex_message;				 // message类的锁
+	ComputerStatus *PCStatus;				 // 监控计算机状态
+	vector<pair<string, string>> chatModels; // 存储模型名称   first存储模型名称，second存储模型厂商
 };
 
 #endif

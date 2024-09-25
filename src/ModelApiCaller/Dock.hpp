@@ -8,7 +8,7 @@
 class Dock
 {
 public:
-    static void RequestGPT(string &data, const string model, Person *user = nullptr)
+    static void RequestGPT(string &data, const pair<string, string> model, Person *user = nullptr)
     {
         // 注意：模型复杂时可能会发生冲突
         // 模型调用：根据传入进来的模型分析应该调用的接口
@@ -21,7 +21,7 @@ public:
         if (user == nullptr)
         {
             LOG_WARNING("超参数使用默认值");
-            json_data = "{\"model\":\"" + model + "\",\"messages\":" + data + ",";
+            json_data = "{\"model\":\"" + model.first + "\",\"messages\":" + data + ",";
             json_data += "\"temperature\":" + CManager.configVariable("temperature") + ",";
             json_data += "\"top_p\":" + CManager.configVariable("top_p") + ",";
             json_data += "\"frequency_penalty\":" + CManager.configVariable("frequency_penalty") + ",";
@@ -30,7 +30,7 @@ public:
         }
         else
         {
-            json_data = "{\"model\":\"" + model + "\",\"messages\":" + data + ",";
+            json_data = "{\"model\":\"" + model.first + "\",\"messages\":" + data + ",";
             json_data += "\"temperature\":" + user->temperature + ",";
             json_data += "\"top_p\":" + user->top_p + ",";
             json_data += "\"frequency_penalty\":" + user->frequency_penalty + ",";
@@ -38,33 +38,23 @@ public:
             json_data += "}";
         }
 
-        if (model.find("gpt") != string::npos && model.find("vision") == string::npos)
+        // 获取特定API
+        auto resultAPI = appointAPI(model.first);
+
+        // 注意：这里的判断规则不能打乱
+        if (model.first == CManager.configVariable("DRAW_DEFAULT_MODEL"))
         {
-            endpoint = CManager.configVariable("OPENAI_MODEL_ENDPOINT");
-            api_key = CManager.configVariable("OPENAI_MODEL_API_KEY");
-            OpenAIStandard::GPT(json_data, model, endpoint, api_key);
-            data = json_data;
+            OpenAIStandard::send_to_draw(data, model.first, resultAPI.second, resultAPI.first);
         }
-        else if (model.find("RWKV") != string::npos || model.find("rwkv") != string::npos || model == CManager.configVariable("OTHER_DEFAULT_MODEL"))
+        else if (model.second == "OpenAI")
         {
-            endpoint = CManager.configVariable("OTHER_MODEL_ENDPOINT");
-            api_key = CManager.configVariable("OTHER_MODEL_API_KEY");
-            OpenAIStandard::GPT(json_data, model, endpoint, api_key);
+            OpenAIStandard::send_to_chat(json_data, model.first, resultAPI.second, resultAPI.first);
             data = json_data;
-        }
-        else if (model == CManager.configVariable("DRAW_DEFAULT_MODEL"))
-        {
-            api_key = CManager.configVariable("DRAW_MODEL_API_KEY");
-            endpoint = CManager.configVariable("DRAW_MODEL_ENDPOINT");
-            OpenAIStandard::send_to_draw(data, model, endpoint, api_key);
         }
         else
         {
-            LOG_WARNING(model + "为未识别的模型，可能会出现特殊情况...");
-            endpoint = CManager.configVariable("OTHER_MODEL_ENDPOINT");
-            api_key = CManager.configVariable("OTHER_MODEL_API_KEY");
-            OpenAIStandard::GPT(json_data, model, endpoint, api_key);
-            data = json_data;
+            LOG_ERROR("错误的服务厂商");
+            data = "你的服务厂商为：" + model.second + "，当前并未支持";
         }
     }
 
@@ -81,6 +71,31 @@ private:
             }
         }
         return result;
+    }
+
+    // 指定API
+    static pair<string, string> appointAPI(string model) // 返回内容 first = key，second = endpoint
+    {
+        pair<string, string> p;
+        p.first = CManager.configVariable("DEFAULT_MODEL_API_KEY");
+        p.second = CManager.configVariable("DEFAULT_MODEL_ENDPOINT");
+
+        if (model == CManager.configVariable("OTHER_DEFAULT_MODEL"))
+        {
+            p.first = CManager.configVariable("OTHER_MODEL_API_KEY");
+            p.second = CManager.configVariable("OTHER_MODEL_ENDPOINT");
+        }
+        else if (model == CManager.configVariable("DRAW_DEFAULT_MODEL"))
+        {
+            p.first = CManager.configVariable("DRAW_MODEL_API_KEY");
+            p.second = CManager.configVariable("DRAW_MODEL_ENDPOINT");
+        }
+        else if (model == CManager.configVariable("VISION_DEFAULT_MODEL"))
+        {
+            p.first = CManager.configVariable("VISION_MODEL_API_KEY");
+            p.second = CManager.configVariable("VISION_MODEL_ENDPOINT");
+        }
+        return p;
     }
 };
 

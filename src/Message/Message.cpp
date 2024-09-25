@@ -7,6 +7,9 @@ Message::Message()
 	srand((unsigned int)time(NULL));
 
 	// 服务器状态类初始化
+#ifdef DEBUG
+	LOG_DEBUG("服务器状态初始化...");
+#endif
 	this->PCStatus = new ComputerStatus;
 
 	// 内置成员属性初始化
@@ -19,7 +22,10 @@ Message::Message()
 	this->default_personality = "You are my assistant, your name is " + CManager.configVariable("QBOT_NAME") + "\"},";
 	this->default_message_line = 2;
 
-	// 载入模型名称
+// 载入模型名称
+#ifdef DEBUG
+	LOG_DEBUG("正在载入模型名称...");
+#endif
 	std::ifstream ifsJson(CManager.configVariable("CHATMODELS_PATH"));
 	if (ifsJson.is_open())
 	{
@@ -38,10 +44,13 @@ Message::Message()
 				for (SizeType i = 0; i < models.Size(); i++)
 				{
 					const Value &model = models[i];
-					if (model.HasMember("name") && model["name"].IsString())
+					if ((model.HasMember("name") && model["name"].IsString()) &&
+						(model.HasMember("service") && model["service"].IsString()))
 					{
-						std::string Name = model["name"].GetString();
-						this->chatModels.push_back(Name);
+						pair<string, string> p;
+						p.first = model["name"].GetString();
+						p.second = model["service"].GetString();
+						this->chatModels.push_back(p);
 					}
 				}
 			}
@@ -53,6 +62,9 @@ Message::Message()
 	}
 
 	// 轻量型人格初始化
+#ifdef DEBUG
+	LOG_DEBUG("轻量型人格初始化...");
+#endif
 	string path = CManager.configVariable("PERSONALITY_PATH") + "personality.txt";
 	ifstream ifs(path);
 	if (!ifs.is_open())
@@ -102,7 +114,12 @@ bool Message::addUsers(UINT64 user_id)
 		// 创建用户
 		Person person;
 		person.user_chatHistory = userDefault;
-		person.user_models = CManager.configVariable("OPENAI_DEFAULT_MODEL"); // 默认模型
+
+		pair<string, string> models;
+		models.first = CManager.configVariable("DEFAULT_MODEL"); // 默认模型
+		models.second = CManager.configVariable("DEFAULT_MODEL_SERVICE");
+		person.user_models = models;
+
 		person.isOpenVoiceMode = false;
 		person.temperature = CManager.configVariable("temperature");
 		person.top_p = CManager.configVariable("top_p");
@@ -153,13 +170,13 @@ string Message::handleMessage(UINT64 user_id, string message, string message_typ
 		// this->fixImageSizeTo4K(message);
 		// message = "系统提示：该功能正在升级...";
 	}
-	*/
-	if (message.find("#精美图片") != message.npos)
+	else if (message.find("#精美图片") != message.npos)
 	{
 		questPictureID(message);
 		LOG_DEBUG(message);
 	}
-	else if (message == CManager.configVariable("QBOT_NAME"))
+	*/
+	if (message == CManager.configVariable("QBOT_NAME"))
 	{
 		SpeechSound(message);
 	}
@@ -229,7 +246,7 @@ string Message::handleMessage(UINT64 user_id, string message, string message_typ
 		}
 		user->second.user_chatHistory[0].first = (this->system_message_format + message + "\"},");
 		user->second.user_chatHistory[0].second = time(nullptr);
-		user->second.user_chatHistory[1].first = (this->system_message_format + "Ok, next I will have a conversation around this topic and reply to you in Chinese.\"},");
+		user->second.user_chatHistory[1].first = (this->system_message_format + "OK!I will use Chinses answer \"},");
 		user->second.user_chatHistory[1].second = time(nullptr);
 
 		message = "好的，接下来我会围绕此话题进行对话";
@@ -249,7 +266,7 @@ string Message::handleMessage(UINT64 user_id, string message, string message_typ
 	}
 	else if (message.find("#查询当前模型") != message.npos)
 	{
-		message = "你当前的模型为：" + this->user_messages->find(user_id)->second.user_models;
+		message = "你当前的模型为：" + this->user_messages->find(user_id)->second.user_models.first;
 	}
 	else if (message.find("#开启语音") != message.npos)
 	{
@@ -374,7 +391,7 @@ void Message::characterMessage(UINT64 &user_id, string &message)
 {
 
 	// 获取用户当前使用的模型
-	string models = this->user_messages->find(user_id)->second.user_models;
+	auto models = this->user_messages->find(user_id)->second.user_models;
 
 	// 是否开启上下文  	当上下文模式为开启状态 || 访问者是管理员时，启用上下文模式
 	if (this->accessibility_chat || user_id == stoi(CManager.configVariable("MANAGER_QQ")))
@@ -429,7 +446,7 @@ void Message::characterMessage(UINT64 &user_id, string &message)
 		message.insert(0, "[\n");
 		message.insert(message.size(), "]");
 
-		// 将内容发送至OpenAI
+		// 将内容发送至对接的大预言模型
 		cout << "send to Model..." << endl;
 		Dock::RequestGPT(message, models, &this->user_messages->find(user_id)->second);
 
@@ -617,7 +634,7 @@ void Message::setPersonality(string &roleName, UINT64 user_id)
 	ifstream ifs(path);
 	if (!ifs.is_open())
 	{
-		LOG_DEBUG("文件打开失败，文件路径:" + path);
+		LOG_WARNING("文件打开失败，文件路径:" + path);
 		roleName = "系统提示：“" + roleName + "”人格不存在！";
 		return;
 	}
@@ -646,7 +663,7 @@ void Message::setPersonality(string &roleName, UINT64 user_id)
 	personality = JParsingClass.toJson(personality);
 	originData.erase(0, originData.find("}") + 1);
 
-	begin = originData.find("temperature") + 12;
+	begin = originData.find("Temperature") + 13;
 	range = originData.find("}") - begin;
 	if (begin == string::npos || range < 1)
 	{
@@ -766,7 +783,7 @@ void Message::resetChat(string &roleName, UINT64 user_id)
 bool Message::adminTerminal(string &message, UINT64 user_id)
 {
 	string str = message;
-	if (message.find("#添加图片") != message.npos)
+	/*if (message.find("#添加图片") != message.npos)
 	{
 		if (Database::getInstance()->AP.savePictrueURL(message))
 		{
@@ -775,14 +792,14 @@ bool Message::adminTerminal(string &message, UINT64 user_id)
 		else
 			message = "添加失败";
 	}
-	/*
+
 	else if (message.find("CQ:image") != message.npos)
 	{
 		database::getInstance()->imgURL.saveFaceURL(message);
 		facePackageMessage(message);
 	}
 	*/
-	else if (message.find("#开启无障碍聊天") != message.npos)
+	if (message.find("#开启无障碍聊天") != message.npos)
 	{
 		this->accessibility_chat = true;
 		message = "无障碍聊天已开启！";
@@ -852,10 +869,10 @@ void Message::switchModel(string &message, UINT64 user_id)
 	// 寻找相同的模型名称
 	for (auto GPTModel = this->chatModels.begin(); GPTModel != this->chatModels.end(); GPTModel++)
 	{
-		if (*GPTModel == modelName)
+		if (GPTModel->first == modelName)
 		{
 			this->user_messages->find(user_id)->second.user_models = *GPTModel;
-			message = "设置成功，当前模型为:" + this->user_messages->find(user_id)->second.user_models;
+			message = "设置成功，当前模型为:" + this->user_messages->find(user_id)->second.user_models.first;
 			return;
 		}
 	}
@@ -1259,7 +1276,11 @@ bool Message::provideImageCreation(const UINT64 user_id, string &text)
 								   "EN", CManager.configVariable("TEXTTRANSLATE_MODEL_ENDPOINT"),
 								   CManager.configVariable("TEXTTRANSLATE_MODEL_API_KEY"));
 	LOG_INFO("文本翻译完成。");
-	Dock::RequestGPT(prompt, CManager.configVariable("DRAW_DEFAULT_MODEL"), &this->user_messages->find(user_id)->second);
+	prompt = JParsingClass.toJson(prompt);
+	pair<string, string> p;
+	p.first = CManager.configVariable("DRAW_DEFAULT_MODEL");
+	p.second = CManager.configVariable("DRAW_DEFUALT_MODEL_SERVICE");
+	Dock::RequestGPT(prompt, p, &this->user_messages->find(user_id)->second);
 
 	if (prompt.size() < 100)
 	{
