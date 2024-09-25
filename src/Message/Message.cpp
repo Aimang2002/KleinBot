@@ -45,11 +45,11 @@ Message::Message()
 				{
 					const Value &model = models[i];
 					if ((model.HasMember("name") && model["name"].IsString()) &&
-						(model.HasMember("service") && model["service"].IsString()))
+						(model.HasMember("APIStandard") && model["APIStandard"].IsString()))
 					{
 						pair<string, string> p;
 						p.first = model["name"].GetString();
-						p.second = model["service"].GetString();
+						p.second = model["APIStandard"].GetString();
 						this->chatModels.push_back(p);
 					}
 				}
@@ -117,7 +117,7 @@ bool Message::addUsers(UINT64 user_id)
 
 		pair<string, string> models;
 		models.first = CManager.configVariable("DEFAULT_MODEL"); // 默认模型
-		models.second = CManager.configVariable("DEFAULT_MODEL_SERVICE");
+		models.second = CManager.configVariable("DEFAULT_MODEL_APISTANDARD");
 		person.user_models = models;
 
 		person.isOpenVoiceMode = false;
@@ -1125,7 +1125,7 @@ bool Message::provideImageRecognition(const UINT64 user_id, string &message)
 	// 封装消息，向OpenAI发送  这里可以检查收到的信息是否合法
 	cout << "send to OpenAI..." << endl;
 	OpenAIStandard::send_to_vision(conversation, base64,
-								   CManager.configVariable("VISION_DEFAULT_MODEL"),
+								   CManager.configVariable("VISION_MODEL"),
 								   CManager.configVariable("VISION_MODEL_ENDPOINT"),
 								   CManager.configVariable("VISION_MODEL_API_KEY"));
 
@@ -1272,14 +1272,14 @@ bool Message::provideImageCreation(const UINT64 user_id, string &text)
 	// 开始请求OpenAI
 	std::cout << "send to Model..." << std::endl;
 	OpenAIStandard::text_translate(prompt,
-								   CManager.configVariable("TEXTTRANSLATE_DEFAULT_MODEL"),
+								   CManager.configVariable("TEXTTRANSLATE_MODEL"),
 								   "EN", CManager.configVariable("TEXTTRANSLATE_MODEL_ENDPOINT"),
 								   CManager.configVariable("TEXTTRANSLATE_MODEL_API_KEY"));
 	LOG_INFO("文本翻译完成。");
 	prompt = JParsingClass.toJson(prompt);
 	pair<string, string> p;
-	p.first = CManager.configVariable("DRAW_DEFAULT_MODEL");
-	p.second = CManager.configVariable("DRAW_DEFUALT_MODEL_SERVICE");
+	p.first = CManager.configVariable("DRAW_MODEL");
+	p.second = CManager.configVariable("DRAW_MODEL_APISTANDARD");
 	Dock::RequestGPT(prompt, p, &this->user_messages->find(user_id)->second);
 
 	if (prompt.size() < 100)
@@ -1422,7 +1422,7 @@ void Message::SDImageCreation(string &message)
 
 	// prompt翻译成英文
 	OpenAIStandard::text_translate(prompt,
-								   CManager.configVariable("TEXTTRANSLATE_DEFAULT_MODEL"),
+								   CManager.configVariable("TEXTTRANSLATE_MODEL"),
 								   "EN", CManager.configVariable("TEXTTRANSLATE_MODEL_ENDPOINT"),
 								   CManager.configVariable("TEXTTRANSLATE_MODEL_API_KEY"));
 

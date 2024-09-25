@@ -1,0 +1,104 @@
+{
+    "Models": [
+        {
+            "name": "gpt-4",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4o",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4o-mini",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-all",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-32k",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-0314",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-0613",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-turbo",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-32k-0314",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-32k-0613",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-1106-preview",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-0125-preview",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-turbo-preview",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-4-trubo-2024-04-09",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-3.5-turbo",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-3.5-turbo-16k",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-3.5-turbo-0301",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-3.5-turbo-0613",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-3.5-turbo-1106",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-3.5-turbo-0125",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "gpt-3.5-turbo-16k-0613",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "o1-preview-20240912",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "o1-preview",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "deepseek-chat",
+            "APIStandard": "OpenAI"
+        },
+        {
+            "name": "deepseek-coder",
+            "APIStandard": "OpenAI"
+        }
+    ]
+}

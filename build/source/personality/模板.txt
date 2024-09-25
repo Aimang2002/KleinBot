@@ -1,0 +1,9 @@
+Rersonality:{}
+
+Temperature:{0.9}
+
+Top_p:{0.9}
+
+Frequency_penalty:{-0.2}
+
+Presence_penalty:{0.8}

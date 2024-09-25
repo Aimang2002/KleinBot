@@ -1,0 +1,91 @@
+{
+    "globalConfig": {
+        "CONTEXT_MAX": 6144,
+        "MODEL_SIGLE_TOKEN_MAX": 3000,
+        "GLOBAL_VOICE": true,
+        "ACCESSIBLITY_CHAT": true,
+        "CONFIG_VERSION": "v2.3.1"
+    },
+    "聊天端口": {
+        "GROUP_API": "send_group_msg",
+        "PRIVATE_API": "send_private_msg"
+    },
+    "QBot": {
+        "QBOT_NAME": "克莱茵"
+    },
+    "消息回复白名单": {
+        "OPEN_GROUPCHAT_MESSAGE": true,
+        "MANAGER_QQ": 1472807646,
+        "BOT_QQ": 3245305826
+    },
+    "QQ通信端口": {
+        "WEBSOCKET_MESSAGE_IP": "127.0.0.1",
+        "WEBSOCKET_MESSAGE_PORT": 9999,
+        "REVERSEWEBSOCKET_MESSAGE_IP": "127.0.0.1",
+        "REVERSEWEBSOCKET_MESSAGE_PORT": 8600
+    },
+    "FilePath": {
+        "FACEURL_PATH": "source/face/faceURL.csv",
+        "WYY_SONGID_PATH": "source/Song/wyySongID.csv",
+        "QUOTES_PATH": "source/celebritySaying/celebritySaying.txt",
+        "ANIMEPICTRUE_PATH": "source/Pictrue/anime.csv",
+        "CNGPICTRUE_PATH": "source/Pictrue/CNG.csv",
+        "HELP_PATH": "source/help/help.txt",
+        "HELP_PERSONALITY_PATH": "source/help/help_personality.txt",
+        "PERSONALITY_PATH": "source/personality/",
+        "CHATMODELS_PATH": "source/Model/ModelsName.json"
+    },
+    "Hyperparameter": {
+        "temperature": "1",
+        "top_p": "1",
+        "frequency_penalty": "0",
+        "presence_penalty": "0"
+    },
+    "消息管理": {
+        "MESSAGE_SURVIVAL_TIME": 3600
+    },
+    "下载管理": {
+        "IMAGE_DOWNLOAD_PATH": "/home/aimang/桌面/QBot/BOT/QBot2.3.0_Beta/build/source/image/"
+    },
+    "DefaultChatModel": {
+        "DEFAULT_MODEL_API_KEY": "sk-nKLaKijGmRSLA71V1027CaAdFaB24f30B7E541B217D29dCf",
+        "DEFAULT_MODEL_ENDPOINT": "https://api.pumpkinaigc.online/v1/chat/completions",
+        "DEFAULT_MODEL": "gpt-4o",
+        "DEFAULT_MODEL_APISTANDARD": "OpenAI"
+    },
+    "OtherChatModel": {
+        "OTHER_MODEL_API_KEY": "sk-72d10096d00344648952047ef850daaf",
+        "OTHER_MODEL_ENDPOINT": "https://api.deepseek.com/v1/chat/completions",
+        "OTHER_MODEL": "deepseek-coder",
+        "OTHER_MODEL_APISTANDARD": "OpenAI"
+    },
+    "DrawModel": {
+        "DRAW_MODEL_API_KEY": "sk-nKLaKijGmRSLA71V1027CaAdFaB24f30B7E541B217D29dCf",
+        "DRAW_MODEL_ENDPOINT": "https://api.pumpkinaigc.online/v1/images/generations",
+        "DRAW_MODEL": "dall-e-3",
+        "DRAW_MODEL_APISTANDARD": "OpenAI"
+    },
+    "VisionModel": {
+        "VISION_MODEL_API_KEY": "sk-nKLaKijGmRSLA71V1027CaAdFaB24f30B7E541B217D29dCf",
+        "VISION_MODEL_ENDPOINT": "https://api.pumpkinaigc.online/v1/chat/completions",
+        "VISION_MODEL": "gpt-4-vision-preview",
+        "VISION_MODEL_APISTANDARD": "OpenAI"
+    },
+    "TextTranslateModel": {
+        "TEXTTRANSLATE_MODEL_API_KEY": "sk-nKLaKijGmRSLA71V1027CaAdFaB24f30B7E541B217D29dCf",
+        "TEXTTRANSLATE_MODEL_ENDPOINT": "https://api.pumpkinaigc.online/v1/chat/completions",
+        "TEXTTRANSLATE_MODEL": "gpt-3.5-turbo",
+        "TEXTTRANSLATE_MODEL_APISTANDARD": "OpenAI"
+    },
+    "SDChatModel": {
+        "STABLEDIFFUSION_ENDPOINT": "http://125.119.50.228:7860/sdapi/v1/txt2img",
+        "STABLEDIFFUSION_DEFAULT_MODEL": ""
+    },
+    "GPT_soVIST": {
+        "VIST_API_URL": "http://192.168.1.4",
+        "VIST_API_PORT": "9880",
+        "VIST_REFERVOICE_PATH": "/home/aimang/OpenSourceProject/GPT-SoVITS-0211/ReferenceAudio/Klein.wav",
+        "VIST_REFERVOICE_TEXT": "卖泡面这类垃圾食品终究还是太局限了，而且容易被人投诉。",
+        "VIST_FILE_SAVE_PATH": "/home/aimang/OpenSourceProject/GPT-SoVITS-0211/tmp/"
+    }
+}

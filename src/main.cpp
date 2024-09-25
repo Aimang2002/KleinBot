@@ -61,7 +61,7 @@ void pollingThread()
 			JsonFormatData += R"({"role": "user", "content": ")" + message + "\"}\n]";
 			pair<string, string> p;
 			p.first = CManager.configVariable("DEFAULT_MODEL");
-			p.second = CManager.configVariable("DEFAULT_MODEL_SERVICE");
+			p.second = CManager.configVariable("DEFAULT_MODEL_APISTANDARD");
 			Dock::RequestGPT(JsonFormatData, p);
 			if (JsonFormatData.size() > 100)
 			{

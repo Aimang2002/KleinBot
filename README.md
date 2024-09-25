@@ -22,6 +22,12 @@
 
 
 
+> 最新版本：v2.3.1
+>
+> 该版本支持对接的API为OpenAI接口规范，凡是兼容OpenAI SDK的API，都可以连接
+
+
+
 # 运行
 
 目前Klein只支持在Linux x86_64系统下，后续将会陆续适配其他系统。从release下载文件后，赋予x权限，直接运行即可。
@@ -43,8 +49,6 @@ curl安装：
 rapidJSON安装:
 
 > 源码已经嵌入到项目中
-
-
 
 
 
@@ -84,7 +88,7 @@ Klein没有实现协议端，本身并不支持直接对接QQ，而是对接第�
 
 |   功能   |          是否支持           |       备注       |
 | :------: | :-------------------------: | :--------------: |
-| 群聊回复 | <font color="gree">√</font> |     需要艾特     |
+| 群聊回复 | <font color="gree">√</font> |      需要@       |
 | 私聊回复 | <font color="gree">√</font> |                  |
 | 图片发送 | <font color="gree">√</font> |   需对接大模型   |
 | 语音发送 | <font color="gree">√</font> | 需对接GPT-SoVIST |
@@ -192,15 +196,11 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 | OPEN_GROUPCHAT_MESSAGE        | 是否开启群聊（true/false）                          |
 | MANAGER_QQ                    | 管理员QQ                                            |
 | BOT_QQ                        | 机器人QQ                                            |
-| WEBSOCKET_MESSAGE_IP          | 正向WS IP                                           |
+| WEBSOCKET_MESSAGE_IP          | 正向WS IP地址                                       |
 | WEBSOCKET_MESSAGE_PORT        | 正向WS 端口                                         |
-| REVERSEWEBSOCKET_MESSAGE_IP   | 反向WS IP                                           |
+| REVERSEWEBSOCKET_MESSAGE_IP   | 反向WS IP地址                                       |
 | REVERSEWEBSOCKET_MESSAGE_PORT | 反向WS 端口                                         |
-|                               |                                                     |
 | WYY_SONGID_PATH               | 网易云音乐ID文件路径                                |
-|                               |                                                     |
-|                               |                                                     |
-|                               |                                                     |
 | HELP_PATH                     | #帮助 文本文件路径                                  |
 | HELP_PERSONALITY_PATH         | #人格帮助 文本文件路径                              |
 | PERSONALITY_PATH              | 人格目录路径                                        |
@@ -213,7 +213,8 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 | IMAGE_DOWNLOAD_PATH           | 图片下载存放路径，图片分析时需要用到                |
 | XXX_MODEL_API_KEY             | 请求模型的API KEY                                   |
 | XXX_MODEL_ENDPOINT            | 请求模型的请求端点                                  |
-| XXX_DEFAULT_MODEL             | 请求的默认模型                                      |
+| XXX_DEFAULT_MODEL             | 请求的模型                                          |
+| XXX_MODEL_APISTANDARD         | 模型使用的API规范                                   |
 | STABLEDIFFUSION_ENDPOINT      | Stable Diffusion 的请求端点                         |
 | DEFAULT_MODEL                 | Stable Diffusion 的默认模型，目前不填               |
 | VIST_API_URL                  | GPT-SoVIST API的IP                                  |
@@ -238,7 +239,25 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 
 + Model
 
-  + 存放模型名称的文件，可以在里面声明各种模型名称。需要注意的是：当模型名称为非大平台的模型时，这些模型会被Klein判断为其他模型（使用OpenAI的方式请求）。
+  + 存放模型名称的文件，可以在里面声明各种模型名称，分别在里面声明模型名称和模型厂商(使用的API规范)，如下：
+
+    ~~~json
+    {
+        "Models": 
+        [
+            {
+                "name": "gpt-4",
+                "service": "OpenAI"
+            },
+            {
+                "name": "xxx",
+                "service": "xxx"
+            }
+        ]
+    }
+    ~~~
+
+    
 
 + personality
 

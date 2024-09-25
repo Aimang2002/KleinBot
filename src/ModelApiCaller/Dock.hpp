@@ -42,7 +42,7 @@ public:
         auto resultAPI = appointAPI(model.first);
 
         // 注意：这里的判断规则不能打乱
-        if (model.first == CManager.configVariable("DRAW_DEFAULT_MODEL"))
+        if (model.first == CManager.configVariable("DRAW_MODEL"))
         {
             OpenAIStandard::send_to_draw(data, model.first, resultAPI.second, resultAPI.first);
         }
@@ -80,17 +80,17 @@ private:
         p.first = CManager.configVariable("DEFAULT_MODEL_API_KEY");
         p.second = CManager.configVariable("DEFAULT_MODEL_ENDPOINT");
 
-        if (model == CManager.configVariable("OTHER_DEFAULT_MODEL"))
+        if (model == CManager.configVariable("OTHER_MODEL"))
         {
             p.first = CManager.configVariable("OTHER_MODEL_API_KEY");
             p.second = CManager.configVariable("OTHER_MODEL_ENDPOINT");
         }
-        else if (model == CManager.configVariable("DRAW_DEFAULT_MODEL"))
+        else if (model == CManager.configVariable("DRAW_MODEL"))
         {
             p.first = CManager.configVariable("DRAW_MODEL_API_KEY");
             p.second = CManager.configVariable("DRAW_MODEL_ENDPOINT");
         }
-        else if (model == CManager.configVariable("VISION_DEFAULT_MODEL"))
+        else if (model == CManager.configVariable("VISION_MODEL"))
         {
             p.first = CManager.configVariable("VISION_MODEL_API_KEY");
             p.second = CManager.configVariable("VISION_MODEL_ENDPOINT");
