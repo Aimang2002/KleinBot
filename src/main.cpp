@@ -12,7 +12,7 @@
 #include "src/Network/MyWebSocket.h"
 #include "TimingTast/TimingTast.h"
 
-#define __KLEIN_VERSION__ "v2.3.1"
+#define __KLEIN_VERSION__ "v2.3.2"
 
 using namespace std;
 
@@ -67,7 +67,7 @@ void pollingThread()
 			{
 				JsonFormatData = JParsingClass.getAttributeFromChoices(JsonFormatData, "content");
 			}
-			MessageQueue::pending_push_queue(JsonFormatData, CManager.configVariable("PRIVATE_API"), user_id);
+			MessageQueue::pending_push_queue(JsonFormatData, CManager.configVariable("PRIVATE_API"), user_id, "text");
 			tag = false;
 		}
 		sleep(3);
@@ -79,22 +79,28 @@ void send_message(JsonData &data, bool isErrorTransfer)
 	// 数据处理 && 封装
 	string getResponse; // 用于接收相应内容
 
-	if (isErrorTransfer)
+	if (isErrorTransfer) // 错误消息发送
 	{
 		if (data.message_type == "group")
 		{
-			MessageQueue::pending_push_queue(data.message, CManager.configVariable("GROUP_API"), data.group_id);
+			// 如果该消息为非at则不发送
+			if (!messageClass.messageFilter(data.message_type, data.message))
+			{
+				LOG_INFO("群消息且非AT消息触发的错误警告，该消息将会不会被处理和发送...");
+				return;
+			}
+			MessageQueue::pending_push_queue(data.message, CManager.configVariable("GROUP_API"), data.group_id, "text");
 		}
 		else
 		{
-			MessageQueue::pending_push_queue(data.message, CManager.configVariable("PRIVATE_API"), data.private_id);
+			MessageQueue::pending_push_queue(data.message, CManager.configVariable("PRIVATE_API"), data.private_id, "text");
 		}
 	}
 	else
 	{
 		if (strcmp(data.message_type.c_str(), "group") == 0)
 		{
-			getResponse = messageClass.handleMessage(data.private_id, data.message, data.message_type);
+			getResponse = messageClass.handleMessage(data);
 			if (getResponse.size() > 5000 && getResponse.size() <= 15000) // GO-CQHTTP插件的单次发送最大长度为5000，而模型单次回复可能达到4096*3的长度
 			{
 				// 截取两段
@@ -102,43 +108,43 @@ void send_message(JsonData &data, bool isErrorTransfer)
 				while (true)
 				{
 					string subStr = getResponse.substr(0, 5000);
-					MessageQueue::pending_push_queue(subStr, CManager.configVariable("GROUP_API"), data.group_id);
+					MessageQueue::pending_push_queue(subStr, CManager.configVariable("GROUP_API"), data.group_id, data.type);
 					getResponse.erase(0, 5000);
 					sleep(1);
 					if (getResponse.size() < 4999)
 					{
-						MessageQueue::pending_push_queue(getResponse, CManager.configVariable("GROUP_API"), data.group_id);
+						MessageQueue::pending_push_queue(getResponse, CManager.configVariable("GROUP_API"), data.group_id, data.type);
 						break;
 					}
 				}
 			}
 			else
 			{
-				MessageQueue::pending_push_queue(getResponse, CManager.configVariable("GROUP_API"), data.group_id);
+				MessageQueue::pending_push_queue(getResponse, CManager.configVariable("GROUP_API"), data.group_id, data.type);
 			}
 		}
 		else
 		{
-			getResponse = messageClass.handleMessage(data.private_id, data.message, data.message_type);
+			getResponse = messageClass.handleMessage(data);
 			if (getResponse.size() > 5000 > 5000 && getResponse.size() <= 15000)
 			{
 				LOG_WARNING("文本过长，将使用分批次发送");
 				while (true)
 				{
 					string subStr = getResponse.substr(0, 5000);
-					MessageQueue::pending_push_queue(subStr, CManager.configVariable("PRIVATE_API"), data.private_id);
+					MessageQueue::pending_push_queue(subStr, CManager.configVariable("PRIVATE_API"), data.private_id, data.type);
 					getResponse.erase(0, 5000);
 					sleep(1);
 					if (getResponse.size() < 4999)
 					{
-						MessageQueue::pending_push_queue(getResponse, CManager.configVariable("PRIVATE_API"), data.private_id);
+						MessageQueue::pending_push_queue(getResponse, CManager.configVariable("PRIVATE_API"), data.private_id, data.type);
 						break;
 					}
 				}
 			}
 			else
 			{
-				MessageQueue::pending_push_queue(getResponse, CManager.configVariable("PRIVATE_API"), data.private_id);
+				MessageQueue::pending_push_queue(getResponse, CManager.configVariable("PRIVATE_API"), data.private_id, data.type);
 			}
 		}
 	}
@@ -154,13 +160,14 @@ void workingThread(string originalJsonData)
 	if (originalJsonData.size() > (stoi(CManager.configVariable("MODEL_SIGLE_TOKEN_MAX")) * 3)) // UTF-8中，1个汉字占用3字节，这里以OpenAI为标准（OpenAI的分词器是1个汉字1个token），这里选择乘3倍
 	{
 		data->message = "系统提示：消息长度超过最大限度，请减少单次发送的字符数量...";
+
 		send_message(*data, true);
 
 		delete data;
 		return;
 	}
 
-	// 消息过滤
+	// 消息过滤  检查消息中是否属于转发消息
 	if (!messageClass.messageFilter(data->message_type, data->message))
 	{
 		return;
@@ -256,7 +263,7 @@ int main()
 	std::thread t2(MyReverseWebSocket::connectReverseWebSocket);
 	t2.detach();
 
-	// 轮询originalMessageQueue
+	// 轮询originalMessageQueue  这里可以使用线程池管理
 	while (true)
 	{
 		if (!MessageQueue::original_empty())

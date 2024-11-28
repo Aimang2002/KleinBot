@@ -72,6 +72,19 @@
         "future": "cpp",
         "iomanip": "cpp",
         "typeindex": "cpp",
-        "variant": "cpp"
+        "variant": "cpp",
+        "shared_mutex": "cpp",
+        "cfenv": "cpp",
+        "__nullptr": "cpp",
+        "__locale": "cpp",
+        "filesystem": "cpp",
+        "__functional_03": "cpp",
+        "__string": "cpp",
+        "__bit_reference": "cpp",
+        "__hash_table": "cpp",
+        "__tree": "cpp",
+        "__split_buffer": "cpp",
+        "queue": "cpp",
+        "stack": "cpp"
     }
 }

@@ -30,7 +30,7 @@ void MyReverseWebSocket::connectReverseWebSocket()
                     message = MessageQueue::pending_front_queue();
                     MessageQueue::pending_pop();
 #ifdef DEBUG
-                    cout << "发送数据：" << message << endl;
+                    LOG_DEBUG("发送数据：" + message);
 #endif
                     ws.text(ws.got_text());
                     ws.write(net::buffer(message));
@@ -60,6 +60,6 @@ void MyReverseWebSocket::connectReverseWebSocket()
 
 std::string MyReverseWebSocket::messageEncapsulation(string message, string messageEndpoint)
 {
-    string format = R"({"action":")" + messageEndpoint + R"(","params":)" + message + "}"; // \"
+    string format = R"({"action":")" + messageEndpoint + R"(","params":)" + message + "}";
     return format;
 }

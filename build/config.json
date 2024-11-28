@@ -4,7 +4,7 @@
         "MODEL_SIGLE_TOKEN_MAX": 3000,
         "GLOBAL_VOICE": true,
         "ACCESSIBLITY_CHAT": true,
-        "CONFIG_VERSION": "v2.3.1"
+        "CONFIG_VERSION": "v2.3.2"
     },
     "聊天端口": {
         "GROUP_API": "send_group_msg",
@@ -15,8 +15,8 @@
     },
     "消息回复白名单": {
         "OPEN_GROUPCHAT_MESSAGE": true,
-        "MANAGER_QQ": 123456,
-        "BOT_QQ": 123456
+        "MANAGER_QQ": 123,
+        "BOT_QQ": 123
     },
     "QQ通信端口": {
         "WEBSOCKET_MESSAGE_IP": "127.0.0.1",
@@ -49,43 +49,48 @@
     },
     "DefaultChatModel": {
         "DEFAULT_MODEL_API_KEY": "sk-",
-        "DEFAULT_MODEL_ENDPOINT": "https://api..online/v1/chat/completions",
+        "DEFAULT_MODEL_ENDPOINT": "https://xxx/v1/chat/completions",
         "DEFAULT_MODEL": "gpt-4o",
         "DEFAULT_MODEL_APISTANDARD": "OpenAI"
     },
     "OtherChatModel": {
         "OTHER_MODEL_API_KEY": "sk-",
-        "OTHER_MODEL_ENDPOINT": "/v1/chat/completions",
+        "OTHER_MODEL_ENDPOINT": "https://xxx/v1/chat/completions",
         "OTHER_MODEL": "deepseek-coder",
         "OTHER_MODEL_APISTANDARD": "OpenAI"
     },
     "DrawModel": {
         "DRAW_MODEL_API_KEY": "sk-",
-        "DRAW_MODEL_ENDPOINT": "/v1/images/generations",
+        "DRAW_MODEL_ENDPOINT": "https://xxx/v1/images/generations",
         "DRAW_MODEL": "dall-e-3",
         "DRAW_MODEL_APISTANDARD": "OpenAI"
     },
     "VisionModel": {
         "VISION_MODEL_API_KEY": "sk-",
-        "VISION_MODEL_ENDPOINT": "/v1/chat/completions",
-        "VISION_MODEL": "gpt-4-vision-preview",
+        "VISION_MODEL_ENDPOINT": "https://xxx/v1/chat/completions",
+        "VISION_MODEL": "gpt-4o-mini",
         "VISION_MODEL_APISTANDARD": "OpenAI"
     },
     "TextTranslateModel": {
         "TEXTTRANSLATE_MODEL_API_KEY": "sk-",
-        "TEXTTRANSLATE_MODEL_ENDPOINT": "/v1/chat/completions",
+        "TEXTTRANSLATE_MODEL_ENDPOINT": "https://xxx/v1/chat/completions",
         "TEXTTRANSLATE_MODEL": "gpt-3.5-turbo",
         "TEXTTRANSLATE_MODEL_APISTANDARD": "OpenAI"
     },
     "SDChatModel": {
-        "STABLEDIFFUSION_ENDPOINT": "",
+        "STABLEDIFFUSION_ENDPOINT": "http://xxx/sdapi/v1/txt2img",
         "STABLEDIFFUSION_DEFAULT_MODEL": ""
     },
-    "GPT_soVIST": {
-        "VIST_API_URL": "",
-        "VIST_API_PORT": "9880",
-        "VIST_REFERVOICE_PATH": "",
-        "VIST_REFERVOICE_TEXT": "",
-        "VIST_FILE_SAVE_PATH": ""
+    "GPT_soVITS": {
+        "VITS_API_URL": "127.0.0.1",
+        "VITS_API_PORT": "9880",
+        "VITS_REFERVOICE_PATH": "xxx",
+        "VITS_REFERVOICE_TEXT": "我不建议稍作休整，不过，你确定这里是个聊天的好地方吗？",
+        "VITS_FILE_SAVE_PATH": "/tmp/"
+    },
+    "REALESGAN": {
+        "REALESGAN_PATH": "xxx/realesrgan/",
+        "REALESGAN_MODEL": "realesrgan-x4plus",
+        "IMAGE_DOWNLOAD_PATH": "/tmp/"
     }
 }

@@ -69,6 +69,7 @@ void MyWebSocket::connectWebSocket(const std::string _url = "/")
 
 bool MyWebSocket::filterMessageType(std::string originalMessage)
 {
+    // 过滤非消息事件
     if (originalMessage.find(R"("post_type":"message")") == originalMessage.npos)
     {
         return true;

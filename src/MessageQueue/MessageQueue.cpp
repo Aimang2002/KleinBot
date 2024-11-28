@@ -18,7 +18,7 @@ void MessageQueue::original_push_queue(std::string task)
     original_mutex.unlock();
 }
 
-void MessageQueue::pending_push_queue(std::string task, std::string API, UINT64 id)
+void MessageQueue::pending_push_queue(const std::string task, std::string API, UINT64 id, const string type)
 {
 #ifdef DEBUG
     cout << "入列消息：" << task << endl;
@@ -33,12 +33,12 @@ void MessageQueue::pending_push_queue(std::string task, std::string API, UINT64 
     // 判断是群消息还是私聊消息
     if (API.compare(CManager.configVariable("GROUP_API")) == 0)
     {
-        getGOCQJsonData = groupGOCQFormat(JsonFormatData, id);
+        getGOCQJsonData = groupGOCQFormat(JsonFormatData, id, type);
         webSocketDataPakage = MyReverseWebSocket::messageEncapsulation(getGOCQJsonData, CManager.configVariable("GROUP_API"));
     }
     else
     {
-        getGOCQJsonData = privateGOCQFormat(JsonFormatData, id);
+        getGOCQJsonData = privateGOCQFormat(JsonFormatData, id, type);
         webSocketDataPakage = MyReverseWebSocket::messageEncapsulation(getGOCQJsonData, CManager.configVariable("PRIVATE_API"));
     }
 
@@ -121,16 +121,64 @@ bool MessageQueue::pending_pop()
 }
 
 // 封装GO-CQ格式数据
-std::string MessageQueue::privateGOCQFormat(std::string message, UINT64 user_id)
-{
-    stringstream post_json;
-    post_json << R"({"user_id":)" << user_id << R"(,"message":")" << message << R"("})";
-    return post_json.str();
-}
-
-std::string MessageQueue::groupGOCQFormat(std::string message, UINT64 group_id)
+std::string MessageQueue::privateGOCQFormat(std::string message, UINT64 user_id, const string type)
 {
     stringstream json_data;
-    json_data << R"({"group_id":)" << group_id << R"(,"message":")" << message << R"("})";
+    if (type.compare("text") == 0)
+    {
+        // 转义“ [ ”
+        /*
+        auto position = message.find("[");
+        while (position != std::string::npos)
+        {
+            message.replace(position, 5, "&#91;");
+            position = message.find("[", position + 5);
+        }
+        // 转义转义“ ] ”
+        position = message.find("]");
+        while (position != std::string::npos)
+        {
+            message.replace(position, 5, "&#93;");
+            position = message.find("]", position + 5);
+        }
+        */
+        json_data << R"({"type": "text",)";
+        json_data << R"("user_id":)" << user_id << R"(,"message":")" << message << R"("})";
+    }
+    else
+    {
+        json_data << R"({"user_id":)" << user_id << R"(,"message":")" << message << R"("})";
+    }
+    return json_data.str();
+}
+
+std::string MessageQueue::groupGOCQFormat(std::string message, UINT64 group_id, const string type)
+{
+    stringstream json_data;
+    if (type.compare("text") == 0)
+    {
+        // 转义“ [ ”
+        /*
+        auto position = message.find("[");
+        while (position != std::string::npos)
+        {
+            message.replace(position, 5, "&#91;");
+            position = message.find("[", position + 5);
+        }
+        // 转义转义“ ] ”
+        position = message.find("]");
+        while (position != std::string::npos)
+        {
+            message.replace(position, 5, "&#93;");
+            position = message.find("]", position + 5);
+        }
+        */
+        json_data << R"({"type": "text",)";
+        json_data << R"("user_id":)" << group_id << R"(,"message":")" << message << R"("})";
+    }
+    else
+    {
+        json_data << R"({"user_id":)" << group_id << R"(,"message":")" << message << R"("})";
+    }
     return json_data.str();
 }

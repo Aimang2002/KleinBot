@@ -14,14 +14,17 @@
 #include <ctime>
 #include <iomanip>
 #include <filesystem>
+#include <cstdio>
 #include "../TimingTast/TimingTast.h"
 #include "../Database/Database.h"
 #include "../JsonParse/JsonParse.h"
 #include "../ConfigManager/ConfigManager.h"
 #include "../ComputerStatus/ComputerStatus.h"
 #include "../ModelApiCaller/StableDiffusion/StableDiffusion.h"
+#include "../ModelApiCaller/Realesrgan/Realesrgan.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "Person.hpp"
+#include "../ModelApiCaller/Voice/Voice.h"
 
 using namespace std;
 
@@ -51,7 +54,8 @@ public:
 	 * @param message 	该用户所发送的信息
 	 * @param message_type 消息类型
 	 */
-	string handleMessage(const UINT64 private_id, string message, string message_type);
+	// string handleMessage(const UINT64 private_id, string message, string message_type);
+	string handleMessage(JsonData &data);
 
 	~Message();
 
@@ -87,7 +91,8 @@ private:
 	 * @param message	用户QQ
 	 *
 	 */
-	void characterMessage(UINT64 &user_id, string &message);
+	// void characterMessage(UINT64 &user_id, string &message);
+	void characterMessage(JsonData &data);
 
 	/**
 	 * @brief 音乐分享
@@ -178,13 +183,12 @@ private:
 	void switchModel(string &message, const UINT64 user_id);
 
 	/**
-	 * @brief 对用户发来的图片进行4K修复
+	 * @brief 调用图片修复接口
 	 *
 	 * @param message 	具体消息
-	 * @return 			当修复成功则返回true
 	 *
 	 */
-	bool fixImageSizeTo4K(string &message);
+	void call_fixImageSizeTo4K(string &message);
 
 	/**
 	 * @brief 调用GPT4-VISION模型
@@ -193,7 +197,7 @@ private:
 	 * @param message 	具体消息
 	 *
 	 */
-	bool provideImageRecognition(const UINT64 user_id, string &message);
+	bool provideImageRecognition(const UINT64 user_id, string &message, string &type);
 
 	/**
 	 * @brief 将传入进去的数据转为bash64编码，最后data保存base64编码
@@ -215,8 +219,11 @@ private:
 	 * @brief 将文本转为语音
 	 *
 	 * @param text 	文本
+	 * @return  返回-1.处理有误；
+				返回1，使用路径传输;
+				返回2，使用base64编码传输;
 	 */
-	void textToVoice(string &text, const UINT64 user_id);
+	int textToVoice(string &text, string &type);
 
 	/**
 	 * @brief 使用dall-e-3模型生成图片
@@ -258,12 +265,11 @@ private:
 	bool accessibility_chat;									  // true为开启
 	bool global_Voice;											  // true为开启
 	vector<std::pair<string, string>> LightweightPersonalityList; // 轻量型人格
-
-private:
-	map<UINT64, Person> *user_messages;		 // key = QQ,second = 用户信息
-	std::mutex mutex_message;				 // message类的锁
-	ComputerStatus *PCStatus;				 // 监控计算机状态
-	vector<pair<string, string>> chatModels; // 存储模型名称   first存储模型名称，second存储模型厂商
+	map<UINT64, Person> *user_messages;							  // key = QQ,second = 用户信息
+	std::mutex mutex_message;									  // message类的锁
+	ComputerStatus *PCStatus;									  // 监控计算机状态
+	vector<pair<string, string>> chatModels;					  // 存储模型名称   first存储模型名称，second存储模型厂商
+	Voice *voice;												  // 语音识别模块
 };
 
 #endif

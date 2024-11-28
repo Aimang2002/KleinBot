@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.11)
-project("Qbot2.3.1")
+project("Qbot2.3.2")
 
 # 添加宏定义
 option(DEBUG "Build the debug version" OFF)
 if(DEBUG)
   add_compile_definitions(DEBUG)
-  set(EXECUTABLE_NAME KleinQBot2.3.1_DEBUG)
+  set(EXECUTABLE_NAME KleinQBot2.3.2_DEBUG)
 else()
-  set(EXECUTABLE_NAME KleinQBot2.3.1)
+  set(EXECUTABLE_NAME KleinQBot2.3.2)
 endif()
 
 file(GLOB_RECURSE SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)# 项目源文件所在位置
@@ -25,6 +25,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Network
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TimingTast
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MessageQueue
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ModelApiCaller
     # 添加其他子目录头文件路径
 )
 

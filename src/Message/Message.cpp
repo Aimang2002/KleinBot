@@ -11,6 +11,7 @@ Message::Message()
 	LOG_DEBUG("服务器状态初始化...");
 #endif
 	this->PCStatus = new ComputerStatus;
+	this->voice = new Voice;
 
 	// 内置成员属性初始化
 	this->user_messages = new map<UINT64, Person>;
@@ -34,7 +35,7 @@ Message::Message()
 		if (document.Parse(json.c_str()).HasParseError() && (document.HasMember("Models") != true))
 		{
 			std::cerr << "JSON parse error: " << GetParseError_En(document.GetParseError()) << std::endl;
-			LOG_DEBUG("JSON数据解析失败！请检查Json文件的合法性。");
+			LOG_ERROR("JSON数据解析失败！请检查Json文件的合法性。");
 		}
 		else
 		{
@@ -133,176 +134,182 @@ bool Message::addUsers(UINT64 user_id)
 	return false;
 }
 
-string Message::handleMessage(UINT64 user_id, string message, string message_type)
+// string Message::handleMessage(UINT64 user_id, string message, string message_type)
+string Message::handleMessage(JsonData &data)
 {
+	// type类型默认为text，如需要更改需要重新指定
+	data.type = "text";
+
 	// 新建用户
-	if (this->user_messages->find(user_id) == this->user_messages->end())
+	if (this->user_messages->find(data.private_id) == this->user_messages->end())
 	{
-		this->addUsers(user_id);
+		this->addUsers(data.private_id);
 	}
 
 	// 判断是否是群消息
-	if (message_type == "group")
+	if (data.message_type == "group")
 	{
 		// 移除CQ码
-		this->removeGroupCQCode(message);
+		this->removeGroupCQCode(data.message);
 	}
 
 	// 显示用户输入的问题
-	cout << "[" << message_type << "]" << user_id << ":" << message << endl;
+	cout << "[" << data.message_type << "]" << data.private_id << ":" << data.message << endl;
 
 	// 管理员权限判断
-	if (this->permissionVerification(user_id))
+	if (this->permissionVerification(data.private_id))
 	{
 		// 管理员可操作的命令
-		bool result = this->adminTerminal(message, user_id);
+		bool result = this->adminTerminal(data.message, data.private_id);
 		if (result)
 		{
-			return message;
+			return data.message;
 		}
 	}
 
 	// 内置回复判断
-	/*
-	if (message.find("#修复图片") != message.npos)
+
+	if (data.message.find("#图片超分") != data.message.npos)
 	{
-		// 该功能于v2.2.0版本将被遗弃
-		// this->fixImageSizeTo4K(message);
-		// message = "系统提示：该功能正在升级...";
+		this->call_fixImageSizeTo4K(data.message);
+		data.type = "CQ";
 	}
+	/*
 	else if (message.find("#精美图片") != message.npos)
 	{
 		questPictureID(message);
 		LOG_DEBUG(message);
 	}
 	*/
-	if (message == CManager.configVariable("QBOT_NAME"))
+	else if (data.message == CManager.configVariable("QBOT_NAME"))
 	{
-		SpeechSound(message);
+		SpeechSound(data.message);
 	}
-	else if (message.find("CQ:image") != message.npos)
+	else if (data.message.find("CQ:image") != string::npos &&
+			 data.message.find("file") != string::npos &&
+			 data.message.find("url=") != string::npos &&
+			 data.message.find("file_size=") != string::npos &&
+			 data.message.size() > 500) // 这个判断很蠢，我目前找不到更好的办法
 	{
-		/*该功能在早期版本是斗图功能，在v2.2.0版本被升级为GPT识图
-		Database::getInstance()->imgURL.saveFaceURL(message);
-		*/
-		// facePackageMessage(message);
-
-		this->provideImageRecognition(user_id, message);
+		this->provideImageRecognition(data.private_id, data.message, data.type);
 	}
-	else if (!strcmp(message.c_str(), "#歌曲推荐"))
+	else if (data.message.compare("#歌曲推荐") == 0)
 	{
-		musicShareMessage(message, 1);
+		data.type = "CQ";
+		musicShareMessage(data.message, 1);
 	}
-	else if (!strcmp(message.c_str(), "#帮助"))
+	else if (data.message.compare("#帮助") == 0)
 	{
 		ifstream ifs(CManager.configVariable("HELP_PATH"));
 		if (!ifs.is_open())
 		{
 			LOG_ERROR("帮助文件打开失败！请检查...");
-			message = "正在编辑中 .>_<.";
+			data.message = "正在编辑中 .>_<.";
 		}
 		else
 		{
-			message.assign((istreambuf_iterator<char>(ifs.rdbuf())), istreambuf_iterator<char>());
+			data.message.assign((istreambuf_iterator<char>(ifs.rdbuf())), istreambuf_iterator<char>());
 			ifs.close();
 		}
 	}
-	else if (!strcmp(message.c_str(), "#人格帮助"))
+	else if (!strcmp(data.message.c_str(), "#人格帮助"))
 	{
 		ifstream ifs(CManager.configVariable("HELP_PERSONALITY_PATH"));
 		if (!ifs.is_open())
 		{
 			LOG_ERROR("file open failed!");
-			message = "正在编辑中 .>_<.";
+			data.message = "正在编辑中 .>_<.";
 		}
 		else
 		{
-			message.assign((istreambuf_iterator<char>(ifs.rdbuf())), istreambuf_iterator<char>());
+			data.message.assign((istreambuf_iterator<char>(ifs.rdbuf())), istreambuf_iterator<char>());
 			ifs.close();
 		}
 	}
-	else if (message.find("#设置人格：") != message.npos || message.find("#设置人格:") != message.npos)
+	else if (data.message.find("#设置人格:") != string::npos || data.message.find("#设置人格：") != string::npos)
 	{
-		this->setPersonality(message, user_id);
+		this->setPersonality(data.message, data.private_id);
 	}
-	else if (message.find("#轻量型人格：") != message.npos || message.find("#轻量型人格:") != message.npos)
+	else if (data.message.find("#轻量型人格:") != string::npos || data.message.find("#轻量型人格：") != string::npos)
 	{
-		this->setPersonality(message, user_id, 1);
+		this->setPersonality(data.message, data.private_id, 1);
 	}
-	else if (message.find("#人格还原：") != message.npos || message.find("#人格还原:") != message.npos)
+	else if (data.message.find("#人格还原:") != string::npos || data.message.find("#人格还原：") != string::npos)
 	{
-		this->setPersonality(message, user_id);
+		this->setPersonality(data.message, data.private_id);
 	}
-	else if (message.find("#重置对话") != message.npos)
+	else if (data.message.compare("#重置对话") == 0)
 	{
-		this->resetChat(message, user_id);
+		this->resetChat(data.message, data.private_id);
 	}
-	else if (message.find("#话题：") != message.npos || message.find("#话题:") != message.npos)
+	else if (data.message.find("#话题:") != string::npos || data.message.find("#话题：") != string::npos)
 	{
-		auto user = this->user_messages->find(user_id);
+		auto user = this->user_messages->find(data.private_id);
 		if (user == this->user_messages->end())
 		{
-			this->addUsers(user_id);
+			this->addUsers(data.private_id);
 		}
-		user->second.user_chatHistory[0].first = (this->system_message_format + message + "\"},");
+		user->second.user_chatHistory[0].first = (this->system_message_format + data.message + "\"},");
 		user->second.user_chatHistory[0].second = time(nullptr);
 		user->second.user_chatHistory[1].first = (this->system_message_format + "OK!I will use Chinses answer \"},");
 		user->second.user_chatHistory[1].second = time(nullptr);
 
-		message = "好的，接下来我会围绕此话题进行对话";
+		data.message = "好的，接下来我会围绕此话题进行对话";
 		std::lock_guard<std::mutex> lock(mutex_message);
-		this->user_messages->find(user_id)->second = user->second;
+		this->user_messages->find(data.private_id)->second = user->second;
 	}
-	else if (message.find("#当前气温") != message.npos)
+	else if (data.message.compare("#当前气温") == 0)
 	{
 	}
-	else if (message.find("#设置定时") != message.npos)
+	else if (data.message.compare("#设置定时") == 0)
 	{
-		message = TTastClass.setFixedRemind(message, user_id);
+		data.message = TTastClass.setFixedRemind(data.message, data.private_id);
 	}
-	else if (message.find("#切换模型") != message.npos || message.find("#模型切换") != message.npos)
+	else if (data.message.find("#切换模型") != string::npos || data.message.find("#模型切换") != string::npos)
 	{
-		this->switchModel(message, user_id);
+		this->switchModel(data.message, data.private_id);
 	}
-	else if (message.find("#查询当前模型") != message.npos)
+	else if (data.message.find("#查询当前模型") != string::npos)
 	{
-		message = "你当前的模型为：" + this->user_messages->find(user_id)->second.user_models.first;
+		data.message = "你当前的模型为：" + this->user_messages->find(data.private_id)->second.user_models.first;
 	}
-	else if (message.find("#开启语音") != message.npos)
+	else if (data.message.find("#开启语音") != string::npos)
 	{
 		if (!this->global_Voice)
 		{
-			message = "管理员临时关闭了该功能，可能是在维护...";
+			data.message = "管理员临时关闭了该功能，可能是在维护...";
 		}
 		else
 		{
-			this->user_messages->find(user_id)->second.isOpenVoiceMode = true;
-			message = "已开启！";
+			this->user_messages->find(data.private_id)->second.isOpenVoiceMode = true;
+			data.message = "已开启！";
 		}
 	}
-	else if (message.find("#关闭语音") != message.npos)
+	else if (data.message.find("#关闭语音") != string::npos)
 	{
-		this->user_messages->find(user_id)->second.isOpenVoiceMode = false;
-		message = "已关闭！";
+		this->user_messages->find(data.private_id)->second.isOpenVoiceMode = false;
+		data.message = "已关闭！";
 	}
-	else if (message.find("#生成图片：") != message.npos || message.find("#生成图片:") != message.npos)
+	else if (data.message.find("#生成图片：") != string::npos || data.message.find("#生成图片:") != string::npos)
 	{
-		this->provideImageCreation(user_id, message);
+		data.type = "CQ";
+		this->provideImageCreation(data.private_id, data.message);
 	}
-	else if (message.find("#删除上条对话") != message.npos)
+	else if (data.message.find("#删除上条对话") != string::npos)
 	{
-		message = this->removePreviousContext(user_id);
+		data.message = this->removePreviousContext(data.private_id);
 	}
 	// else if (message.substr(1, 12).find(message.find("#SD绘图")) != message.npos)
-	else if (message.find("#SD绘图") != message.npos)
+	else if (data.message.find("#SD绘图") != string::npos)
 	{
-		this->SDImageCreation(message);
+		data.type = "CQ";
+		this->SDImageCreation(data.message);
 	}
 	else
 	{
-		characterMessage(user_id, message);
+		characterMessage(data);
 	}
-	return message;
+	return data.message;
 }
 
 bool Message::messageFilter(string message_type, string message)
@@ -314,9 +321,12 @@ bool Message::messageFilter(string message_type, string message)
 	{
 		if (CManager.configVariable("OPEN_GROUPCHAT_MESSAGE") == "false")
 			return false; // 群消息是否开启
+
 		if (message.find("CQ:at") == message.npos || message.find(CManager.configVariable("BOT_QQ")) == message.npos)
 			return false; // 过滤非AT消息
 	}
+
+	// 检查CQ码，不对转发内容进行
 	return true;
 }
 
@@ -384,17 +394,16 @@ void Message::questPictureID(string &message)
 void Message::SpeechSound(string &message)
 {
 	message = "你好，我是克莱茵，请问有什么可以帮到你。";
-	// this->textToVoice(message, user_id);
 }
 
-void Message::characterMessage(UINT64 &user_id, string &message)
+void Message::characterMessage(JsonData &data)
 {
 
 	// 获取用户当前使用的模型
-	auto models = this->user_messages->find(user_id)->second.user_models;
+	auto models = this->user_messages->find(data.private_id)->second.user_models;
 
 	// 是否开启上下文  	当上下文模式为开启状态 || 访问者是管理员时，启用上下文模式
-	if (this->accessibility_chat || user_id == stoi(CManager.configVariable("MANAGER_QQ")))
+	if (this->accessibility_chat || data.private_id == stoi(CManager.configVariable("MANAGER_QQ")))
 	{
 		int contextMax = 0;
 
@@ -405,7 +414,7 @@ void Message::characterMessage(UINT64 &user_id, string &message)
 		vector<pair<string, time_t>> user_vector;
 		{
 			std::lock_guard<std::mutex> lock(mutex_message);
-			user_vector = this->user_messages->find(user_id)->second.user_chatHistory;
+			user_vector = this->user_messages->find(data.private_id)->second.user_chatHistory;
 		}
 
 		// 判断消息存活时间
@@ -428,49 +437,49 @@ void Message::characterMessage(UINT64 &user_id, string &message)
 					cout << "Chat message delete over!" << endl;
 					user_vector.erase(user_vector.begin() + this->default_message_line, it + 2);
 					std::lock_guard<std::mutex> lock(mutex_message);
-					this->user_messages->find(user_id)->second.user_chatHistory = user_vector;
+					this->user_messages->find(data.private_id)->second.user_chatHistory = user_vector;
 					break;
 				}
 			}
 		}
 
-		message = JParsingClass.toJson(message);
-		string format = this->users_message_format + message + "\"}";
+		data.message = JParsingClass.toJson(data.message);
+		string format = this->users_message_format + data.message + "\"}";
 		user_vector.push_back(make_pair(format, time(nullptr)));
 
-		message = "";
+		data.message = "";
 		for (vector<pair<string, time_t>>::const_iterator it = user_vector.begin(); it != user_vector.end(); it++)
 		{
-			message += "\t" + it->first + '\n';
+			data.message += "\t" + it->first + '\n';
 		}
-		message.insert(0, "[\n");
-		message.insert(message.size(), "]");
+		data.message.insert(0, "[\n");
+		data.message.insert(data.message.size(), "]");
 
 		// 将内容发送至对接的大预言模型
 		cout << "send to Model..." << endl;
-		Dock::RequestGPT(message, models, &this->user_messages->find(user_id)->second);
+		Dock::RequestGPT(data.message, models, &this->user_messages->find(data.private_id)->second);
 
 		// 消息完整性验证
-		string errorSubstr = message.substr(0, 10);
+		string errorSubstr = data.message.substr(0, 10);
 		// 判断此消息是否为错误消息
 		if (errorSubstr.find("error") != errorSubstr.npos)
 		{
 			// 提取错误问题
-			if (message.find("message"))
+			if (data.message.find("message"))
 			{
-				int begin_index = message.find("message") + 10;
-				int end_index = message.find("type") - 3;
-				message = message.substr(begin_index, end_index - begin_index);
-				LOG_ERROR(message);
+				int begin_index = data.message.find("message") + 10;
+				int end_index = data.message.find("type") - 3;
+				data.message = data.message.substr(begin_index, end_index - begin_index);
+				LOG_ERROR(data.message);
 			}
-			message.insert(0, "系统提示：未知错误,建议清除上下文后重新发送！\n错误消息：");
+			data.message.insert(0, "系统提示：未知错误,建议清除上下文后重新发送！\n错误消息：");
 		}
-		else if (message.size() > 100) // 当收到的消息大于100个字节则表示为合法消息
+		else if (data.message.size() > 100) // 当收到的消息大于100个字节则表示为合法消息
 		{
-			message = JParsingClass.getAttributeFromChoices(message, "content");
+			data.message = JParsingClass.getAttributeFromChoices(data.message, "content");
 
 			user_vector.back().first.push_back(','); // 格式调整
-			string JsonData = JParsingClass.toJson(message);
+			string JsonData = JParsingClass.toJson(data.message);
 
 			// 保存回答信息
 			format = this->bot_message_format + JsonData + "\"},"; // 数据格式化
@@ -490,36 +499,36 @@ void Message::characterMessage(UINT64 &user_id, string &message)
 					LOG_WARNING("Chat message delete over!");
 					user_vector.erase(user_vector.begin() + this->default_message_line, it + 2);
 					std::lock_guard<std::mutex> lock(mutex_message);
-					this->user_messages->find(user_id)->second.user_chatHistory = user_vector;
+					this->user_messages->find(data.private_id)->second.user_chatHistory = user_vector;
 					break;
 				}
 			}
 
 			// 确认无误，聊天记录更新
 			std::lock_guard<std::mutex> lock(mutex_message);
-			this->user_messages->find(user_id)->second.user_chatHistory = user_vector;
+			this->user_messages->find(data.private_id)->second.user_chatHistory = user_vector;
 		}
 		else
 		{
-			LOG_ERROR("小于100字节的消息：" + message);
+			LOG_ERROR("小于100字节的消息：" + data.message);
 		}
 	}
 	else
 	{
 		// 不开启上下文
 		LOG_INFO("当前聊天不支持上下文模式...");
-		message = JParsingClass.toJson(message);
-		string format = this->users_message_format + message + "\"}";
-		message = format;
-		message.insert(0, "[\n");
-		message.insert(message.size(), "]");
+		data.message = JParsingClass.toJson(data.message);
+		string format = this->users_message_format + data.message + "\"}";
+		data.message = format;
+		data.message.insert(0, "[\n");
+		data.message.insert(data.message.size(), "]");
 		cout << "send to Model..." << endl;
-		Dock::RequestGPT(message,
-						 this->user_messages->find(user_id)->second.user_models,
-						 &this->user_messages->find(user_id)->second);
-		if (message.size() > 100)
+		Dock::RequestGPT(data.message,
+						 this->user_messages->find(data.private_id)->second.user_models,
+						 &this->user_messages->find(data.private_id)->second);
+		if (data.message.size() > 100)
 		{
-			message = JParsingClass.getAttributeFromChoices(message, "content");
+			data.message = JParsingClass.getAttributeFromChoices(data.message, "content");
 			// cout << "OpenAI response: " << message << endl;
 		}
 	}
@@ -527,13 +536,14 @@ void Message::characterMessage(UINT64 &user_id, string &message)
 	// 打印回复内容
 	std::cout << "\033[32m"
 			  << "OpenAI response: "
-			  << "\033[0m" << message << std::endl;
+			  << "\033[0m" << data.message << std::endl;
 
 	// 判断是否需要提供文本转语音
-	if (this->global_Voice && this->user_messages->find(user_id)->second.isOpenVoiceMode)
+	if (this->global_Voice && this->user_messages->find(data.private_id)->second.isOpenVoiceMode)
 	{
-		LOG_INFO(std::to_string(user_id) + "需要使用文本转语音...");
-		this->textToVoice(message, user_id);
+		// LOG_INFO(std::to_string(data.private_id) + "需要使用文本转语音...");
+		data.type = "CQ";
+		this->textToVoice(data.message, data.type);
 	}
 }
 
@@ -890,107 +900,30 @@ size_t write_data(void *ptr, size_t size, size_t nmemb, std::string *data)
 	data->append(reinterpret_cast<const char *>(ptr), size * nmemb);
 	return size * nmemb;
 }
-bool Message::fixImageSizeTo4K(string &message)
+
+void Message::call_fixImageSizeTo4K(std::string &message)
 {
-	std::string url = message.substr(message.find("url=") + 4, message.find(";") - (message.find("url=") + 4)); // 提取URL
-	if (url.size() < 10)
+	Realesrgan *rlg = new Realesrgan;
+	int res = rlg->fixImageSizeTo4K(message);
+
+	if (res == -1)
 	{
-		message = "似乎没有图片...";
-		return false;
+		LOG_ERROR("返回内容少于20字节");
+		return;
+	}
+	if (res == 1)
+	{
+		// 路径传输
+		message.insert(0, "file://");
+		message = CQCode("image", "file", message);
+	}
+	else if (res == 2)
+	{
+		// base64传输
+		message = CQCode("image", "file=base64://" + message);
 	}
 
-	// URL修正
-	size_t index = 0;
-	do
-	{
-		string findWord = "&amp;";
-		index = url.find(findWord);
-		if (index != string::npos)
-		{
-			url.erase(index, findWord.size());
-			url.insert(index, "&");
-		}
-	} while (index != string::npos);
-
-	string filename;
-	// 随机名称
-	for (int i = 0; i < 10; i++)
-	{
-		unsigned short number = rand() % 26 + 65;
-		filename += (char)number;
-	}
-
-	filename += ".jpg";
-	string inputPath = CManager.configVariable("IMAGE_DOWNLOAD_PATH") + filename;
-	string outputPath = inputPath;
-	outputPath.insert(outputPath.rfind("."), "_4K");
-
-	// 下载图片
-	{
-		// 以二进制写入方式打开文件
-		std::ofstream outfile(inputPath, std::ios::binary);
-		if (!outfile.is_open())
-		{
-			std::cerr << "Failed to open file for writing" << std::endl;
-			return false;
-		}
-
-		// 初始化 curl
-		CURL *curl = curl_easy_init();
-		if (!curl)
-		{
-			std::cerr << "Failed to initialize curl" << std::endl;
-			outfile.close();
-			return false;
-		}
-
-		// 创建 curl 实例
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &outfile);
-
-		// 执行下载操作
-		CURLcode res = curl_easy_perform(curl);
-		if (res != CURLE_OK)
-		{
-			std::cerr << "Failed to download image: " << curl_easy_strerror(res) << std::endl;
-			outfile.close();
-			curl_easy_cleanup(curl);
-			return false;
-		}
-
-		// 关闭文件
-		outfile.close();
-
-		// 清理 curl 实例
-		curl_easy_cleanup(curl);
-	}
-
-	// 对图片进行4K修复
-	{
-		string command = "" + CManager.configVariable("REALESGAN_PATH") + "realesrgan-ncnn-vulkan -i ";
-		command += inputPath + " -o ";
-		command += outputPath + " -n " + CManager.configVariable("REALESGAN_MODEL");
-		// command += " > log.txt";
-
-		LOG_INFO("正在进行修复...");
-		int returnCode = system(command.c_str());
-		if (returnCode == 0)
-		{
-			LOG_INFO("修复完成！");
-		}
-		else
-		{
-			LOG_ERROR("修复失败！");
-			message = "系统提示：修复失败!";
-			return false;
-		}
-	}
-
-	// 发送已经修复的图片
-	outputPath.insert(0, "file://");
-	message = CQCode("image", "file", outputPath);
-	return true;
+	delete rlg;
 }
 
 // 数据流转为base64编码
@@ -1058,7 +991,7 @@ string Message::encodeToURL(const string &input)
 	return escaped.str();
 }
 
-bool Message::provideImageRecognition(const UINT64 user_id, string &message)
+bool Message::provideImageRecognition(const UINT64 user_id, string &message, string &type)
 {
 	std::string conversation = message.substr(0, message.find("[CQ:image"));									// 提取对话，如果有的话
 	std::string url = message.substr(message.find("url=") + 4, message.find("]") - (message.find("url=") + 4)); // 提取URL
@@ -1144,7 +1077,7 @@ bool Message::provideImageRecognition(const UINT64 user_id, string &message)
 			// 判断是否需要转语音
 			if (this->user_messages->find(user_id)->second.isOpenVoiceMode)
 			{
-				this->textToVoice(message, user_id);
+				this->textToVoice(message, type);
 			}
 		}
 	}
@@ -1167,86 +1100,30 @@ size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
 	}
 	return realsize;
 }
-void Message::textToVoice(string &text, const UINT64 user_id)
+int Message::textToVoice(string &text, string &type)
 {
-	LOG_INFO("使用了文本转语音");
-	/*
-	 * 目前文本转语音仅支持中文
-	 */
-
-	// 检查文本是否合格
-	if (text.size() < 4)
+	type = "CQ";
+	text = JParsingClass.toJson(text);
+	// LOG_DEBUG("转语音的内容：" + text);
+	int res = this->voice->toAudio(text);
+	if (res = 1)
 	{
-		text = "系统提示：未检查到文本...";
-		return;
+		// 使用路径传输
+		string URL = "file://" + text;
+		text = CQCode("record", "file", URL);
+		return 0;
 	}
-
-	// 创建语音文件
-	string filename;
-	for (int i = 0; i < 10; i++)
+	else if (res = 2)
 	{
-		unsigned short number = rand() % 26 + 65;
-		filename += (char)number;
+		// 使用base64编码传输
+		// 很遗憾的是，record不支持base64编码
+		LOG_WARNING("开发出现错误，你使用了base64编码的方式传输，但是CQ码并不支持这种方式...");
+		return -1;
 	}
-	filename += ".wav";
-
-	string filePath = CManager.configVariable("VIST_FILE_SAVE_PATH") + filename;
-	std::ofstream tts_file(filePath, std::ios::binary);
-	if (!tts_file.is_open())
+	else
 	{
-		LOG_WARNING(filePath);
-		LOG_ERROR("Unable to open output file.");
-		return;
-	}
-
-	// 判断参考文件是否存在
-	if (!ifstream(CManager.configVariable("VIST_REFERVOICE_PATH")).is_open())
-	{
-		LOG_ERROR("参考音频不存在，无法推理！请检查路径：" + CManager.configVariable("VIST_REFERVOICE_PATH"));
-		text += "\n系统提示:参考音频不存在，无法推理，已自动关闭语音渲染";
-		this->user_messages->find(user_id)->second.isOpenVoiceMode = false;
-		return;
-	}
-
-	CURL *curl = curl_easy_init();
-	if (curl)
-	{
-		// 基础信息配置
-		std::string original_url = CManager.configVariable("VIST_API_URL") + ":" + CManager.configVariable("VIST_API_PORT");
-		std::string refer_wav_path = CManager.configVariable("VIST_REFERVOICE_PATH");
-		std::string prompt_text = CManager.configVariable("VIST_REFERVOICE_TEXT");
-		std::string prompt_language = "中文";
-		std::string text_language = "中文";
-
-		// 对URL进行URL编码
-		std::string url = original_url +
-						  "?refer_wav_path=" + encodeToURL(refer_wav_path) +
-						  "&prompt_text=" + encodeToURL(prompt_text) +
-						  "&prompt_language=" + encodeToURL(prompt_language) +
-						  "&text=" + encodeToURL(text) +
-						  "&text_language=" + encodeToURL(text_language);
-
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &tts_file);
-
-		CURLcode res = curl_easy_perform(curl);
-		if (res != CURLE_OK)
-		{
-			LOG_ERROR("Failed to perform request: " + string(curl_easy_strerror(res)));
-			this->user_messages->find(user_id)->second.isOpenVoiceMode = false;
-			text += ("\n(系统提示：语音推理失败，管理员可能在维护服务器，已自动关闭语音回复，请稍后再重试...)");
-		}
-		else
-		{
-			string URL = "file://" + filePath;
-			text = CQCode("record", "file", URL);
-		}
-
-		// 清除数据
-		tts_file.close();
-		curl_easy_cleanup(curl);
+		// 错误返回内容
+		return -1;
 	}
 }
 
@@ -1295,7 +1172,7 @@ bool Message::provideImageCreation(const UINT64 user_id, string &text)
 		prompt = prompt.substr(prompt.find("message") + 10); // 前缀分割
 		text = prompt.substr(0, prompt.find("request id") - 10);
 		url = "";
-		LOG_DEBUG(text);
+		// LOG_DEBUG(text);
 		return false;
 	}
 	else
@@ -1310,61 +1187,6 @@ bool Message::provideImageCreation(const UINT64 user_id, string &text)
 		}
 
 		string outputPath;
-		/*该代码段是下载模型返回的图片，然后放置指定位置
-				LOG_INFO("正在下载图片...");
-				// 下载图片
-				string filename;
-				for (int i = 0; i < 10; i++) // 随机名称
-				{
-					unsigned short number = rand() % 26 + 65;
-					filename += (char)number;
-				}
-
-				filename += ".png";
-				string inputPath = CManager.configVariable("IMAGE_DOWNLOAD_PATH") + filename;
-				outputPath = inputPath;
-
-				// 下载图片
-				// 以二进制写入方式打开文件
-				std::ofstream outfile(inputPath, std::ios::binary);
-				if (!outfile.is_open())
-				{
-					std::cerr << "Failed to open file for writing" << std::endl;
-					return false;
-				}
-
-				// 初始化 curl
-				CURL *curl = curl_easy_init();
-				if (!curl)
-				{
-					std::cerr << "Failed to initialize curl" << std::endl;
-					outfile.close();
-					return false;
-				}
-
-				// 创建 curl 实例
-				curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-				curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback); // write_data
-				curl_easy_setopt(curl, CURLOPT_WRITEDATA, &outfile);
-
-				// 执行下载操作
-				CURLcode res = curl_easy_perform(curl);
-				if (res != CURLE_OK)
-				{
-					LOG_ERROR("Failed to download image" + string(curl_easy_strerror(res)));
-					outfile.close();
-					curl_easy_cleanup(curl);
-					return false;
-				}
-
-				// 关闭文件
-				outfile.close();
-
-				// 清理 curl 实例
-				curl_easy_cleanup(curl); // https://www.baidu.com/img/PCtm_d9c8750bed0b3c7d089fa7d55720d6cf.png
-
-		LOG_INFO(outputPath);
-		*/
 
 		// 封装格式(采用RUL)
 		outputPath = url;
@@ -1452,5 +1274,11 @@ Message::~Message()
 	{
 		delete this->PCStatus;
 		this->PCStatus = nullptr;
+	}
+
+	if (this->voice != nullptr)
+	{
+		delete this->voice;
+		this->voice = nullptr;
 	}
 }

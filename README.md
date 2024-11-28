@@ -89,7 +89,7 @@ Klein没有实现协议端，本身并不支持直接对接QQ，而是对接第�
 |   功能   |          是否支持           |       备注       |
 | :------: | :-------------------------: | :--------------: |
 | 群聊回复 | <font color="gree">√</font> |      需要@       |
-| 私聊回复 | <font color="gree">√</font> |                  |
+| 私聊回复 | <font color="gree">√</font> |    无特殊需求    |
 | 图片发送 | <font color="gree">√</font> |   需对接大模型   |
 | 语音发送 | <font color="gree">√</font> | 需对接GPT-SoVIST |
 | 图片分析 | <font color="gree">√</font> |   需对接大模型   |
@@ -125,6 +125,7 @@ Klein没有实现协议端，本身并不支持直接对接QQ，而是对接第�
 |   #生成图片   |                    使用大模型生成一张图片                    | #生成图片:在银河中漂流的太空战舰                             |
 | #删除上条对话 |                删除Klein和发送者的上一条对话                 | #删除上条对话                                                |
 |    #SD绘图    |                     对接StableDiffusion                      | #SD绘图:在雪地里的可爱少女                                   |
+|   #图片超分   |                 对接REALESGAN项目后可以使用                  | #图片超分:图片.jpg                                           |
 
 
 
@@ -222,6 +223,9 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 | VIST_REFERVOICE_PATH          | GPT-SoVIST 的参考音频                               |
 | VIST_REFERVOICE_TEXT          | GPT-SoVIST 的参考音频文本                           |
 | VIST_FILE_SAVE_PATH           | GPT-SoVIST 推理后音频文件存放的位置                 |
+| REALESGAN_PATH                | REALESGAN项目的路径                                 |
+| REALESGAN_MODEL               | REALESGAN使用的修复模型                             |
+| IMAGE_DOWNLOAD_PATH           | 图片下载后的位置(供REALESGAN使用)                   |
 
 
 
@@ -284,3 +288,14 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 + voice
 
   + 无
+
+
+
+
+
+
+
+# 鸣谢
+
++ [rapidJSON](https://github.com/Tencent/rapidjson)
++ [Boost](https://github.com/boostorg/boost)
