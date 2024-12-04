@@ -2,15 +2,9 @@
 #ifndef DATABASE_H
 #define DATABASE_H
 
-#include <iostream>
-#include <fstream>
-#include <map>
-#include <unordered_map>
-#include <string>
 #include <mutex>
 #include <vector>
 #include "../ConfigManager/ConfigManager.h"
-#include "../Log/Log.h"
 
 extern ConfigManager &CManager;
 
@@ -37,7 +31,7 @@ private:
 class SongID
 {
 public:
-	std::vector<UINT64> wyy_vector;
+	std::vector<uint64_t> wyy_vector;
 	const std::string wyySongIDPath = CManager.configVariable("WYY_SONGID_PATH");
 
 public:
@@ -45,7 +39,7 @@ public:
 
 	void readData();
 	int getWyy_size();
-	UINT64 getWyyID(int index);
+	uint64_t getWyyID(int index);
 	SongID &operator=(const SongID &sID);
 	~SongID();
 };

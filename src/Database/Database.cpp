@@ -163,7 +163,7 @@ ImageURL &ImageURL::operator=(const ImageURL &image)
 	return *this;
 }
 
-inline int ImageURL::getIMGURL_size()
+int ImageURL::getIMGURL_size()
 {
 	return this->image_map.size();
 }
@@ -173,7 +173,7 @@ ImageURL::~ImageURL() {}
 // -------------Song id -----------------------
 SongID::SongID()
 {
-	this->wyy_vector = std::vector<UINT64>();
+	this->wyy_vector = std::vector<uint64_t>();
 	this->readData();
 }
 
@@ -199,7 +199,7 @@ void SongID::readData()
 
 int SongID::getWyy_size() { return this->wyy_vector.size(); }
 
-UINT64 SongID::getWyyID(int index)
+uint64_t SongID::getWyyID(int index)
 {
 	if (index >= this->wyy_vector.size())
 		return -1;

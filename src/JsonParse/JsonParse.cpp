@@ -19,7 +19,7 @@ JsonData JsonParse::jsonReader(std::string &json_str)
 
 	if (!doc.IsObject())
 	{
-		std::cerr << "The JSON string does not contain an object." << endl;
+		std::cerr << "The JSON string does not contain an object." << std::endl;
 		this->__mutex.unlock(); // 提前开锁
 		return Data;
 	}
@@ -111,7 +111,7 @@ std::string JsonParse::getAttributeFromChoices(std::string &json_str, std::strin
 	return std::string();
 }
 
-string JsonParse::toJson(string message)
+std::string JsonParse::toJson(std::string message)
 {
 	/* 将message转为Json格式 */
 	if (message.length() > 4)
@@ -179,7 +179,7 @@ bool JsonParse::findKeyAndValue(const std::string &json, const std::string &key,
 	return findValueByKey(this->doc, key, value);
 }
 
-void JsonParse::CQCodeSeparation(string &message)
+void JsonParse::CQCodeSeparation(std::string &message)
 {
 	int begin = message.find("[CQ:");
 	while (begin != message.npos)

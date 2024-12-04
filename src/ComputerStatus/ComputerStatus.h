@@ -8,10 +8,13 @@
 #include "../Log/Log.h"
 #include <vector>
 #include <sstream>
+
+#if defined(__linux__)
 #include <sys/types.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
 
 class ComputerStatus
 {

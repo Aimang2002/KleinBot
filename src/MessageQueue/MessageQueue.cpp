@@ -18,7 +18,7 @@ void MessageQueue::original_push_queue(std::string task)
     original_mutex.unlock();
 }
 
-void MessageQueue::pending_push_queue(const std::string task, std::string API, UINT64 id, const string type)
+void MessageQueue::pending_push_queue(const std::string task, std::string API, uint64_t id, const std::string type)
 {
 #ifdef DEBUG
     cout << "入列消息：" << task << endl;
@@ -121,9 +121,9 @@ bool MessageQueue::pending_pop()
 }
 
 // 封装GO-CQ格式数据
-std::string MessageQueue::privateGOCQFormat(std::string message, UINT64 user_id, const string type)
+std::string MessageQueue::privateGOCQFormat(std::string message, uint64_t user_id, const std::string type)
 {
-    stringstream json_data;
+    std::stringstream json_data;
     if (type.compare("text") == 0)
     {
         // 转义“ [ ”
@@ -152,9 +152,9 @@ std::string MessageQueue::privateGOCQFormat(std::string message, UINT64 user_id,
     return json_data.str();
 }
 
-std::string MessageQueue::groupGOCQFormat(std::string message, UINT64 group_id, const string type)
+std::string MessageQueue::groupGOCQFormat(std::string message, uint64_t group_id, const std::string type)
 {
-    stringstream json_data;
+    std::stringstream json_data;
     if (type.compare("text") == 0)
     {
         // 转义“ [ ”

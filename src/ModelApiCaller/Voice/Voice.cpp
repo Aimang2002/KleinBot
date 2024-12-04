@@ -96,7 +96,7 @@ int Voice::toAudio(std::string &text)
     return -1;
 }
 
-string Voice::dataToBase64(const string &input)
+std::string Voice::dataToBase64(const std::string &input)
 {
     const std::string base64_chars =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"

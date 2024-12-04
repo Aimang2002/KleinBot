@@ -8,7 +8,7 @@ class MyReverseWebSocket
 {
 public:
     static void connectReverseWebSocket();
-    static std::string messageEncapsulation(const string message, const string messageEndpoint);
+    static std::string messageEncapsulation(const std::string message, const std::string messageEndpoint);
 
 private:
 };

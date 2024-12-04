@@ -8,13 +8,13 @@
 class Dock
 {
 public:
-    static void RequestGPT(string &data, const pair<string, string> model, Person *user = nullptr)
+    static void RequestGPT(std::string &data, const std::pair<std::string, std::string> model, Person *user = nullptr)
     {
         // 注意：模型复杂时可能会发生冲突
         // 模型调用：根据传入进来的模型分析应该调用的接口
         // 不是OpenAI模型也用OpenAI调用，但是需要更换端点
-        string endpoint;
-        string api_key;
+        std::string endpoint;
+        std::string api_key;
         std::string json_data;
 
         // 指定超参数
@@ -60,9 +60,9 @@ public:
 
 private:
     // API&endpoint空白字符去除
-    static string filterNonNormalChars(string str)
+    static std::string filterNonNormalChars(std::string str)
     {
-        string result;
+        std::string result;
         for (char c : str)
         {
             if (std::isprint(c) && !std::isspace(c))
@@ -74,9 +74,9 @@ private:
     }
 
     // 指定API
-    static pair<string, string> appointAPI(string model) // 返回内容 first = key，second = endpoint
+    static std::pair<std::string, std::string> appointAPI(std::string model) // 返回内容 first = key，second = endpoint
     {
-        pair<string, string> p;
+        std::pair<std::string, std::string> p;
         p.first = CManager.configVariable("DEFAULT_MODEL_API_KEY");
         p.second = CManager.configVariable("DEFAULT_MODEL_ENDPOINT");
 

@@ -2,10 +2,10 @@
 
 TimingTast::TimingTast()
 {
-    this->Event = new std::map<UINT64, std::pair<UINT64, std::string>>();
+    this->Event = new std::map<uint64_t, std::pair<uint64_t, std::string>>();
 }
 
-UINT64 TimingTast::timeChange(std::string time)
+uint64_t TimingTast::timeChange(std::string time)
 {
     int year = 0;
     int moon = 0;
@@ -57,7 +57,7 @@ UINT64 TimingTast::timeChange(std::string time)
         }
 
         // 判断时间是否合法
-        UINT64 time_stamp = 0; // 单位：s
+        uint64_t time_stamp = 0; // 单位：s
         int dayArray[12] = {0, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
         if (year > 2025 || year < 2023)
         {
@@ -93,21 +93,21 @@ UINT64 TimingTast::timeChange(std::string time)
     }
 }
 
-UINT64 TimingTast::getPresentTime()
+uint64_t TimingTast::getPresentTime()
 {
     // 获取当前时间戳（单位：秒）
     auto now = std::chrono::system_clock::now();
     time_t now_c = std::chrono::system_clock::to_time_t(now);
-    return (UINT64)now_c;
+    return (uint64_t)now_c;
 }
 
-std::string TimingTast::setFixedRemind(std::string message, UINT64 user_id)
+std::string TimingTast::setFixedRemind(std::string message, uint64_t user_id)
 {
     message.erase(0, message.find("20"));
-    UINT64 time_stamp = timeChange(message.substr(0, message.find("/")));
+    uint64_t time_stamp = timeChange(message.substr(0, message.find("/")));
 
     // 事件注册
-    this->Event->insert(make_pair(time_stamp, std::pair<UINT64, std::string>(user_id, message.substr(message.find("/") + 1))));
+    this->Event->insert(make_pair(time_stamp, std::pair<uint64_t, std::string>(user_id, message.substr(message.find("/") + 1))));
 
     return "设置成功！";
 }

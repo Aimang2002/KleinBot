@@ -63,7 +63,7 @@ void MyWebSocket::connectWebSocket(const std::string _url = "/")
         }
 
         LOG_FATAL("正向ws已失联，5秒后将重新连接...");
-        sleep(5); // 休眠5秒后重连
+        std::this_thread::sleep_for(std::chrono::seconds(5)); // 休眠5秒后重连
     }
 }
 

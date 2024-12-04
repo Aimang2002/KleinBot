@@ -10,23 +10,21 @@
 #include "../../Library/rapidjson/document.h"
 #include "../../Library/rapidjson/filereadstream.h"
 
-typedef long long UINT64;
-
 using namespace rapidjson;
-using namespace std;
+// using namespace std;
 
 class ConfigManager
 {
 public:
-    ConfigManager(string configPath);
-    bool refreshConfiguation(const string configPath);
-    string configVariable(const string varriable);
+    ConfigManager(std::string configPath);
+    bool refreshConfiguation(const std::string configPath);
+    std::string configVariable(const std::string varriable);
 
 private:
-    void readConfig(const string configPath);
+    void readConfig(const std::string configPath);
 
 private:
-    unordered_map<string, string> *configuation;
+    std::unordered_map<std::string, std::string> *configuation;
 };
 
 #endif

@@ -14,7 +14,7 @@
 
 #define __KLEIN_VERSION__ "v2.3.2"
 
-using namespace std;
+// using namespace std;
 
 ConfigManager &CManager = *new ConfigManager("config.json");
 JsonParse &JParsingClass = *new JsonParse;
@@ -24,12 +24,12 @@ Message &messageClass = *new Message;
 // 子线程
 void pollingThread()
 {
-	string message;
-	string content;
-	string JsonFormatData;
-	string getGOCQJsonData;
-	string webSocketDataPakage;
-	UINT64 user_id;
+	std::string message;
+	std::string content;
+	std::string JsonFormatData;
+	std::string getGOCQJsonData;
+	std::string webSocketDataPakage;
+	uint64_t user_id;
 	bool tag = false;
 
 	while (true)
@@ -59,7 +59,7 @@ void pollingThread()
 			message += content;
 			JsonFormatData = "[\n\t";
 			JsonFormatData += R"({"role": "user", "content": ")" + message + "\"}\n]";
-			pair<string, string> p;
+			std::pair<std::string, std::string> p;
 			p.first = CManager.configVariable("DEFAULT_MODEL");
 			p.second = CManager.configVariable("DEFAULT_MODEL_APISTANDARD");
 			Dock::RequestGPT(JsonFormatData, p);
@@ -70,14 +70,14 @@ void pollingThread()
 			MessageQueue::pending_push_queue(JsonFormatData, CManager.configVariable("PRIVATE_API"), user_id, "text");
 			tag = false;
 		}
-		sleep(3);
+		std::this_thread::sleep_for(std::chrono::seconds(3));
 	}
 }
 
 void send_message(JsonData &data, bool isErrorTransfer)
 {
 	// 数据处理 && 封装
-	string getResponse; // 用于接收相应内容
+	std::string getResponse; // 用于接收相应内容
 
 	if (isErrorTransfer) // 错误消息发送
 	{
@@ -107,10 +107,10 @@ void send_message(JsonData &data, bool isErrorTransfer)
 				LOG_WARNING("文本过长，将使用分批次发送");
 				while (true)
 				{
-					string subStr = getResponse.substr(0, 5000);
+					std::string subStr = getResponse.substr(0, 5000);
 					MessageQueue::pending_push_queue(subStr, CManager.configVariable("GROUP_API"), data.group_id, data.type);
 					getResponse.erase(0, 5000);
-					sleep(1);
+					std::this_thread::sleep_for(std::chrono::seconds(1));
 					if (getResponse.size() < 4999)
 					{
 						MessageQueue::pending_push_queue(getResponse, CManager.configVariable("GROUP_API"), data.group_id, data.type);
@@ -131,10 +131,10 @@ void send_message(JsonData &data, bool isErrorTransfer)
 				LOG_WARNING("文本过长，将使用分批次发送");
 				while (true)
 				{
-					string subStr = getResponse.substr(0, 5000);
+					std::string subStr = getResponse.substr(0, 5000);
 					MessageQueue::pending_push_queue(subStr, CManager.configVariable("PRIVATE_API"), data.private_id, data.type);
 					getResponse.erase(0, 5000);
-					sleep(1);
+					std::this_thread::sleep_for(std::chrono::seconds(5));
 					if (getResponse.size() < 4999)
 					{
 						MessageQueue::pending_push_queue(getResponse, CManager.configVariable("PRIVATE_API"), data.private_id, data.type);
@@ -151,7 +151,7 @@ void send_message(JsonData &data, bool isErrorTransfer)
 }
 
 // 子线程
-void workingThread(string originalJsonData)
+void workingThread(std::string originalJsonData)
 {
 	// 内容提取
 	JsonData *data = new JsonData(JParsingClass.jsonReader(originalJsonData));
@@ -182,7 +182,7 @@ void workingThread(string originalJsonData)
 void createTimingTastThread()
 {
 	// 创建子线程
-	thread t(pollingThread);
+	std::thread t(pollingThread);
 	t.detach(); // 线程分离
 	return;
 }
@@ -213,9 +213,12 @@ void resourceCleanup()
 
 void init()
 {
+#if defined(__WIN32) || defined(__WIN64)
+	std::system("chcp 65001");
+#endif
 
 	// LOGO
-	string Klein_logo =
+	std::string Klein_logo =
 		R"( -------------------------------------------
 | ██╗  ██╗ ██╗      ███████╗ ██╗ ███╗   ██╗ |
 | ██║ ██╔╝ ██║      ██╔════╝ ██║ ████╗  ██║ |
@@ -225,12 +228,12 @@ void init()
 | ╚═╝  ╚═╝ ╚══════╝ ╚══════╝ ╚═╝ ╚═╝  ╚═══╝ |
  -------------------------------------------)";
 
-	cout << "\033[32m" << "\n"
-		 << Klein_logo << "\n"
-		 << "\033[0m" << endl; // 显示logo
+	std::cout << "\033[32m" << "\n"
+			  << Klein_logo << "\n"
+			  << "\033[0m" << std::endl; // 显示logo
 
 	// 版本
-	LOG_INFO("当前Klein版本：" + string(__KLEIN_VERSION__));
+	LOG_INFO("当前Klein版本：" + std::string(__KLEIN_VERSION__));
 	LOG_INFO("当前配置文件版本：" + CManager.configVariable("CONFIG_VERSION"));
 
 	// 配置文件版本检查
@@ -255,9 +258,9 @@ int main()
 	std::thread t1(MyWebSocket::connectWebSocket, "/");
 	t1.detach();
 
-	sleep(1);
+	std::this_thread::sleep_for(std::chrono::seconds(1));
 	LOG_INFO("3秒后连接反向WebSocket...");
-	sleep(3);
+	std::this_thread::sleep_for(std::chrono::seconds(3));
 
 	// 反向WebSocket连接
 	std::thread t2(MyReverseWebSocket::connectReverseWebSocket);
@@ -275,7 +278,7 @@ int main()
 		else
 		{
 			// 休眠算法...
-			sleep(1);
+			std::this_thread::sleep_for(std::chrono::seconds(1));
 		}
 	}
 

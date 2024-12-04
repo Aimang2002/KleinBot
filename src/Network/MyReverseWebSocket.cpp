@@ -24,7 +24,7 @@ void MyReverseWebSocket::connectReverseWebSocket()
 
             for (;;)
             {
-                string message;
+                std::string message;
                 if (!MessageQueue::pending_empty()) // 若消息队列不为空
                 {
                     message = MessageQueue::pending_front_queue();
@@ -34,16 +34,18 @@ void MyReverseWebSocket::connectReverseWebSocket()
 #endif
                     ws.text(ws.got_text());
                     ws.write(net::buffer(message));
-                    cout << "send over!" << endl;
+                    std::cout << "send over!" << std::endl;
                 }
                 else
                 {
-                    sleep(1); // 休眠一秒
+                    // std::this_thread::sleep_for(std::chrono::seconds(1));        // 休眠一秒
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 休眠100ms
                     palpitate++;
-                    if (palpitate > 10) // 当休眠达到十次，将进行一个心跳
+                    if (palpitate > 100) // 当休眠达到十次，将进行一个心跳
                     {
                         ws.text(ws.got_text());
                         ws.write(net::buffer("ping")); // 发送心跳
+                        palpitate = 0;
                     }
                 }
             }
@@ -54,12 +56,12 @@ void MyReverseWebSocket::connectReverseWebSocket()
         }
 
         LOG_FATAL("反向ws已失联，10秒后将重新连接...");
-        sleep(10); // 休眠10后重连
+        std::this_thread::sleep_for(std::chrono::seconds(10)); // 休眠10后重连
     }
 }
 
-std::string MyReverseWebSocket::messageEncapsulation(string message, string messageEndpoint)
+std::string MyReverseWebSocket::messageEncapsulation(std::string message, std::string messageEndpoint)
 {
-    string format = R"({"action":")" + messageEndpoint + R"(","params":)" + message + "}";
+    std::string format = R"({"action":")" + messageEndpoint + R"(","params":)" + message + "}";
     return format;
 }

@@ -4,12 +4,12 @@ std::string StableDiffusion::connectStableDiffusion(std::string prompt)
 {
     // prompt = R"("lou tianyi")";
     // v2.2.4版本正向提示词硬编码写入，v2.3.0版本修改为软编码
-    string revised_prompt = "(((best quality))),(((ultra detailed))),(((masterpiece))),illustration,";
+    std::string revised_prompt = "(((best quality))),(((ultra detailed))),(((masterpiece))),illustration,";
 
     prompt = JParsingClass.toJson(prompt);
 
     // 构造请求的内容
-    string HTTPPkage;
+    std::string HTTPPkage;
     HTTPPkage = R"({"prompt": ")";
     HTTPPkage += revised_prompt + prompt; // 填入修订词+提示
     HTTPPkage += R"(", "steps": 35})";    // 生成图像的步数

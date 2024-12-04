@@ -1,11 +1,11 @@
 #include "OpenAIStandard.h"
 
 // 文本翻译
-bool OpenAIStandard::text_translate(std::string &text, const std::string model, std::string language, string endpoint, string api_key)
+bool OpenAIStandard::text_translate(std::string &text, const std::string model, std::string language, std::string endpoint, std::string api_key)
 {
     LOG_INFO("使用了文本翻译");
     // 调整格式
-    string ss;
+    std::string ss;
     if (language == "EN")
     {
         ss = R"({"model":")" + model + "\",\"messages\":[";
@@ -13,7 +13,7 @@ bool OpenAIStandard::text_translate(std::string &text, const std::string model, 
         {"role": "assistant", "content": "OK"},
         {"role": "user", "content": ")" +
               text + "\"}]";
-        ss += R"(,"temperature":0.1,"top_p":0.9,"frequency_penalty":0,"presence_penalty":0)" + string("}"); // 超参数
+        ss += R"(,"temperature":0.1,"top_p":0.9,"frequency_penalty":0,"presence_penalty":0)" + std::string("}"); // 超参数
     }
     if (language == "ZH")
     {
@@ -23,7 +23,7 @@ bool OpenAIStandard::text_translate(std::string &text, const std::string model, 
         {"role": "assistant", "content": "好的"},
         {"role": "user", "content": ")";
         ss += text + "\"}]";
-        ss += R"(,"temperature":0.1,"top_p":0.9,"frequency_penalty":0,"presence_penalty":0)" + string("}");
+        ss += R"(,"temperature":0.1,"top_p":0.9,"frequency_penalty":0,"presence_penalty":0)" + std::string("}");
     }
 
     text = ss;
@@ -41,10 +41,11 @@ bool OpenAIStandard::text_translate(std::string &text, const std::string model, 
         LOG_ERROR("翻译失败！错误消息：" + text);
         return false;
     }
+
     return true;
 }
 
-bool OpenAIStandard::send_to_chat(string &data, string models, string endpoint, string api_key)
+bool OpenAIStandard::send_to_chat(std::string &data, std::string models, std::string endpoint, std::string api_key)
 {
     /*
      * data参数里必须构建好Json数据以及prompt，本函数不提供Json数据封装
@@ -72,10 +73,10 @@ bool OpenAIStandard::send_to_chat(string &data, string models, string endpoint, 
         headers = curl_slist_append(headers, "Content-Type: application/json");
         headers = curl_slist_append(headers, header_auth.c_str());
 
-        string json_data = data;
+        std::string json_data = data;
         // LOG_DEBUG("发送内容：" + json_data);
         data = "";
-        // 封装HTTP POST数据报 + 设置libcurl选项
+        VerifyCertificate(curl);
         curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str()); // 添加端点
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data.c_str());
@@ -90,7 +91,7 @@ bool OpenAIStandard::send_to_chat(string &data, string models, string endpoint, 
             if (res != CURLE_OK)
             {
                 fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-                sleep(1);
+                std::this_thread::sleep_for(std::chrono::seconds(1));
                 continue;
             }
             break;
@@ -104,9 +105,8 @@ bool OpenAIStandard::send_to_chat(string &data, string models, string endpoint, 
         // 清理资源
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
-
 #ifdef DEBUG
-        cout << "OpenAI 原始消息：" << data << endl;
+        std::cout << "OpenAI 原始消息：" << data << std::endl;
 #endif
         // 判断数据合格性
         if (!isMessageComplete(data))
@@ -122,7 +122,7 @@ bool OpenAIStandard::send_to_chat(string &data, string models, string endpoint, 
 }
 
 // 调用视觉模型
-bool OpenAIStandard::send_to_vision(std::string &data, std::string &base64, string model, string endpoint, string api_key)
+bool OpenAIStandard::send_to_vision(std::string &data, std::string &base64, std::string model, std::string endpoint, std::string api_key)
 {
     // api和端点纠正
     endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
@@ -143,6 +143,7 @@ bool OpenAIStandard::send_to_vision(std::string &data, std::string &base64, stri
     {
         // 设置API密钥
         struct curl_slist *headers = NULL;
+        VerifyCertificate(curl);
         std::string header_auth = "Authorization: Bearer " + api_key;
         headers = curl_slist_append(headers, "Content-Type: application/json");
         headers = curl_slist_append(headers, header_auth.c_str());
@@ -165,7 +166,7 @@ bool OpenAIStandard::send_to_vision(std::string &data, std::string &base64, stri
             if (res != CURLE_OK)
             {
                 fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-                sleep(1);
+                std::this_thread::sleep_for(std::chrono::seconds(1));
                 continue;
             }
             break;
@@ -179,7 +180,6 @@ bool OpenAIStandard::send_to_vision(std::string &data, std::string &base64, stri
         // 清理资源
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
-
 #ifdef DEBUG
         cout << "OpenAI 返回的原始消息：" << data << endl;
 #endif
@@ -189,7 +189,7 @@ bool OpenAIStandard::send_to_vision(std::string &data, std::string &base64, stri
             return false;
         }
         // 无误返回
-        cout << "无误返回:" << data << endl;
+        std::cout << "无误返回:" << data << std::endl;
         return true;
     }
 
@@ -198,9 +198,8 @@ bool OpenAIStandard::send_to_vision(std::string &data, std::string &base64, stri
 }
 
 // 调用绘图模型
-bool OpenAIStandard::send_to_draw(std::string &prompt, string model, string endpoint, string api_key)
+bool OpenAIStandard::send_to_draw(std::string &prompt, std::string model, std::string endpoint, std::string api_key)
 {
-
     // api和端点纠正
     endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
     api_key = OpenAIStandard::filterNonNormalChars(api_key);
@@ -217,6 +216,7 @@ bool OpenAIStandard::send_to_draw(std::string &prompt, string model, string endp
 
         // 设置请求头
         struct curl_slist *headers = NULL;
+        VerifyCertificate(curl);
         headers = curl_slist_append(headers, "Content-Type: application/json");
         std::string authorization = "Authorization: Bearer " + api_key;
         headers = curl_slist_append(headers, authorization.c_str());
@@ -235,11 +235,11 @@ bool OpenAIStandard::send_to_draw(std::string &prompt, string model, string endp
         res = curl_easy_perform(curl);
         if (res != CURLE_OK)
         {
-            LOG_ERROR("curl_easy_strerror(res)");
+            LOG_ERROR(curl_easy_strerror(res));
         }
         else
         {
-            cout << "OpenAI 返回的原始消息：" << prompt << endl;
+            LOG_DEBUG(prompt);
         }
 
         // 清理
@@ -251,18 +251,24 @@ bool OpenAIStandard::send_to_draw(std::string &prompt, string model, string endp
 }
 
 // 回调函数
-size_t OpenAIStandard::write_callback_chat(char *ptr, size_t size, size_t nmemb, void *userdata)
+size_t OpenAIStandard::write_callback_chat(char *ptr, size_t size, size_t nmemb, std::string *userdata)
 {
-    size_t response_size = size * nmemb;
-    // 获取类实例指针
-    std::string *instance = static_cast<std::string *>(userdata);
-    // 保存接收到的内容
-    *instance += std::string(ptr);
-    return response_size;
+    size_t newLength = size * nmemb;
+    try
+    {
+        userdata->append(ptr, newLength);
+    }
+    catch (std::bad_alloc &e)
+    {
+        // 内存不足异常
+        LOG_ERROR("奇怪的异常，内存不足！");
+        return 0;
+    }
+    return newLength;
 }
 
 // 消息完整性判断
-bool OpenAIStandard::isMessageComplete(string &message)
+bool OpenAIStandard::isMessageComplete(std::string &message)
 {
     // 若出现以下问题，则消息不完整
     if (isTimeOut(message))
@@ -275,7 +281,7 @@ bool OpenAIStandard::isMessageComplete(string &message)
 }
 
 // 超时判断
-bool OpenAIStandard::isTimeOut(string &message)
+bool OpenAIStandard::isTimeOut(std::string &message)
 {
     // 所有来自OpenAI的错误代码都将注册在此处
     std::vector<std::string> errorCode;
@@ -298,7 +304,7 @@ bool OpenAIStandard::isTimeOut(string &message)
 }
 
 // Key 错误判断
-bool OpenAIStandard::isKeyError(string &message)
+bool OpenAIStandard::isKeyError(std::string &message)
 {
     if (message.find("无效的令牌") != message.npos)
     {
@@ -319,10 +325,29 @@ bool OpenAIStandard::isKeyError(string &message)
     return false;
 }
 
-// API和端点修正
-string OpenAIStandard::filterNonNormalChars(string str)
+/*
+std::string OpenAIStandard::ResponseJsonVerify(std::string str, std::string sub)
 {
-    string result;
+    LOG_DEBUG("裁剪前：" + str);
+    // 该函数的主要目的是把json后面的东西给分割掉
+    return str.substr(0, str.rfind(sub) + sub.size());
+}
+*/
+
+void OpenAIStandard::VerifyCertificate(CURL *curl)
+{
+#if defined(__WIN32) || defined(__WIN64)
+    // 设置SSL证书验证
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);   // 开启SSL证书验证
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);   // 验证证书中的主机名
+    curl_easy_setopt(curl, CURLOPT_CAINFO, "cacert.pem"); // 指定CA根证书
+#endif
+}
+
+// API和端点修正
+std::string OpenAIStandard::filterNonNormalChars(std::string str)
+{
+    std::string result;
     for (char c : str)
     {
         if (std::isprint(c) && !std::isspace(c))

@@ -22,7 +22,7 @@
 
 
 
-> 最新版本：v2.3.1
+> 最新版本：v2.3.2
 >
 > 该版本支持对接的API为OpenAI接口规范，凡是兼容OpenAI SDK的API，都可以连接
 
@@ -30,7 +30,10 @@
 
 # 运行
 
-目前Klein只支持在Linux x86_64系统下，后续将会陆续适配其他系统。从release下载文件后，赋予x权限，直接运行即可。
+目前Klein支持的平台有：
+
++ Linux_Ubuntu x86_64
++ Windows x86_64
 
 
 
@@ -40,21 +43,17 @@
 
 [curl](https://github.com/curl/curl)
 
-curl安装：
-
-> Linux Ubuntu:apt install curl
+[Boost](https://github.com/boostorg/boost)
 
 [rapidJSON](https://github.com/Tencent/rapidjson)
 
-rapidJSON安装:
-
-> 源码已经嵌入到项目中
+> rapidJSON源码已经嵌入到项目中
 
 
 
 # 兼容性
 
-Klein没有实现协议端，本身并不支持直接对接QQ，而是对接第三方插件。内部使用CQ码发送内容，所以只要支持发送CQ码的QQ插件，Klein就能够跟该插件实现对接。Klein在测试时采用的QQ插件为[go-cqhttp](https://docs.go-cqhttp.org/)，如果找不到其他更好的QQ插件，可采用go-cqhttp。
+Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三方插件的方式。内部使用CQ码发送内容，所以只要支持发送CQ码的QQ插件，Klein就能够跟该插件实现对接。Klein在测试时采用的QQ插件为[LLOneBot](https://github.com/LLOneBot/LLOneBot)，如果找不到其他更好的QQ插件，可采用LLOneBot。
 
 
 
@@ -299,3 +298,5 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 
 + [rapidJSON](https://github.com/Tencent/rapidjson)
 + [Boost](https://github.com/boostorg/boost)
+
++ [curl](https://curl.se/)

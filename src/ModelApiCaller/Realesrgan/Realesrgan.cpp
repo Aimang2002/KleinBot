@@ -97,6 +97,10 @@ short Realesrgan::fixImageSizeTo4K(std::string &message)
         }
 
         // 下载
+        // 设置SSL证书验证
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+        curl_easy_setopt(curl, CURLOPT_CAINFO, "cacert.pem");
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, realesrgan_write_data);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &image_data);
@@ -104,9 +108,9 @@ short Realesrgan::fixImageSizeTo4K(std::string &message)
         CURLcode res = curl_easy_perform(curl);
         if (res != CURLE_OK)
         {
-            LOG_ERROR(string("Failed to download image: ") + curl_easy_strerror(res));
+            LOG_ERROR(std::string("Failed to download image: ") + curl_easy_strerror(res));
             curl_easy_cleanup(curl);
-            message = "系统提示：Failed to download image: " + string(curl_easy_strerror(res));
+            message = "系统提示：Failed to download image: " + std::string(curl_easy_strerror(res));
             return -1;
         }
 
@@ -186,7 +190,7 @@ short Realesrgan::fixImageSizeTo4K(std::string &message)
     return 1;
 }
 
-vector<std::string> Realesrgan::getFileSuffix(const std::string directoryPath)
+std::vector<std::string> Realesrgan::getFileSuffix(const std::string directoryPath)
 {
     std::vector<std::string> files;
     for (const auto &entry : std::filesystem::directory_iterator(directoryPath))

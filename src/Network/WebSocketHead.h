@@ -2,8 +2,15 @@
 #define WEBSOCKETHEAD_H
 
 #include <iostream>
+#include <thread>
+#include <chrono>
+#if defined(__linux__)
 #include <boost/beast.hpp>
 #include <boost/asio.hpp>
+#elif defined(_WIN32) || defined(_WIN64)
+#include <boost/beast.hpp>
+#include <boost/asio.hpp>
+#endif
 #include "../ConfigManager/ConfigManager.h"
 #include "../Log/Log.h"
 #include "../MessageQueue/MessageQueue.h"

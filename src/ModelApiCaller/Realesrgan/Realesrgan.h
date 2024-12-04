@@ -25,7 +25,7 @@ public:
                 返回2，使用base64编码传输;
      */
     short fixImageSizeTo4K(std::string &message);
-    vector<std::string> getFileSuffix(const std::string directoryPath);
+    std::vector<std::string> getFileSuffix(const std::string directoryPath);
     ~Realesrgan();
 
 private:

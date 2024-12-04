@@ -17,17 +17,17 @@ class TimingTast
 public:
     TimingTast();
     // 设置定时
-    std::string setFixedRemind(std::string, UINT64);
+    std::string setFixedRemind(std::string, uint64_t);
     // 获取当前时间
-    UINT64 getPresentTime();
+    uint64_t getPresentTime();
     // 时间转换
-    UINT64 timeChange(std::string);
+    uint64_t timeChange(std::string);
     // 每日提醒
     void dailyRemind(); // 一天的时间戳是86400s
     ~TimingTast();
 
 public:
-    std::map<UINT64, std::pair<UINT64, std::string>> *Event; // first = 时间戳 pair.first = QQ号 second = 提醒内容
+    std::map<uint64_t, std::pair<uint64_t, std::string>> *Event; // first = 时间戳 pair.first = QQ号 second = 提醒内容
     // ConnectPythonProcess *CPY;
 };
 

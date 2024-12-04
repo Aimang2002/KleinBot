@@ -9,7 +9,6 @@
 #include "../JsonParse/JsonParse.h"
 #include "../ConfigManager/ConfigManager.h"
 #include "../Network/MyReverseWebSocket.h"
-#include "src/Log/Log.h"
 
 extern JsonParse &JParsingClass;
 extern ConfigManager &CManager;
@@ -21,7 +20,7 @@ public:
 
     // 消息入列
     static void original_push_queue(std::string task);
-    static void pending_push_queue(const std::string task, std::string API, UINT64 id, const string type);
+    static void pending_push_queue(const std::string task, std::string API, uint64_t id, const std::string type);
 
     // 判断消息队列是否为空
     static bool original_empty();
@@ -36,8 +35,8 @@ public:
     static bool pending_pop();
 
 private:
-    static std::string privateGOCQFormat(std::string message, UINT64 user_id, const string type);
-    static std::string groupGOCQFormat(std::string message, UINT64 group_id, const string type);
+    static std::string privateGOCQFormat(std::string message, uint64_t user_id, const std::string type);
+    static std::string groupGOCQFormat(std::string message, uint64_t group_id, const std::string type);
 
 private:
     static std::queue<std::string> *origina_queue; // 原始消息队列

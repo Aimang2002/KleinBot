@@ -30,6 +30,7 @@ std::string ComputerStatus::Command(const std::string command)
 std::string ComputerStatus::getInet4()
 {
     std::string ipv4Addresses;
+#if defined(__linux__) // defined(_WIN32) || defined(_WIN64)
     struct ifaddrs *ifAddrStruct = nullptr;
     if (getifaddrs(&ifAddrStruct) == -1)
     {
@@ -59,6 +60,7 @@ std::string ComputerStatus::getInet4()
     }
     freeifaddrs(ifAddrStruct);
 
+#endif
     return ipv4Addresses;
 }
 
@@ -67,7 +69,8 @@ std::string ComputerStatus::getInet6()
     std::istringstream iss(this->Command("ifconfig | grep inet6"));
     std::string ipv6Addresses;
     std::string line;
-
+#if defined(__linux__)
+    std::cout << "开始进入inet6" << std::endl;
     while (std::getline(iss, line))
     {
         std::size_t inet6Pos = line.find("inet6 ");
@@ -82,7 +85,7 @@ std::string ComputerStatus::getInet6()
             }
         }
     }
-
+#endif
     return ipv6Addresses;
 }
 
