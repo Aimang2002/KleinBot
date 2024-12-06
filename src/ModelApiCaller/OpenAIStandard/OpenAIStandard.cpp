@@ -181,7 +181,7 @@ bool OpenAIStandard::send_to_vision(std::string &data, std::string &base64, std:
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
 #ifdef DEBUG
-        cout << "OpenAI 返回的原始消息：" << data << endl;
+        std::cout << "OpenAI 返回的原始消息：" << data << std::endl;
 #endif
         // 判断数据合格性
         if (!isMessageComplete(data))
@@ -295,7 +295,7 @@ bool OpenAIStandard::isTimeOut(std::string &message)
         {
             message = "系统提示：时间超时,请重新发送...";
 #ifdef DEBUG
-            cout << "时间超时..." << endl;
+            std::cout << "时间超时..." << std::endl;
 #endif
             return true;
         }

@@ -9,7 +9,7 @@ ConfigManager::ConfigManager(std::string configPath)
     LOG_INFO("配置文件如下：\n-----------------");
     for (auto it = this->configuation->begin(); it != this->configuation->end(); it++)
     {
-        cout << it->first << "\t" << it->second << endl;
+        std::cout << it->first << "\t" << it->second << std::endl;
     }
     LOG_INFO("-----------------");
 #endif

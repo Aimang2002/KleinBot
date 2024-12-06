@@ -10,7 +10,7 @@ std::mutex MessageQueue::pending_mutex = std::mutex();
 void MessageQueue::original_push_queue(std::string task)
 {
 #ifdef DEBUG
-    cout << "入列消息：" << task << endl;
+    std::cout << "入列消息：" << task << std::endl;
 #endif
     // std::lock_guard(original_mutex);
     original_mutex.lock();
@@ -21,7 +21,7 @@ void MessageQueue::original_push_queue(std::string task)
 void MessageQueue::pending_push_queue(const std::string task, std::string API, uint64_t id, const std::string type)
 {
 #ifdef DEBUG
-    cout << "入列消息：" << task << endl;
+    std::cout << "入列消息：" << task << std::endl;
 #endif
 
     // 数据封装
@@ -174,11 +174,11 @@ std::string MessageQueue::groupGOCQFormat(std::string message, uint64_t group_id
         }
         */
         json_data << R"({"type": "text",)";
-        json_data << R"("user_id":)" << group_id << R"(,"message":")" << message << R"("})";
+        json_data << R"("group_id":)" << group_id << R"(,"message":")" << message << R"("})";
     }
     else
     {
-        json_data << R"({"user_id":)" << group_id << R"(,"message":")" << message << R"("})";
+        json_data << R"({"group_id":)" << group_id << R"(,"message":")" << message << R"("})";
     }
     return json_data.str();
 }

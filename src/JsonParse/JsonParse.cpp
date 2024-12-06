@@ -30,13 +30,13 @@ JsonData JsonParse::jsonReader(std::string &json_str)
 	{
 		std::cout << "Key: " << it->name.GetString() << ", Value: ";
 		if (it->value.IsString())
-			std::cout << it->value.GetString() << endl;
+			std::cout << it->value.GetString() << std::endl;
 		else if (it->value.IsInt64())
-			std::cout << it->value.GetInt64() << endl;
+			std::cout << it->value.GetInt64() << std::endl;
 		else if (it->value.IsUint())
-			std::cout << it->value.GetUint() << endl;
+			std::cout << it->value.GetUint() << std::endl;
 		else
-			std::cout << "Unknown data type" << endl;
+			std::cout << "Unknown data type" << std::endl;
 	}
 #endif
 

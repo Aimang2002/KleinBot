@@ -71,6 +71,7 @@ Message::Message()
 	if (!ifs.is_open())
 	{
 		perror("轻量型人格初始化失败");
+		LOG_FATAL("失败！");
 	}
 	else
 	{
@@ -95,7 +96,8 @@ Message::Message()
 	}
 
 	// 初始化管理员
-	this->addUsers(stoi(CManager.configVariable("MANAGER_QQ")));
+	uint64_t manager_qq = std::stoll(CManager.configVariable("MANAGER_QQ"));
+	this->addUsers(manager_qq);
 }
 
 bool Message::addUsers(uint64_t user_id)
@@ -137,177 +139,184 @@ bool Message::addUsers(uint64_t user_id)
 // string Message::handleMessage(uint64_t user_id, string message, string message_type)
 std::string Message::handleMessage(JsonData &data)
 {
-	// type类型默认为text，如需要更改需要重新指定
-	data.type = "text";
+	try
+	{
+		// type类型默认为text，如需要更改需要重新指定
+		data.type = "text";
 
-	// 新建用户
-	if (this->user_messages->find(data.private_id) == this->user_messages->end())
-	{
-		this->addUsers(data.private_id);
-	}
-
-	// 判断是否是群消息
-	if (data.message_type == "group")
-	{
-		// 移除CQ码
-		this->removeGroupCQCode(data.message);
-	}
-
-	// 显示用户输入的问题
-	std::cout << "[" << data.message_type << "]" << data.private_id << ":" << data.message << std::endl;
-
-	// 管理员权限判断
-	if (this->permissionVerification(data.private_id))
-	{
-		// 管理员可操作的命令
-		bool result = this->adminTerminal(data.message, data.private_id);
-		if (result)
-		{
-			return data.message;
-		}
-	}
-
-	// 内置回复判断
-
-	if (data.message.find("#图片超分") != data.message.npos)
-	{
-		this->call_fixImageSizeTo4K(data.message);
-		data.type = "CQ";
-	}
-	/*
-	else if (message.find("#精美图片") != message.npos)
-	{
-		questPictureID(message);
-		LOG_DEBUG(message);
-	}
-	*/
-	else if (data.message == CManager.configVariable("QBOT_NAME"))
-	{
-		SpeechSound(data.message);
-	}
-	else if (data.message.find("CQ:image") != std::string::npos &&
-			 data.message.find("file") != std::string::npos &&
-			 data.message.find("url=") != std::string::npos &&
-			 data.message.find("file_size=") != std::string::npos &&
-			 data.message.size() > 200) // 这个判断很蠢，我目前找不到更好的办法
-	{
-		this->provideImageRecognition(data.private_id, data.message, data.type);
-	}
-	else if (data.message.compare("#歌曲推荐") == 0)
-	{
-		data.type = "CQ";
-		musicShareMessage(data.message, 1);
-	}
-	else if (data.message.compare("#帮助") == 0)
-	{
-		std::ifstream ifs(CManager.configVariable("HELP_PATH"));
-		if (!ifs.is_open())
-		{
-			LOG_ERROR("帮助文件打开失败！请检查...");
-			data.message = "正在编辑中 .>_<.";
-		}
-		else
-		{
-			data.message.assign((std::istreambuf_iterator<char>(ifs.rdbuf())), std::istreambuf_iterator<char>());
-			ifs.close();
-		}
-	}
-	else if (!strcmp(data.message.c_str(), "#人格帮助"))
-	{
-		std::ifstream ifs(CManager.configVariable("HELP_PERSONALITY_PATH"));
-		if (!ifs.is_open())
-		{
-			LOG_ERROR("file open failed!");
-			data.message = "正在编辑中 .>_<.";
-		}
-		else
-		{
-			data.message.assign((std::istreambuf_iterator<char>(ifs.rdbuf())), std::istreambuf_iterator<char>());
-			ifs.close();
-		}
-	}
-	else if (data.message.find("#设置人格:") != std::string::npos || data.message.find("#设置人格：") != std::string::npos)
-	{
-		this->setPersonality(data.message, data.private_id);
-	}
-	else if (data.message.find("#轻量型人格:") != std::string::npos || data.message.find("#轻量型人格：") != std::string::npos)
-	{
-		this->setPersonality(data.message, data.private_id, 1);
-	}
-	else if (data.message.find("#人格还原:") != std::string::npos || data.message.find("#人格还原：") != std::string::npos)
-	{
-		this->setPersonality(data.message, data.private_id);
-	}
-	else if (data.message.compare("#重置对话") == 0)
-	{
-		this->resetChat(data.message, data.private_id);
-	}
-	else if (data.message.find("#话题:") != std::string::npos || data.message.find("#话题：") != std::string::npos)
-	{
-		auto user = this->user_messages->find(data.private_id);
-		if (user == this->user_messages->end())
+		// 新建用户
+		if (this->user_messages->find(data.private_id) == this->user_messages->end())
 		{
 			this->addUsers(data.private_id);
 		}
-		user->second.user_chatHistory[0].first = (this->system_message_format + data.message + "\"},");
-		user->second.user_chatHistory[0].second = time(nullptr);
-		user->second.user_chatHistory[1].first = (this->system_message_format + "OK!I will use Chinses answer \"},");
-		user->second.user_chatHistory[1].second = time(nullptr);
 
-		data.message = "好的，接下来我会围绕此话题进行对话";
-		std::lock_guard<std::mutex> lock(mutex_message);
-		this->user_messages->find(data.private_id)->second = user->second;
-	}
-	else if (data.message.compare("#当前气温") == 0)
-	{
-	}
-	else if (data.message.compare("#设置定时") == 0)
-	{
-		data.message = TTastClass.setFixedRemind(data.message, data.private_id);
-	}
-	else if (data.message.find("#切换模型") != std::string::npos || data.message.find("#模型切换") != std::string::npos)
-	{
-		this->switchModel(data.message, data.private_id);
-	}
-	else if (data.message.find("#查询当前模型") != std::string::npos)
-	{
-		data.message = "你当前的模型为：" + this->user_messages->find(data.private_id)->second.user_models.first;
-	}
-	else if (data.message.find("#开启语音") != std::string::npos)
-	{
-		if (!this->global_Voice)
+		// 判断是否是群消息
+		if (data.message_type == "group")
 		{
-			data.message = "管理员临时关闭了该功能，可能是在维护...";
+			// 移除CQ码
+			this->removeGroupCQCode(data.message);
+		}
+
+		// 显示用户输入的问题
+		std::cout << "[" << data.message_type << "]" << data.private_id << ":" << data.message << std::endl;
+
+		// 管理员权限判断
+		if (this->permissionVerification(data.private_id))
+		{
+			// 管理员可操作的命令
+			bool result = this->adminTerminal(data.message, data.private_id);
+			if (result)
+			{
+				return data.message;
+			}
+		}
+
+		// 内置回复判断
+
+		if (data.message.find("#图片超分") != data.message.npos)
+		{
+			this->call_fixImageSizeTo4K(data.message);
+			data.type = "CQ";
+		}
+		/*
+		else if (message.find("#精美图片") != message.npos)
+		{
+			questPictureID(message);
+			LOG_DEBUG(message);
+		}
+		*/
+		else if (data.message == CManager.configVariable("QBOT_NAME"))
+		{
+			SpeechSound(data.message);
+		}
+		else if (data.message.find("CQ:image") != std::string::npos &&
+				 data.message.find("file") != std::string::npos &&
+				 data.message.find("url=") != std::string::npos &&
+				 data.message.find("file_size=") != std::string::npos &&
+				 data.message.size() > 200) // 这个判断很蠢，我目前找不到更好的办法
+		{
+			this->provideImageRecognition(data.private_id, data.message, data.type);
+		}
+		else if (data.message.compare("#歌曲推荐") == 0)
+		{
+			data.type = "CQ";
+			musicShareMessage(data.message, 1);
+		}
+		else if (data.message.compare("#帮助") == 0)
+		{
+			std::ifstream ifs(CManager.configVariable("HELP_PATH"));
+			if (!ifs.is_open())
+			{
+				LOG_ERROR("帮助文件打开失败！请检查...");
+				data.message = "正在编辑中 .>_<.";
+			}
+			else
+			{
+				data.message.assign((std::istreambuf_iterator<char>(ifs.rdbuf())), std::istreambuf_iterator<char>());
+				ifs.close();
+			}
+		}
+		else if (!strcmp(data.message.c_str(), "#人格帮助"))
+		{
+			std::ifstream ifs(CManager.configVariable("HELP_PERSONALITY_PATH"));
+			if (!ifs.is_open())
+			{
+				LOG_ERROR("file open failed!");
+				data.message = "正在编辑中 .>_<.";
+			}
+			else
+			{
+				data.message.assign((std::istreambuf_iterator<char>(ifs.rdbuf())), std::istreambuf_iterator<char>());
+				ifs.close();
+			}
+		}
+		else if (data.message.find("#设置人格:") != std::string::npos || data.message.find("#设置人格：") != std::string::npos)
+		{
+			this->setPersonality(data.message, data.private_id);
+		}
+		else if (data.message.find("#轻量型人格:") != std::string::npos || data.message.find("#轻量型人格：") != std::string::npos)
+		{
+			this->setPersonality(data.message, data.private_id, 1);
+		}
+		else if (data.message.find("#人格还原:") != std::string::npos || data.message.find("#人格还原：") != std::string::npos)
+		{
+			this->setPersonality(data.message, data.private_id);
+		}
+		else if (data.message.compare("#重置对话") == 0)
+		{
+			this->resetChat(data.message, data.private_id);
+		}
+		else if (data.message.find("#话题:") != std::string::npos || data.message.find("#话题：") != std::string::npos)
+		{
+			auto user = this->user_messages->find(data.private_id);
+			if (user == this->user_messages->end())
+			{
+				this->addUsers(data.private_id);
+			}
+			user->second.user_chatHistory[0].first = (this->system_message_format + data.message + "\"},");
+			user->second.user_chatHistory[0].second = time(nullptr);
+			user->second.user_chatHistory[1].first = (this->system_message_format + "OK!I will use Chinses answer \"},");
+			user->second.user_chatHistory[1].second = time(nullptr);
+
+			data.message = "好的，接下来我会围绕此话题进行对话";
+			std::lock_guard<std::mutex> lock(mutex_message);
+			this->user_messages->find(data.private_id)->second = user->second;
+		}
+		else if (data.message.compare("#当前气温") == 0)
+		{
+		}
+		else if (data.message.compare("#设置定时") == 0)
+		{
+			data.message = TTastClass.setFixedRemind(data.message, data.private_id);
+		}
+		else if (data.message.find("#切换模型") != std::string::npos || data.message.find("#模型切换") != std::string::npos)
+		{
+			this->switchModel(data.message, data.private_id);
+		}
+		else if (data.message.find("#查询当前模型") != std::string::npos)
+		{
+			data.message = "你当前的模型为：" + this->user_messages->find(data.private_id)->second.user_models.first;
+		}
+		else if (data.message.find("#开启语音") != std::string::npos)
+		{
+			if (!this->global_Voice)
+			{
+				data.message = "管理员临时关闭了该功能，可能是在维护...";
+			}
+			else
+			{
+				this->user_messages->find(data.private_id)->second.isOpenVoiceMode = true;
+				data.message = "已开启！";
+			}
+		}
+		else if (data.message.find("#关闭语音") != std::string::npos)
+		{
+			this->user_messages->find(data.private_id)->second.isOpenVoiceMode = false;
+			data.message = "已关闭！";
+		}
+		else if (data.message.find("#生成图片：") != std::string::npos || data.message.find("#生成图片:") != std::string::npos)
+		{
+			data.type = "CQ";
+			this->provideImageCreation(data.private_id, data.message);
+		}
+		else if (data.message.find("#删除上条对话") != std::string::npos)
+		{
+			data.message = this->removePreviousContext(data.private_id);
+		}
+		// else if (message.substr(1, 12).find(message.find("#SD绘图")) != message.npos)
+		else if (data.message.find("#SD绘图") != std::string::npos)
+		{
+			data.type = "CQ";
+			this->SDImageCreation(data.message);
 		}
 		else
 		{
-			this->user_messages->find(data.private_id)->second.isOpenVoiceMode = true;
-			data.message = "已开启！";
+			characterMessage(data);
 		}
 	}
-	else if (data.message.find("#关闭语音") != std::string::npos)
+	catch (const std::exception &e)
 	{
-		this->user_messages->find(data.private_id)->second.isOpenVoiceMode = false;
-		data.message = "已关闭！";
-	}
-	else if (data.message.find("#生成图片：") != std::string::npos || data.message.find("#生成图片:") != std::string::npos)
-	{
-		data.type = "CQ";
-		this->provideImageCreation(data.private_id, data.message);
-	}
-	else if (data.message.find("#删除上条对话") != std::string::npos)
-	{
-		data.message = this->removePreviousContext(data.private_id);
-	}
-	// else if (message.substr(1, 12).find(message.find("#SD绘图")) != message.npos)
-	else if (data.message.find("#SD绘图") != std::string::npos)
-	{
-		data.type = "CQ";
-		this->SDImageCreation(data.message);
-	}
-	else
-	{
-		characterMessage(data);
+		std::cerr << e.what() << '\n';
 	}
 	return data.message;
 }
@@ -333,17 +342,16 @@ bool Message::messageFilter(std::string message_type, std::string message)
 bool Message::removeGroupCQCode(std::string &message)
 {
 	// 为了防止CQ码和普通文本出现冲突，这里选择半硬编码查找，减少冲突，但不一定彻底解决
-	std::string specificCQCode = "[CQ:at,qq=" + CManager.configVariable("BOT_QQ") + "]";
-
+	std::string specificCQCode = "[CQ:at,qq=" + CManager.configVariable("BOT_QQ"); // [CQ:at,qq=2333
 	int begin = message.find(specificCQCode);
 	if (begin == message.npos)
 	{
 		LOG_WARNING("该消息CQ码格式异常或者不存在CQ码!\n源消息:" + message);
 		return false;
 	}
-	int end = message.find("]");
+	int end = message.find("]", begin);
 	// 移除CQ码
-	message.erase(begin, end - begin + 1);
+	message.erase(begin, end - begin + 2); // 硬编码不可取！！！
 
 	return true;
 }
@@ -405,12 +413,12 @@ void Message::characterMessage(JsonData &data)
 	auto models = this->user_messages->find(data.private_id)->second.user_models;
 
 	// 是否开启上下文  	当上下文模式为开启状态 || 访问者是管理员时，启用上下文模式
-	if (this->accessibility_chat || data.private_id == stoi(CManager.configVariable("MANAGER_QQ")))
+	if (this->accessibility_chat || data.private_id == std::stoll(CManager.configVariable("MANAGER_QQ")))
 	{
 		int contextMax = 0;
 
 		// 设置模型最大的上下文
-		contextMax = stoi(CManager.configVariable("CONTEXT_MAX"));
+		contextMax = std::stoll(CManager.configVariable("CONTEXT_MAX"));
 
 		// 提取用户聊天记录
 		std::vector<std::pair<std::string, time_t>> user_vector;
@@ -420,7 +428,7 @@ void Message::characterMessage(JsonData &data)
 		}
 
 		// 判断消息存活时间
-		if (user_vector.back().second + stoi(CManager.configVariable("MESSAGE_SURVIVAL_TIME")) < time(nullptr))
+		if (user_vector.back().second + std::stoll(CManager.configVariable("MESSAGE_SURVIVAL_TIME")) < time(nullptr))
 		{
 			user_vector.erase(user_vector.begin() + 1, user_vector.end());
 			LOG_WARNING("该用户的消息存活时间大于指定时间，已清空...");
@@ -893,7 +901,7 @@ void Message::switchModel(std::string &message, uint64_t user_id)
 
 bool Message::permissionVerification(uint64_t user_id)
 {
-	return user_id == stoi(CManager.configVariable("MANAGER_QQ")) ? true : false;
+	return user_id == std::stoll(CManager.configVariable("MANAGER_QQ")) ? true : false;
 }
 
 // 回调函数用于写入数据到文件
