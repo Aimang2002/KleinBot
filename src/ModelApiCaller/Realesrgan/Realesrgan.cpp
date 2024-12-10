@@ -98,9 +98,11 @@ short Realesrgan::fixImageSizeTo4K(std::string &message)
 
         // 下载
         // 设置SSL证书验证
+#if defined(__WIN32) || defined(__WIN64)
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
         curl_easy_setopt(curl, CURLOPT_CAINFO, "cacert.pem");
+#endif
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, realesrgan_write_data);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &image_data);
