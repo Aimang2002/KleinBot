@@ -22,7 +22,7 @@
 
 
 
-> 最新版本：v2.3.2
+> 最新版本：v2.3.3
 >
 > 该版本支持对接的API为OpenAI接口规范，凡是兼容OpenAI SDK的API，都可以连接
 
@@ -120,11 +120,7 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 |   #切换模型   |             根据载入的模型名称，切换各大语言模型             | #切换模型:gpt-3.5-turbo                                      |
 | #查询当前模型 |                 查询当前Kline正在调用的模型                  | #查询当前模型                                                |
 |   #开启语音   | 该功能将文字转语音，开启语音回复(<font color="orange">需要开源项目GPT-SoVIST</font>) | #开启语音                                                    |
-|   #关闭语音   |                         关闭语音回复                         | #关闭语音                                                    |
-|   #生成图片   |                    使用大模型生成一张图片                    | #生成图片:在银河中漂流的太空战舰                             |
-| #删除上条对话 |                删除Klein和发送者的上一条对话                 | #删除上条对话                                                |
-|    #SD绘图    |                     对接StableDiffusion                      | #SD绘图:在雪地里的可爱少女                                   |
-|   #图片超分   |                 对接REALESGAN项目后可以使用                  | #图片超分:图片.jpg                                           |
+|     #搜歌     | 将歌曲名追加到后面，机器人会返回搜索结果（目前只支持网易云音乐） | #搜歌：rubia                                                 |
 
 
 
@@ -155,7 +151,7 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 
 
 
-# 适配的大模型平台
+# 适配的大模型API SDK
 
 |  平台  |          是否支持           |
 | :----: | :-------------------------: |
@@ -163,7 +159,7 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 | Google | <font color="red">×</font>  |
 | Azure  | <font color="red">×</font>  |
 
-PS:以上只是列举一些大模型平台，有一些本地模型推理软件(LM Studio、RWKV-Running)它的接口采用的和OpenAI一样，所以这些API也是能连接的，这些没有指定平台的模型其中的API参数在配置文件中填到“OtherChatModel”中。
+PS:以上只是列举一些大模型平台，有一些本地模型推理软件(LM Studio、RWKV-Running)它的接口规范采用的时OpenAI SDK，所以这些API也是能连接的，这些没有指定平台的模型其中的API参数在配置文件中填到“OtherChatModel”中。
 
 
 
@@ -246,20 +242,33 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 
     ~~~json
     {
-        "Models": 
-        [
+        "Models": [
             {
-                "name": "gpt-4",
-                "service": "OpenAI"
+                "ModelName": [
+                    "gpt-4",
+                    "gpt-4o",
+                    "o1-preview"
+                ],
+                "api_key": "sk-",
+                "api_endpoint": "https://api.xxx.com/v1/chat/completions",
+                "APIStandard": "OpenAI"
             },
             {
-                "name": "xxx",
-                "service": "xxx"
+                "name": [
+                  "deepseek-chat",
+                    "deepseek-reasoner",
+                    "deepseek-coder"
+                ],
+                "api_key": "sk-xxx",
+                "api_endpoint": "https://api.xxx.com/v1/chat/completions",
+                "APIStandard": "OpenAI"
             }
         ]
     }
     ~~~
-
+    
+    以api_key为一组，在改组内，所有的模型将会使用改组的api_key和endpoint。
+    
     
 
 + personality
