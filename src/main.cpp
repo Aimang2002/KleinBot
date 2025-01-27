@@ -12,7 +12,7 @@
 #include "src/Network/MyWebSocket.h"
 #include "TimingTast/TimingTast.h"
 
-#define __KLEIN_VERSION__ "v2.3.2"
+#define __KLEIN_VERSION__ "v2.3.3"
 
 // using namespace std;
 
@@ -59,10 +59,19 @@ void pollingThread()
 			message += content;
 			JsonFormatData = "[\n\t";
 			JsonFormatData += R"({"role": "user", "content": ")" + message + "\"}\n]";
-			std::pair<std::string, std::string> p;
-			p.first = CManager.configVariable("DEFAULT_MODEL");
-			p.second = CManager.configVariable("DEFAULT_MODEL_APISTANDARD");
-			Dock::RequestGPT(JsonFormatData, p);
+			// std::pair<std::string, std::vector<std::string>> p;
+			Person p;
+			p.frequency_penalty = CManager.configVariable("frequency_penalty");
+			p.isOpenVoiceMode = false;
+			p.presence_penalty = CManager.configVariable("presence_penalty");
+			p.temperature = CManager.configVariable("temperature");
+			p.top_p = CManager.configVariable("top_p");
+			p.user_models.first = CManager.configVariable("DEFAULT_MODEL");
+			p.user_models.second[0] = CManager.configVariable("DEFAULT_MODEL_API_KEY");
+			p.user_models.second[1] = CManager.configVariable("DEFAULT_MODEL_ENDPOINT");
+			p.user_models.second[2] = CManager.configVariable("DEFAULT_MODEL_APISTANDARD");
+
+			Dock::RequestGPT(JsonFormatData, &p);
 			if (JsonFormatData.size() > 100)
 			{
 				JsonFormatData = JParsingClass.getAttributeFromChoices(JsonFormatData, "content");

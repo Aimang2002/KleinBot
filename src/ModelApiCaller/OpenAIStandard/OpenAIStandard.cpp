@@ -224,6 +224,7 @@ bool OpenAIStandard::send_to_draw(std::string &prompt, std::string model, std::s
 
         // 设置请求体
         std::string postData = "{\"model\": \"" + model + "\", \"prompt\": \"" + prompt + "\", \"n\": 1, \"size\": \"1024x1024\"}";
+
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postData.c_str());
 
         // 设置响应回调函数
@@ -239,7 +240,7 @@ bool OpenAIStandard::send_to_draw(std::string &prompt, std::string model, std::s
         }
         else
         {
-            LOG_DEBUG(prompt);
+            // LOG_DEBUG(prompt);
         }
 
         // 清理

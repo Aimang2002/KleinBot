@@ -4,29 +4,6 @@ ComputerStatus::ComputerStatus()
 {
 }
 
-std::string ComputerStatus::Command(const std::string command)
-{
-    std::FILE *pipe = popen(command.c_str(), "r");
-    if (!pipe)
-    {
-        LOG_ERROR(command + "命令无法执行...");
-        return std::string();
-    }
-
-    // 读取数据
-    char buffer[512];
-    std::string ss;
-
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
-    {
-        ss += buffer;
-    }
-
-    pclose(pipe);
-
-    return ss;
-}
-
 std::string ComputerStatus::getInet4()
 {
     std::string ipv4Addresses;
@@ -50,82 +27,150 @@ std::string ComputerStatus::getInet4()
             struct sockaddr_in *addr = reinterpret_cast<struct sockaddr_in *>(ifa->ifa_addr);
             char ipAddr[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &(addr->sin_addr), ipAddr, INET_ADDRSTRLEN);
-            // std::cout << "Interface: " << ifa->ifa_name << " - IPv4 Address: " << ipAddr << std::endl;
-            ipv4Addresses.append("Interface:");
-            ipv4Addresses.append(ifa->ifa_name);
-            ipv4Addresses.append("\t  IPv4 Address: ");
+            // ipv4Addresses.append("Interface:");
+            // ipv4Addresses.append(ifa->ifa_name);
+            ipv4Addresses.append("IPv4 Address: ");
             ipv4Addresses.append(ipAddr);
-            ipv4Addresses += '\n';
+            ipv4Addresses.append("\n\n");
         }
     }
     freeifaddrs(ifAddrStruct);
 
+#endif
+
+#if defined(_WIN32) || defined(_WIN64)
+    ULONG buflen = sizeof(IP_ADAPTER_ADDRESSES);
+    IP_ADAPTER_ADDRESSES *pAddresses = (IP_ADAPTER_ADDRESSES *)malloc(buflen);
+
+    if (GetAdaptersAddresses(AF_INET, 0, NULL, pAddresses, &buflen) == ERROR_BUFFER_OVERFLOW)
+    {
+        free(pAddresses);
+        pAddresses = (IP_ADAPTER_ADDRESSES *)malloc(buflen);
+    }
+
+    if (GetAdaptersAddresses(AF_INET, 0, NULL, pAddresses, &buflen) == NO_ERROR)
+    {
+        for (IP_ADAPTER_ADDRESSES *pCurr = pAddresses; pCurr; pCurr = pCurr->Next)
+        {
+            for (IP_ADAPTER_UNICAST_ADDRESS *pUnicast = pCurr->FirstUnicastAddress; pUnicast != NULL; pUnicast = pUnicast->Next)
+            {
+                ipv4Addresses.append("IPv4 Address: ");
+                SOCKADDR_IN *sa_in = (SOCKADDR_IN *)pUnicast->Address.lpSockaddr;
+                ipv4Addresses.append(inet_ntoa(sa_in->sin_addr));
+                ipv4Addresses.append("\n\n");
+            }
+        }
+    }
+
+    free(pAddresses);
 #endif
     return ipv4Addresses;
 }
 
 std::string ComputerStatus::getInet6()
 {
-    std::istringstream iss(this->Command("ifconfig | grep inet6"));
     std::string ipv6Addresses;
-    std::string line;
 #if defined(__linux__)
-    std::cout << "开始进入inet6" << std::endl;
-    while (std::getline(iss, line))
+    struct ifaddrs *ifaddr, *ifa;
+
+    if (getifaddrs(&ifaddr) == -1)
     {
-        std::size_t inet6Pos = line.find("inet6 ");
-        if (inet6Pos != std::string::npos)
+        perror("getifaddrs");
+        return "";
+    }
+
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+    {
+        if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_INET6)
         {
-            inet6Pos += 6; // "inet6 "长度为6
-            std::size_t spacePos = line.find(' ', inet6Pos);
-            if (spacePos != std::string::npos)
+            char addr[INET6_ADDRSTRLEN];
+            void *tempAddrPtr = &((struct sockaddr_in6 *)ifa->ifa_addr)->sin6_addr;
+            inet_ntop(AF_INET6, tempAddrPtr, addr, INET6_ADDRSTRLEN);
+            // ipv6Addresses += ifa->ifa_name;
+            ipv6Addresses += "IPv6 Address：";
+            ipv6Addresses += addr;
+            ipv6Addresses.append("\n\n");
+        }
+    }
+
+    freeifaddrs(ifaddr);
+#endif
+
+#if defined(_WIN32) || defined(_WIN64)
+    ULONG buflen = sizeof(IP_ADAPTER_ADDRESSES);
+    IP_ADAPTER_ADDRESSES *pAddresses = (IP_ADAPTER_ADDRESSES *)malloc(buflen);
+
+    if (GetAdaptersAddresses(AF_INET6, 0, NULL, pAddresses, &buflen) == ERROR_BUFFER_OVERFLOW)
+    {
+        free(pAddresses);
+        pAddresses = (IP_ADAPTER_ADDRESSES *)malloc(buflen);
+    }
+
+    if (GetAdaptersAddresses(AF_INET6, 0, NULL, pAddresses, &buflen) == NO_ERROR)
+    {
+        for (IP_ADAPTER_ADDRESSES *pCurr = pAddresses; pCurr; pCurr = pCurr->Next)
+        {
+            for (IP_ADAPTER_UNICAST_ADDRESS *pUnicast = pCurr->FirstUnicastAddress; pUnicast != NULL; pUnicast = pUnicast->Next)
             {
-                ipv6Addresses += line.substr(inet6Pos, spacePos - inet6Pos);
-                ipv6Addresses += "\n\n";
+                if (pUnicast->Address.lpSockaddr->sa_family == AF_INET6)
+                {
+                    ipv6Addresses.append("IPv6 Address: ");
+                    char addressString[INET6_ADDRSTRLEN];
+                    sockaddr_in6 *ipv6Addr = (sockaddr_in6 *)pUnicast->Address.lpSockaddr;
+                    inet_ntop(AF_INET6, &(ipv6Addr->sin6_addr), addressString, sizeof(addressString));
+                    ipv6Addresses.append(addressString);
+                    ipv6Addresses.append("\n\n");
+                }
             }
         }
     }
+
+    free(pAddresses);
 #endif
     return ipv6Addresses;
 }
 
-std::string ComputerStatus::getPublicIP4()
+std::size_t callback(const char *in, std::size_t size, std::size_t num, std::string *out)
 {
-    char buffer[128];
+    const std::size_t totalBytes(size * num);
+    out->append(in, totalBytes);
+    return totalBytes;
+}
+std::string ComputerStatus::getPublicIP()
+{
     std::string IP;
-    FILE *fp;
+    std::vector<std::pair<std::string, std::string>> url = {
+        std::make_pair("http://ip.3322.net", "IPv4 Address: "),
+        std::make_pair("http://ipv6.icanhazip.com", "IPv6 Address: ")};
 
-    // 获取IPv4
-    fp = popen("curl 4.ipw.cn", "r");
-    if (fp == NULL)
+    for (int index = 0; index < 2; ++index)
     {
-        LOG_WARNING("popen failed!");
-        return std::string("获取失败！");
-    }
+        CURL *curl = curl_easy_init();
+        std::string response;
 
-    // 从管道中读取命令的输出
-    if (fgets(buffer, sizeof(buffer), fp) != NULL)
-    {
-        IP += std::string("IPv4:") + buffer;
-    }
-    // 关闭管道
-    pclose(fp);
+        if (curl)
+        {
+            curl_easy_setopt(curl, CURLOPT_URL, url[index].first.c_str());
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, callback);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
-    IP += "\n";
+            CURLcode res = curl_easy_perform(curl);
+            if (res != CURLE_OK)
+            {
+                std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << '\n';
+            }
+            else
+            {
+                IP.append(url[index].second + response + "\n");
+            }
 
-    // 获取IPv6
-    fp = popen("curl 6.ipw.cn", "r");
-    if (fp == NULL)
-    {
-        LOG_WARNING("popen failed!");
-        return std::string("获取失败！");
+            curl_easy_cleanup(curl);
+        }
+        else
+        {
+            return "Failed to initialize CURL";
+        }
     }
-
-    if (fgets(buffer, sizeof(buffer), fp) != NULL)
-    {
-        IP += std::string("IPv6:") + buffer;
-    }
-    pclose(fp);
 
     return IP;
 }

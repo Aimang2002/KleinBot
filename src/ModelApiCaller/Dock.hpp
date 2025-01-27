@@ -8,20 +8,15 @@
 class Dock
 {
 public:
-    static void RequestGPT(std::string &data, const std::pair<std::string, std::string> model, Person *user = nullptr)
+    static void RequestGPT(std::string &data, Person *user = nullptr)
     {
-        // 注意：模型复杂时可能会发生冲突
-        // 模型调用：根据传入进来的模型分析应该调用的接口
-        // 不是OpenAI模型也用OpenAI调用，但是需要更换端点
-        std::string endpoint;
-        std::string api_key;
         std::string json_data;
 
         // 指定超参数
         if (user == nullptr)
         {
             LOG_WARNING("超参数使用默认值");
-            json_data = "{\"model\":\"" + model.first + "\",\"messages\":" + data + ",";
+            json_data = "{\"model\":\"" + user->user_models.first + "\",\"messages\":" + data + ",";
             json_data += "\"temperature\":" + CManager.configVariable("temperature") + ",";
             json_data += "\"top_p\":" + CManager.configVariable("top_p") + ",";
             json_data += "\"frequency_penalty\":" + CManager.configVariable("frequency_penalty") + ",";
@@ -30,7 +25,7 @@ public:
         }
         else
         {
-            json_data = "{\"model\":\"" + model.first + "\",\"messages\":" + data + ",";
+            json_data = "{\"model\":\"" + user->user_models.first + "\",\"messages\":" + data + ",";
             json_data += "\"temperature\":" + user->temperature + ",";
             json_data += "\"top_p\":" + user->top_p + ",";
             json_data += "\"frequency_penalty\":" + user->frequency_penalty + ",";
@@ -38,23 +33,23 @@ public:
             json_data += "}";
         }
 
-        // 获取特定API
-        auto resultAPI = appointAPI(model.first);
-
-        // 注意：这里的判断规则不能打乱
-        if (model.first == CManager.configVariable("DRAW_MODEL"))
+        if (user->user_models.first == CManager.configVariable("DRAW_MODEL"))
         {
-            OpenAIStandard::send_to_draw(data, model.first, resultAPI.second, resultAPI.first);
+            OpenAIStandard::send_to_draw(data, user->user_models.first, user->user_models.second[1], user->user_models.second[0]);
         }
-        else if (model.second == "OpenAI")
+        else if (user->user_models.second[2] == "OpenAI")
         {
-            OpenAIStandard::send_to_chat(json_data, model.first, resultAPI.second, resultAPI.first);
+            std::string format = user->user_models.first + "\n";
+            format.append(user->user_models.second[0] + "\n");
+            format.append(user->user_models.second[1] + "\n");
+            format.append(user->user_models.second[2] + "\n");
+            OpenAIStandard::send_to_chat(json_data, user->user_models.first, user->user_models.second[1], user->user_models.second[0]);
             data = json_data;
         }
         else
         {
-            LOG_ERROR("错误的服务厂商");
-            data = "你的服务厂商为：" + model.second + "，当前并未支持";
+            LOG_ERROR("错误的API规范");
+            data = "你的服务API规范为：" + user->user_models.second[2] + "，当前并未支持";
         }
     }
 
@@ -71,31 +66,6 @@ private:
             }
         }
         return result;
-    }
-
-    // 指定API
-    static std::pair<std::string, std::string> appointAPI(std::string model) // 返回内容 first = key，second = endpoint
-    {
-        std::pair<std::string, std::string> p;
-        p.first = CManager.configVariable("DEFAULT_MODEL_API_KEY");
-        p.second = CManager.configVariable("DEFAULT_MODEL_ENDPOINT");
-
-        if (model == CManager.configVariable("OTHER_MODEL"))
-        {
-            p.first = CManager.configVariable("OTHER_MODEL_API_KEY");
-            p.second = CManager.configVariable("OTHER_MODEL_ENDPOINT");
-        }
-        else if (model == CManager.configVariable("DRAW_MODEL"))
-        {
-            p.first = CManager.configVariable("DRAW_MODEL_API_KEY");
-            p.second = CManager.configVariable("DRAW_MODEL_ENDPOINT");
-        }
-        else if (model == CManager.configVariable("VISION_MODEL"))
-        {
-            p.first = CManager.configVariable("VISION_MODEL_API_KEY");
-            p.second = CManager.configVariable("VISION_MODEL_ENDPOINT");
-        }
-        return p;
     }
 };
 

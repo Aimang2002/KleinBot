@@ -8,12 +8,20 @@
 #include "../Log/Log.h"
 #include <vector>
 #include <sstream>
+#include <curl/curl.h>
 
 #if defined(__linux__)
 #include <sys/types.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
+#if defined(__WIN32) || defined(__WIN64)
+#include <winsock2.h>
+#include <iphlpapi.h>
+#pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "ws2_32.lib")
+
 #endif
 
 class ComputerStatus
@@ -22,9 +30,8 @@ public:
     ComputerStatus();
     std::string getInet4();
     std::string getInet6();
-    std::string getPublicIP4();
+    std::string getPublicIP();
     ~ComputerStatus();
 
 private:
-    std::string Command(const std::string command);
 };

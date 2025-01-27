@@ -30,37 +30,102 @@ Message::Message()
 	std::ifstream ifsJson(CManager.configVariable("CHATMODELS_PATH"));
 	if (ifsJson.is_open())
 	{
+
 		std::string json((std::istreambuf_iterator<char>(ifsJson)), std::istreambuf_iterator<char>());
 		Document document;
-		if (document.Parse(json.c_str()).HasParseError() && (document.HasMember("Models") != true))
+		document.Parse(json.c_str());
+		if (document.HasParseError())
 		{
-			std::cerr << "JSON parse error: " << GetParseError_En(document.GetParseError()) << std::endl;
-			LOG_ERROR("JSON数据解析失败！请检查Json文件的合法性。");
+			LOG_FATAL("JSON 解析失败！");
+			exit(-1);
 		}
-		else
+
+		if (!document.HasMember("Models") || !document["Models"].IsArray())
 		{
-			const rapidjson::Value &models = document["Models"];
-			if (models.IsArray())
+			LOG_FATAL("JSON 数据中缺少 Models 字段或 Models 不是数组！");
+			exit(-1);
+		}
+
+		// 遍历 Models 数组
+		const Value &models = document["Models"];
+		for (SizeType i = 0; i < models.Size(); i++)
+		{
+			const Value &model = models[i];
+			std::unordered_set<std::string> modelNames;
+			std::vector<std::string> otherInfo(3, ""); // 初始化为 3 个空字符串
+
+			// 提取 ModelName 或 name 字段
+			if (model.HasMember("ModelName") && model["ModelName"].IsArray())
 			{
-				for (SizeType i = 0; i < models.Size(); i++)
+				const Value &modelNamesArray = model["ModelName"];
+				for (SizeType j = 0; j < modelNamesArray.Size(); j++)
 				{
-					const Value &model = models[i];
-					if ((model.HasMember("name") && model["name"].IsString()) &&
-						(model.HasMember("APIStandard") && model["APIStandard"].IsString()))
-					{
-						std::pair<std::string, std::string> p;
-						p.first = model["name"].GetString();
-						p.second = model["APIStandard"].GetString();
-						this->chatModels.push_back(p);
-					}
+					modelNames.insert(modelNamesArray[j].GetString());
 				}
 			}
+			else if (model.HasMember("name") && model["name"].IsArray())
+			{
+				const Value &modelNamesArray = model["name"];
+				for (SizeType j = 0; j < modelNamesArray.Size(); j++)
+				{
+					modelNames.insert(modelNamesArray[j].GetString());
+				}
+			}
+
+			// 提取其余字段
+			if (model.HasMember("api_key") && model["api_key"].IsString())
+			{
+				otherInfo[0] = model["api_key"].GetString();
+			}
+			if (model.HasMember("api_endpoint") && model["api_endpoint"].IsString())
+			{
+				otherInfo[1] = model["api_endpoint"].GetString();
+			}
+			if (model.HasMember("APIStandard") && model["APIStandard"].IsString())
+			{
+				otherInfo[2] = model["APIStandard"].GetString();
+			}
+			chatModels.push_back(std::make_pair(modelNames, otherInfo));
 		}
 	}
 	else
 	{
 		LOG_ERROR("模型配置文件打开失败！请检查该文件是否存在。");
 	}
+
+	/*
+		for (const auto &pair : chatModels)
+		{
+			std::cout << "Model Names: ";
+			for (const auto &name : pair.first)
+			{
+				std::cout << name << " ";
+			}
+			std::cout << "\nOther Info: ";
+			for (const auto &info : pair.second)
+			{
+				std::cout << info << " ";
+			}
+			std::cout << "\n\n";
+		}
+	*/
+
+	/*
+		for (auto &entry : chatModels)
+		{
+			for (auto it : entry.first)
+			{
+				std::cout << it << "\t";
+			}
+			std::cout << std::endl;
+			for (auto it : entry.second)
+			{
+				std::cout << it << "\t";
+			}
+			std::cout << std::endl;
+			std::cout << std::endl;
+		}
+	*/
 
 	// 轻量型人格初始化
 #ifdef DEBUG
@@ -118,9 +183,11 @@ bool Message::addUsers(uint64_t user_id)
 		Person person;
 		person.user_chatHistory = userDefault;
 
-		std::pair<std::string, std::string> models;
+		std::pair<std::string, std::vector<std::string>> models;
 		models.first = CManager.configVariable("DEFAULT_MODEL"); // 默认模型
-		models.second = CManager.configVariable("DEFAULT_MODEL_APISTANDARD");
+		models.second.push_back(CManager.configVariable("DEFAULT_MODEL_API_KEY"));
+		models.second.push_back(CManager.configVariable("DEFAULT_MODEL_ENDPOINT"));
+		models.second.push_back(CManager.configVariable("DEFAULT_MODEL_APISTANDARD"));
 		person.user_models = models;
 
 		person.isOpenVoiceMode = false;
@@ -197,7 +264,7 @@ std::string Message::handleMessage(JsonData &data)
 		{
 			this->provideImageRecognition(data.private_id, data.message, data.type);
 		}
-		else if (data.message.compare("#歌曲推荐") == 0)
+		else if (data.message.find("#搜歌:") != std::string::npos || data.message.find("#搜歌：") != std::string::npos)
 		{
 			data.type = "CQ";
 			musicShareMessage(data.message, 1);
@@ -253,7 +320,8 @@ std::string Message::handleMessage(JsonData &data)
 			{
 				this->addUsers(data.private_id);
 			}
-			user->second.user_chatHistory[0].first = (this->system_message_format + data.message + "\"},");
+
+			user->second.user_chatHistory[0].first = (this->system_message_format + JParsingClass.toJson(data.message) + "\"},");
 			user->second.user_chatHistory[0].second = time(nullptr);
 			user->second.user_chatHistory[1].first = (this->system_message_format + "OK!I will use Chinses answer \"},");
 			user->second.user_chatHistory[1].second = time(nullptr);
@@ -410,7 +478,7 @@ void Message::characterMessage(JsonData &data)
 {
 
 	// 获取用户当前使用的模型
-	auto models = this->user_messages->find(data.private_id)->second.user_models;
+	// auto models = this->user_messages->find(data.private_id)->second.user_models;
 
 	// 是否开启上下文  	当上下文模式为开启状态 || 访问者是管理员时，启用上下文模式
 	if (this->accessibility_chat || data.private_id == std::stoll(CManager.configVariable("MANAGER_QQ")))
@@ -467,7 +535,7 @@ void Message::characterMessage(JsonData &data)
 
 		// 将内容发送至对接的大预言模型
 		std::cout << "send to Model..." << std::endl;
-		Dock::RequestGPT(data.message, models, &this->user_messages->find(data.private_id)->second);
+		Dock::RequestGPT(data.message, &this->user_messages->find(data.private_id)->second);
 
 		// 消息完整性验证
 		std::string errorSubstr = data.message.substr(0, 10);
@@ -521,6 +589,7 @@ void Message::characterMessage(JsonData &data)
 		else
 		{
 			LOG_ERROR("小于100字节的消息：" + data.message);
+			data.message = "系统提示：未收到正确的回答，请重写发送问题...";
 		}
 	}
 	else
@@ -534,7 +603,6 @@ void Message::characterMessage(JsonData &data)
 		data.message.insert(data.message.size(), "]");
 		std::cout << "send to model..." << std::endl;
 		Dock::RequestGPT(data.message,
-						 this->user_messages->find(data.private_id)->second.user_models,
 						 &this->user_messages->find(data.private_id)->second);
 		if (data.message.size() > 100)
 		{
@@ -559,15 +627,35 @@ void Message::characterMessage(JsonData &data)
 
 void Message::musicShareMessage(std::string &message, short platform)
 {
+	// 提取歌手或歌曲
+	auto result = message.find(":");
+	if (result != std::string::npos)
+	{
+		result += 1;
+	}
+	else
+	{
+		result = message.find("：") + 3;
+	}
+	std::string musicName = message.substr(result);
+
+	CloudMusicID cm;
 	int num = 0;
 	uint64_t songID = 0;
 	switch (platform)
 	{
 	case 1:
 	{
-		num = rand() % Database::getInstance()->sID.getWyy_size();
-		songID = Database::getInstance()->sID.getWyyID(num);
-		message.insert(0, CQCode("music", "type", "163", "id", songID));
+		std::string res = cm.searchSong(musicName);
+		try
+		{
+			songID = std::stoll(res);
+		}
+		catch (const std::exception &e)
+		{
+			std::cerr << "捕获异常：" << e.what() << '\n';
+		}
+		message = CQCode("music", "type", "163", "id", res);
 		break;
 	}
 	default:
@@ -587,23 +675,6 @@ std::string Message::atUserMassage(std::string message, uint64_t user_id)
 	message.insert(0, CQCode("at", "qq", user_id));
 	return message;
 }
-
-/*
-string Message::privateGOCQFormat(string message, uint64_t user_id)
-{
-	// 封装go-cq格式
-	stringstream post_json;
-	post_json << R"({"user_id":)" << user_id << R"(,"message":")" << message << R"("})";
-	return post_json.str();
-}
-
-string Message::gourpGOCQFormat(string message, uint64_t group_id)
-{
-	stringstream json_data;
-	json_data << R"({"group_id":)" << group_id << R"(,"message":")" << message << R"("})";
-	return json_data.str();
-}
-*/
 
 void Message::atAllMessage(std::string &message)
 {
@@ -803,22 +874,6 @@ void Message::resetChat(std::string &roleName, uint64_t user_id)
 bool Message::adminTerminal(std::string &message, uint64_t user_id)
 {
 	std::string str = message;
-	/*if (message.find("#添加图片") != message.npos)
-	{
-		if (Database::getInstance()->AP.savePictrueURL(message))
-		{
-			message = "添加成功";
-		}
-		else
-			message = "添加失败";
-	}
-
-	else if (message.find("CQ:image") != message.npos)
-	{
-		database::getInstance()->imgURL.saveFaceURL(message);
-		facePackageMessage(message);
-	}
-	*/
 	if (message.find("#开启无障碍聊天") != message.npos)
 	{
 		this->accessibility_chat = true;
@@ -854,7 +909,7 @@ bool Message::adminTerminal(std::string &message, uint64_t user_id)
 	}
 	else if (message.find("#获取服务器公网IP") != message.npos)
 	{
-		message = this->PCStatus->getPublicIP4();
+		message = this->PCStatus->getPublicIP();
 	}
 	// 若message被修改，判断为走内置消息
 	return str != message ? true : false;
@@ -887,6 +942,21 @@ void Message::switchModel(std::string &message, uint64_t user_id)
 	}
 
 	// 寻找相同的模型名称
+	std::pair<std::string, std::vector<std::string>> newModel;
+	for (auto &entry : this->chatModels)
+	{
+		if (entry.first.find(modelName) != entry.first.end())
+		{
+			newModel.first = modelName;
+			newModel.second.push_back(entry.second[0]);
+			newModel.second.push_back(entry.second[1]);
+			newModel.second.push_back(entry.second[2]);
+			this->user_messages->find(user_id)->second.user_models = newModel;
+			message = "设置成功，当前模型为:" + this->user_messages->find(user_id)->second.user_models.first;
+			return;
+		}
+	}
+	/*
 	for (auto GPTModel = this->chatModels.begin(); GPTModel != this->chatModels.end(); GPTModel++)
 	{
 		if (GPTModel->first == modelName)
@@ -896,6 +966,7 @@ void Message::switchModel(std::string &message, uint64_t user_id)
 			return;
 		}
 	}
+	*/
 	message = "系统提示：不存在的模型!";
 }
 
@@ -1024,6 +1095,7 @@ bool Message::provideImageRecognition(const uint64_t user_id, std::string &messa
 	{
 		conversation = "Please analyze this picture in all aspects and answer it in Chinese";
 	}
+	conversation = JParsingClass.toJson(conversation);
 
 	// 初始化
 	CURL *curl_handle = curl_easy_init();
@@ -1168,10 +1240,14 @@ bool Message::provideImageCreation(const uint64_t user_id, std::string &text)
 								   CManager.configVariable("TEXTTRANSLATE_MODEL_API_KEY"));
 	LOG_INFO("文本翻译完成。");
 	prompt = JParsingClass.toJson(prompt);
-	std::pair<std::string, std::string> p;
+	std::pair<std::string, std::vector<std::string>> p;
 	p.first = CManager.configVariable("DRAW_MODEL");
-	p.second = CManager.configVariable("DRAW_MODEL_APISTANDARD");
-	Dock::RequestGPT(prompt, p, &this->user_messages->find(user_id)->second);
+	p.second.push_back(CManager.configVariable("DRAW_MODEL_API_KEY"));
+	p.second.push_back(CManager.configVariable("DRAW_MODEL_ENDPOINT"));
+	p.second.push_back(CManager.configVariable("DRAW_MODEL_APISTANDARD"));
+	auto result = this->user_messages->find(user_id)->second; // 值拷贝
+	result.user_models = p;
+	Dock::RequestGPT(prompt, &result);
 
 	if (prompt.size() < 100)
 	{

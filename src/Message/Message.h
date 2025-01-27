@@ -17,6 +17,7 @@
 #include <cstdio>
 */
 #include <random>
+#include <unordered_set>
 #include "../TimingTast/TimingTast.h"
 #include "../Database/Database.h"
 // #include "../JsonParse/JsonParse.h"
@@ -26,6 +27,7 @@
 #include "../ModelApiCaller/Realesrgan/Realesrgan.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../ModelApiCaller/Voice/Voice.h"
+#include "../submodules/CloudMusicID/CloudMusicID.h"
 
 // using namespace std;
 
@@ -263,14 +265,14 @@ private:
 	std::string bot_message_format;
 	std::string system_message_format;
 	short default_message_line;
-	bool accessibility_chat;													 // true为开启
-	bool global_Voice;															 // true为开启
-	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList; // 轻量型人格
-	std::map<uint64_t, Person> *user_messages;									 // key = QQ,second = 用户信息
-	std::mutex mutex_message;													 // message类的锁
-	ComputerStatus *PCStatus;													 // 监控计算机状态
-	std::vector<std::pair<std::string, std::string>> chatModels;				 // 存储模型名称   first存储模型名称，second存储模型厂商
-	Voice *voice;																 // 语音识别模块
+	bool accessibility_chat;																	  // true为开启
+	bool global_Voice;																			  // true为开启
+	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList;				  // 轻量型人格
+	std::map<uint64_t, Person> *user_messages;													  // key = QQ,second = 用户信息
+	std::mutex mutex_message;																	  // message类的锁
+	ComputerStatus *PCStatus;																	  // 监控计算机状态
+	std::vector<std::pair<std::unordered_set<std::string>, std::vector<std::string>>> chatModels; // 存储模型   first存储该端点的模型名称，second存储该模型的api、端点、API标准
+	Voice *voice;																				  // 语音识别模块
 };
 
 #endif
