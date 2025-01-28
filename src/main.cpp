@@ -67,9 +67,9 @@ void pollingThread()
 			p.temperature = CManager.configVariable("temperature");
 			p.top_p = CManager.configVariable("top_p");
 			p.user_models.first = CManager.configVariable("DEFAULT_MODEL");
-			p.user_models.second[0] = CManager.configVariable("DEFAULT_MODEL_API_KEY");
-			p.user_models.second[1] = CManager.configVariable("DEFAULT_MODEL_ENDPOINT");
-			p.user_models.second[2] = CManager.configVariable("DEFAULT_MODEL_APISTANDARD");
+			p.user_models.second.push_back(CManager.configVariable("DEFAULT_MODEL_API_KEY"));
+			p.user_models.second.push_back(CManager.configVariable("DEFAULT_MODEL_ENDPOINT"));
+			p.user_models.second.push_back(CManager.configVariable("DEFAULT_MODEL_APISTANDARD"));
 
 			Dock::RequestGPT(JsonFormatData, &p);
 			if (JsonFormatData.size() > 100)
