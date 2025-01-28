@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 <p align="center">
   <a >
     <img src="https://github.com/Aimang2002/mySource/blob/main/picture/anime/output.png?raw=true" width="200" height="200" alt="go-cqhttp">
