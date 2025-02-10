@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 cmake_minimum_required(VERSION 3.11)
 project("Qbot2.3.3")
 
@@ -67,7 +66,6 @@ else()
     find_package(CURL REQUIRED)
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE CURL::libcurl Boost::system)
 endif()
-=======
 cmake_minimum_required(VERSION 3.11)
 project("Qbot2.3.3")
 
@@ -136,4 +134,3 @@ else()
     find_package(CURL REQUIRED)
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE CURL::libcurl Boost::system)
 endif()
->>>>>>> 9a4f959adef287664fb86df137346c2d541761c6
