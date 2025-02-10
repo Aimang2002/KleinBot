@@ -55,7 +55,7 @@ bool OpenAIStandard::send_to_chat(std::string &data, std::string models, std::st
     LOG_INFO("使用模型:" + models);
 #endif
 
-    // api和端点纠正
+    // api&endpoint纠正
     endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
     api_key = OpenAIStandard::filterNonNormalChars(api_key);
 
@@ -276,6 +276,8 @@ bool OpenAIStandard::isMessageComplete(std::string &message)
         return false;
     else if (isKeyError(message))
         return false;
+    else if (message.size() < 100)
+        return false;
     // ...这里设置其他错误判断
 
     return true;
@@ -294,6 +296,7 @@ bool OpenAIStandard::isTimeOut(std::string &message)
     {
         if (message.find(str) != message.npos)
         {
+            LOG_ERROR(message);
             message = "系统提示：时间超时,请重新发送...";
 #ifdef DEBUG
             std::cout << "时间超时..." << std::endl;
@@ -309,6 +312,7 @@ bool OpenAIStandard::isKeyError(std::string &message)
 {
     if (message.find("无效的令牌") != message.npos)
     {
+        LOG_ERROR(message);
         message = "系统提示：Key 有误！";
 #ifdef DEBUG
         LOG_ERROR("Key有误！");
@@ -317,6 +321,7 @@ bool OpenAIStandard::isKeyError(std::string &message)
     }
     else if (message.find("该令牌额度已用尽") != message.npos)
     {
+        LOG_ERROR(message);
         message = "系统提示：Key额度用完！请联系管理员...";
 #ifdef DEBUG
         LOG_ERROR("Key额度已用完！");

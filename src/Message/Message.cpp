@@ -17,7 +17,7 @@ Message::Message()
 	this->user_messages = new std::map<uint64_t, Person>;
 	this->accessibility_chat = CManager.configVariable("GLOBAL_VOICE") == "true" ? true : false;
 	this->global_Voice = CManager.configVariable("ACCESSIBLITY_CHAT") == "true" ? true : false;
-	this->system_message_format = R"({"role": "system", "content": ")";
+	this->system_message_format = R"({"role": "user", "content": ")"; // system
 	this->bot_message_format = R"({"role": "assistant", "content": ")";
 	this->users_message_format = R"({"role": "user", "content": ")";
 	this->default_personality = "You are my assistant, your name is " + CManager.configVariable("QBOT_NAME") + "\"},";
@@ -94,20 +94,20 @@ Message::Message()
 	}
 
 	/*
-		for (const auto &pair : chatModels)
+	for (const auto &pair : chatModels)
+	{
+		std::cout << "Model Names: ";
+		for (const auto &name : pair.first)
 		{
-			std::cout << "Model Names: ";
-			for (const auto &name : pair.first)
-			{
-				std::cout << name << " ";
-			}
-			std::cout << "\nOther Info: ";
-			for (const auto &info : pair.second)
-			{
-				std::cout << info << " ";
-			}
-			std::cout << "\n\n";
+			std::cout << name << " ";
 		}
+		std::cout << "\nOther Info: ";
+		for (const auto &info : pair.second)
+		{
+			std::cout << info << " ";
+		}
+		std::cout << "\n\n";
+	}
 	*/
 
 	/*
@@ -172,8 +172,8 @@ bool Message::addUsers(uint64_t user_id)
 		// 添加默认数据
 		std::vector<std::pair<std::string, time_t>> userDefault;
 		std::pair<std::string, time_t> p;
-		p.first = this->system_message_format + this->default_personality; // 设置system信息
-		p.second = time(nullptr);										   // 获取当前时间
+		p.first = this->users_message_format + this->default_personality;
+		p.second = time(nullptr); // 获取当前时间
 		userDefault.push_back(p);
 
 		p.first = this->bot_message_format + "OK!I will use Chinses answer\"},"; // 设置assistant信息
@@ -320,10 +320,10 @@ std::string Message::handleMessage(JsonData &data)
 			{
 				this->addUsers(data.private_id);
 			}
-
-			user->second.user_chatHistory[0].first = (this->system_message_format + JParsingClass.toJson(data.message) + "\"},");
+			data.message = data.message.substr(data.message.find("#话题") + 7); // 截断
+			user->second.user_chatHistory[0].first = (this->users_message_format + JParsingClass.toJson(data.message) + "\"},");
 			user->second.user_chatHistory[0].second = time(nullptr);
-			user->second.user_chatHistory[1].first = (this->system_message_format + "OK!I will use Chinses answer \"},");
+			user->second.user_chatHistory[1].first = (this->bot_message_format + "OK!I will use Chinses answer \"},");
 			user->second.user_chatHistory[1].second = time(nullptr);
 
 			data.message = "好的，接下来我会围绕此话题进行对话";
@@ -376,6 +376,22 @@ std::string Message::handleMessage(JsonData &data)
 		{
 			data.type = "CQ";
 			this->SDImageCreation(data.message);
+		}
+		else if (data.message.compare("#模型列表") == 0)
+		{
+			data.message = "当前支持如下模型：\n";
+			if (chatModels.size() < 1)
+			{
+				data.message = "未配置模型";
+			}
+			// 遍历模型
+			for (const auto &pair : chatModels)
+			{
+				for (const auto &name : pair.first)
+				{
+					data.message.append("\n" + name + "\n");
+				}
+			}
 		}
 		else
 		{
@@ -480,7 +496,7 @@ void Message::characterMessage(JsonData &data)
 	// 获取用户当前使用的模型
 	// auto models = this->user_messages->find(data.private_id)->second.user_models;
 
-	// 是否开启上下文  	当上下文模式为开启状态 || 访问者是管理员时，启用上下文模式
+	// 是否开启上下文  	当上下文模式为开启状态 || 访问者是管理员时，启用上下文
 	if (this->accessibility_chat || data.private_id == std::stoll(CManager.configVariable("MANAGER_QQ")))
 	{
 		int contextMax = 0;
@@ -498,22 +514,24 @@ void Message::characterMessage(JsonData &data)
 		// 判断消息存活时间
 		if (user_vector.back().second + std::stoll(CManager.configVariable("MESSAGE_SURVIVAL_TIME")) < time(nullptr))
 		{
-			user_vector.erase(user_vector.begin() + 1, user_vector.end());
+			user_vector.erase(user_vector.begin() + 2, user_vector.end());
 			LOG_WARNING("该用户的消息存活时间大于指定时间，已清空...");
 		}
 		else // 判断消息是否达到最大token限度
 		{
 			short c_size = 0; // 这里存储的是占用的字节数，而非token数
 			// 这部分可以优化，现在为了进度先暂时搁置
-			c_size = user_vector.begin()->first.size() + (user_vector.begin() + 1)->first.size(); // 提前统计首部长度
-			for (auto it = user_vector.end() - 1; it > user_vector.begin() + 1; it--)
+			c_size = user_vector.begin()->first.size() + (user_vector.begin() + 1)->first.size(); // 统计首部长度
+			// for (auto it = user_vector.end() - 1; it > user_vector.begin() + 1; it--)
+			for (auto it = user_vector.begin() + this->default_message_line; it != user_vector.end(); it++)
 			{
 				c_size += it->first.size();
 				// 删除早期聊天记录
 				if ((c_size / 3) >= contextMax - 512) //  预留512 token，保证判断正常
 				{
-					std::cout << "Chat message delete over!" << std::endl;
+					// 删除的范围
 					user_vector.erase(user_vector.begin() + this->default_message_line, it + 2);
+					std::cout << "Chat message delete over!" << std::endl;
 					std::lock_guard<std::mutex> lock(mutex_message);
 					this->user_messages->find(data.private_id)->second.user_chatHistory = user_vector;
 					break;
@@ -526,6 +544,7 @@ void Message::characterMessage(JsonData &data)
 		user_vector.push_back(make_pair(format, time(nullptr)));
 
 		data.message = "";
+		// 拼接上下文
 		for (std::vector<std::pair<std::string, time_t>>::const_iterator it = user_vector.begin(); it != user_vector.end(); it++)
 		{
 			data.message += "\t" + it->first + '\n';
@@ -533,8 +552,8 @@ void Message::characterMessage(JsonData &data)
 		data.message.insert(0, "[\n");
 		data.message.insert(data.message.size(), "]");
 
-		// 将内容发送至对接的大预言模型
-		std::cout << "send to Model..." << std::endl;
+		// 将内容发送至模型
+		std::cout << "Send to model..." << std::endl;
 		Dock::RequestGPT(data.message, &this->user_messages->find(data.private_id)->second);
 
 		// 消息完整性验证
@@ -589,7 +608,10 @@ void Message::characterMessage(JsonData &data)
 		else
 		{
 			LOG_ERROR("小于100字节的消息：" + data.message);
-			data.message = "系统提示：未收到正确的回答，请重写发送问题...";
+			if (data.message.find("系统提示") == std::string::npos)
+			{
+				data.message = "系统提示：未收到正确的回答，请重写发送问题...";
+			}
 		}
 	}
 	else
