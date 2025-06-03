@@ -22,6 +22,7 @@ public:
 
 private:
     void readConfig(const std::string configPath);
+    void validDetection();
 
 private:
     std::unordered_map<std::string, std::string> *configuation;

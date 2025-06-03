@@ -2,73 +2,42 @@
 #define LOG_H
 
 #include <iostream>
-#include <string>
-/*
-namespace LOGNAMESPACE
+#include <cstring>
+#include <sstream>
+#include <fstream>
+#include <queue>
+#include <mutex>
+
+class Log
 {
-    bool isUtf8Start(char byte)
-    {
-        return (byte & 0xC0) != 0x80;
-    }
+public:
+    static void info(std::string message);
+    static void debug(std::string message);
+    static void warning(std::string message);
+    static void error(std::string message);
+    static void fatal(std::string message);
+    static std::string getNowTime(std::string ch = "h", std::string split = ":");
 
-    std::string utf8substr(const std::string &str, size_t start, size_t length)
-    {
-        size_t byteStart = 0;
-        size_t charCount = 0;
+public:
+    static std::string logName;
 
-        // 找到开始位置
-        for (size_t i = 0; i < str.size(); ++i)
-        {
-            if (charCount == start)
-            {
-                byteStart = i;
-                break;
-            }
-            if (isUtf8Start(str[i]))
-            {
-                ++charCount;
-            }
-        }
+private:
+    static std::string messageLengthCheck(std::string message);
+    static void record(const std::string message);
 
-        // 找到结束位置
-        size_t byteEnd = byteStart;
-        for (size_t i = byteStart; i < str.size(); ++i)
-        {
-            if (charCount == start + length)
-            {
-                byteEnd = i;
-                break;
-            }
-            if (isUtf8Start(str[i]))
-            {
-                ++charCount;
-            }
-        }
+private:
+    static int maxLength;
+    static std::mutex __mutex; // 静态锁，对日志写入进行控制
+};
 
-        return str.substr(byteStart, byteEnd - byteStart);
-    }
-}
+#define LOG_DEBUG(message) Log::debug(message)
 
-*/
+#define LOG_INFO(message) Log::info(message)
 
-#define LOG_DEBUG(message)        \
-    std::cout << "\033[38;5;208m" \
-              << "DEBUG: " << message << "\033[0m" << std::endl
+#define LOG_WARNING(message) Log::warning(message)
 
-#define LOG_INFO(message)   \
-    std::cout << "\033[32m" \
-              << "INFO: " << message << "\033[0m" << std::endl
+#define LOG_ERROR(message) Log::error(message)
 
-#define LOG_WARNING(message) \
-    std::cout << "\033[33m"  \
-              << "WARNING: " << message << "\033[0m" << std::endl
+#define LOG_FATAL(message) Log::fatal(message)
 
-#define LOG_ERROR(message)  \
-    std::cerr << "\033[31m" \
-              << "ERROR: " << message << "\033[0m" << std::endl
-
-#define LOG_FATAL(message)    \
-    std::cerr << "\033[1;31m" \
-              << "FATAL: " << message << "\033[0m" << std::endl
-
-#endif
+#endif // LOG_H

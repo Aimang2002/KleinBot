@@ -1,2 +1,4 @@
-#include <iostream>
-using namespace std;
+#ifndef GOOGLESTANDAR_H
+#define GOOGLESTANDAR_H
+
+#endif // GOOGLESTANDAR_H

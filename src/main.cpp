@@ -12,7 +12,7 @@
 #include "src/Network/MyWebSocket.h"
 #include "TimingTast/TimingTast.h"
 
-#define __KLEIN_VERSION__ "v2.3.3"
+#define __KLEIN_VERSION__ "v2.3.4"
 
 // using namespace std;
 
@@ -225,6 +225,11 @@ void init()
 #if defined(__WIN32) || defined(__WIN64)
 	std::system("chcp 65001");
 #endif
+	std::ios::sync_with_stdio(false);
+	std::cin.tie(0);
+
+	// 指定日志名称
+	Log::logName = Log::getNowTime("y", "-") + ".log";
 
 	// LOGO
 	std::string Klein_logo =

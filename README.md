@@ -18,11 +18,11 @@
 
 # 项目介绍
 
-克莱茵QQ机器人(下面统称<font color="green" >Klein</font>)是基于C/C++开发的QQ机器人，用于调用各大厂商的大语言模型API和部分优秀的开源项目(详细见下)。
+克莱茵QQ机器人(下面统称<font color="green" >Klein</font>)是基于C/C++开发的QQ机器人，用于调用各大厂商的LLM(大语言模型)API和部分优秀的开源项目(详细见下)。
 
 
 
-> 最新版本：v2.3.3
+> 最新版本：v2.3.4
 >
 
 
@@ -47,6 +47,52 @@
 [rapidJSON](https://github.com/Tencent/rapidjson)
 
 > rapidJSON源码已经嵌入到项目中
+
+
+
+
+
+
+
+# 编译
+
+> 提示：<font color="orange">该步骤用于对其他开发者提供介绍，如果没有定制化需求，可跳过该步骤。</font>
+
+
+
+## 1.Windows平台
+
+~~~bash
+git clone https://github.com/Aimang2002/KleinBot.git
+cd KLineBot
+mkdir build && cd build
+cmake .. -G "MinGW Makefiles"
+make
+~~~
+
+> 在Windows平台下，我们建议使用minGW进行编译，CMakeLists文件中链接的boost库和curl库改成自己的位置。
+>
+> Windows平台下需要准备证书，点击[此处](https://curl.se/docs/caextract.html)下载证书，并存放到可执行文件的目录下。
+
+
+
+## 2.Linux平台
+
+~~~bash
+git clone https://github.com/Aimang2002/KleinBot.git
+cd KLineBot
+mkdir build && cd build
+cmake ..
+make
+~~~
+
+
+
+## 3.资源
+
++ 资源文件可在[releases](https://github.com/Aimang2002/KleinBot/releases)下载。
+
+
 
 
 
@@ -102,8 +148,6 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 
 
 
-
-
 ## 1.公有命令
 
 |     命令      |                           命令描述                           | 实例                                                         |
@@ -118,7 +162,7 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 |   #设置定时   |           可设置提醒，到点时Klein将发送信息给你。            | “#设置定时:2024年8月2日18:10/提醒的内容"(设置的时间必须大于当前时间） |
 |   #切换模型   |             根据载入的模型名称，切换各大语言模型             | #切换模型:gpt-3.5-turbo                                      |
 | #查询当前模型 |                 查询当前Kline正在调用的模型                  | #查询当前模型                                                |
-|   #开启语音   | 该功能将文字转语音，开启语音回复(<font color="orange">需要开源项目GPT-SoVIST</font>) | #开启语音                                                    |
+|   #开启语音   | 该功能将文字转语音，开启语音回复(<font color="orange">需要启动开源项目GPT-SoVIST</font>) | #开启语音                                                    |
 |     #搜歌     | 将歌曲名追加到后面，机器人会返回搜索结果（目前只支持网易云音乐） | #搜歌：rubia                                                 |
 |   #模型列表   |               将列举出当前Bot支持的大语言模型                | #模型列表                                                    |
 
@@ -165,11 +209,13 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 
 # 适配的开源项目
 
-开源项目的使用方式为API调用，适配的项目有：
+开源项目的使用方式为API调用和服务器内部运行两种方式，适配的项目有：
 
 [Stable Diffusion ]()
 
 [GPT-SoVIST ](https://github.com/RVC-Boss/GPT-SoVITS)
+
+[Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
 
 
 
@@ -263,6 +309,7 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
                 "api_endpoint": "https://api.xxx.com/v1/chat/completions",
                 "APIStandard": "OpenAI"
             }
+          ... 在此处添加其他模型，方式请遵循上面的格式
         ]
     }
     ~~~

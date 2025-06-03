@@ -256,6 +256,12 @@ private:
 	 * @param message 	 提示
 	 */
 	void SDImageCreation(std::string &message);
+
+	/**
+	 * @brief 刷新模型配置文件
+	 *
+	 */
+	void readModelName();
 	// 在下面添加新的函数用于拓展其他内容...
 
 private:
