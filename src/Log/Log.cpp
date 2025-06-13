@@ -68,11 +68,11 @@ std::string Log::getNowTime(std::string ch, std::string split)
 
     if (ch == "y")
     {
-        sstring << (1900 + t->tm_year) << split << t->tm_mon << split << t->tm_mday;
+        sstring << (1900 + t->tm_year) << split << t->tm_mon + 1 << split << t->tm_mday;
     }
     else if (ch == "y+h")
     {
-        sstring << (1900 + t->tm_year) << split << t->tm_mon << split << t->tm_mday << " "
+        sstring << (1900 + t->tm_year) << split << t->tm_mon + 1 << split << t->tm_mday << " "
                 << t->tm_hour << split << t->tm_min << split << t->tm_sec;
     }
     else if (ch == "h")
