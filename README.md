@@ -23,7 +23,7 @@
 
 
 
-> 最新版本：v2.3.4
+> 最新版本：v2.4.0 开发中
 
 
 
@@ -44,9 +44,9 @@
 
 [Boost](https://github.com/boostorg/boost)
 
-[rapidJSON](https://github.com/Tencent/rapidjson)
+[nlohmann/json](https://github.com/nlohmann/json)
 
-> rapidJSON源码已经嵌入到项目中
+> nlohmann/json源码已经嵌入到项目中
 
 
 
