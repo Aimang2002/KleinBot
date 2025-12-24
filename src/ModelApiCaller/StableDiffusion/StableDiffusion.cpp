@@ -3,19 +3,18 @@
 #include <curl/curl.h>
 #include <iostream>
 
-std::string StableDiffusion::connectStableDiffusion(std::string prompt)
+std::string StableDiffusion::connectStableDiffusion(const std::string prompt)
 {
     // prompt = R"("lou tianyi")";
     // v2.2.4版本正向提示词硬编码写入，v2.3.0版本修改为软编码
     std::string revised_prompt = "(((best quality))),(((ultra detailed))),(((masterpiece))),illustration,";
-
-    prompt = JsonParse::getInstance().toJson(prompt);
+    std::string payload = JsonParse::getInstance().toJson(prompt);
 
     // 构造请求的内容
-    std::string HTTPPkage;
-    HTTPPkage = R"({"prompt": ")";
-    HTTPPkage += revised_prompt + prompt; // 填入修订词+提示
-    HTTPPkage += R"(", "steps": 35})";    // 生成图像的步数
+    nlohmann::json HTTPPkage;
+    HTTPPkage = {
+        {"prompt", revised_prompt + payload},
+        {"steps", 35}};
 
     // 获取端点
     std::string endpint = ConfigManager::getInstance().configVariable("STABLEDIFFUSION_ENDPOINT");
@@ -34,7 +33,7 @@ std::string StableDiffusion::connectStableDiffusion(std::string prompt)
 
         // 配置HTTP POST
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, HTTPPkage.c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, HTTPPkage.dump().c_str());
 
         // 设置回调函数以便抓取服务器的响应
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
@@ -51,30 +50,27 @@ std::string StableDiffusion::connectStableDiffusion(std::string prompt)
         if (res != CURLE_OK)
         {
             LOG_ERROR(std::string("curl_easy_perform() failed: ") + curl_easy_strerror(res));
-            return std::string("系统提示：无法连接至StableDiffusion，请联系管理员...");
+            return {};
         }
         else
         {
-            // 硬解析，不采用rapidjson，对未来拓展有阻碍
-            int begin = readBuffer.find("[") + 2;
-            std::string base64_data = readBuffer.substr(begin, readBuffer.find("]") - begin - 1);
+            std::string base64_data;
+            try
+            {
+                nlohmann::json doc = nlohmann::json::parse(readBuffer);
+                if (!doc.is_object() || doc.contains("images") == false || doc["images"].is_array() == false || doc["images"].size() == 0)
+                {
+                    LOG_ERROR("Invalid JSON response");
+                    return {};
+                }
+                base64_data = doc["images"][0].get<std::string>();
+            }
+            catch (const std::exception &e)
+            {
+                LOG_ERROR("无法有效解释Json，原内容：" + readBuffer + ",错误信息：" + std::string(e.what()));
+                return {};
+            }
             return base64_data;
-
-            /* 使用RapidJSON，但解析失败
-            std::string key = "images"; // 所需查找的key
-            std::string value;
-
-            bool result = JParsingClass.findKeyAndValue(readBuffer.c_str(), key, value);
-            if (result)
-            {
-                return value;
-            }
-            else
-            {
-                LOG_ERROR("First image data not found in the images list");
-                return std::string("系统提示：StableDiffusion返回的内容");
-            }
-            */
         }
 
         // 清理

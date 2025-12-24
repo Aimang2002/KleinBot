@@ -1,6 +1,6 @@
 #include "OpenAIStandard.h"
 #include "../Log/Log.h"
-#include "../JsonParse/JsonParse.h"
+#include "../../Library/nlohmann/json.hpp"
 #include <chrono>
 #include <thread>
 #include <vector>
@@ -8,7 +8,7 @@
 #include <string>
 
 // 文本翻译
-bool OpenAIStandard::text_translate(std::string &text, const std::string model, std::string language, std::string endpoint, std::string api_key)
+bool OpenAIStandard::text_translate(const std::string endpoint, const std::string api_key, std::string &text, const std::string model, std::string language)
 {
     LOG_INFO("使用了文本翻译");
     // 调整格式
@@ -52,7 +52,7 @@ bool OpenAIStandard::text_translate(std::string &text, const std::string model, 
     return true;
 }
 
-OpenAIChatResponse OpenAIStandard::send_to_chat(const nlohmann::json &body, std::string endpoint, std::string api_key)
+OpenAIChatResponse OpenAIStandard::send_to_chat(const std::string endpoint, std::string api_key, const nlohmann::json &body)
 {
     /*
      * data参数里必须构建好Json数据以及prompt，本函数不提供Json数据封装
@@ -61,10 +61,6 @@ OpenAIChatResponse OpenAIStandard::send_to_chat(const nlohmann::json &body, std:
 #ifdef DEBUG
     LOG_INFO("使用模型:" + body.value("model", ""));
 #endif
-
-    // api&endpoint纠正
-    endpoint = this->filterNonNormalChars(endpoint);
-    api_key = this->filterNonNormalChars(api_key);
 
     // 初始化curl
     CURL *curl;
@@ -75,26 +71,27 @@ OpenAIChatResponse OpenAIStandard::send_to_chat(const nlohmann::json &body, std:
     {
         struct curl_slist *headers = NULL;
 
-        std::string header_auth = "Authorization: Bearer " + api_key;
-        //+api_key;
+        std::string header_auth = "Authorization: Bearer " + this->filterNonNormalChars(api_key);
         headers = curl_slist_append(headers, "Content-Type: application/json");
         headers = curl_slist_append(headers, header_auth.c_str());
 
-        LOG_DEBUG("发送内容：" + body);
-        // std::cout << "发送内容：" << body << std::endl;
+        std::string message = body.dump();
+        LOG_DEBUG("发送内容：" + message);
         std::string response;
         VerifyCertificate(curl);
-        curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str()); // 添加端点
+        curl_easy_setopt(curl, CURLOPT_URL, this->filterNonNormalChars(endpoint).c_str());
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.dump().c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, message.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_chat);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
         // 执行HTTP请求
         unsigned short request = 5;
+        long http_code = 0;
         while (request--)
         {
             res = curl_easy_perform(curl);
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
             if (res != CURLE_OK)
             {
                 fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
@@ -103,24 +100,27 @@ OpenAIChatResponse OpenAIStandard::send_to_chat(const nlohmann::json &body, std:
             }
             break;
         }
-        if (request < 1)
+
+#ifdef DEBUG
+        std::cout << "OpenAI 原始消息：" << response << std::endl;
+#endif
+        // 清理资源提前：防止多路径未清理
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+
+        if (http_code >= 400)
         {
-            OpenAIChatResponse tmp;
+            OpenAIChatResponse tmp = this->chat_json_parse(response);
+            tmp.code = http_code;
             tmp.choices_message_content = "系统提示：无法将问题发送给OpenAI，请稍后再重试或联系管理员...";
             return tmp;
         }
 
-        // 清理资源
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-#ifdef DEBUG
-        std::cout << "OpenAI 原始消息：" << response << std::endl;
-#endif
-
         // 响应格式化
         OpenAIChatResponse responseFormat = this->chat_json_parse(response);
+        responseFormat.code = http_code;
         // 无误返回
-        return {};
+        return responseFormat;
     }
 
     LOG_ERROR("无法创建http请求...");
@@ -128,16 +128,16 @@ OpenAIChatResponse OpenAIStandard::send_to_chat(const nlohmann::json &body, std:
 }
 
 // 调用视觉模型
-OpenAIVisionResponse OpenAIStandard::send_to_vision(const std::string &data, const std::string &base64, std::string model, std::string endpoint, std::string api_key)
+OpenAIVisionResponse OpenAIStandard::send_to_vision(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt, const std::string &base64)
 {
     // api和端点纠正
-    endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
-    api_key = OpenAIStandard::filterNonNormalChars(api_key);
-    endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
-    api_key = OpenAIStandard::filterNonNormalChars(api_key);
+    // endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
+    // api_key = OpenAIStandard::filterNonNormalChars(api_key);
+    // endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
+    // api_key = OpenAIStandard::filterNonNormalChars(api_key);
 
     nlohmann::json content = nlohmann::json::array();
-    content.push_back({{"type", "text"}, {"text", data}});
+    content.push_back({{"type", "text"}, {"text", prompt}});
     content.push_back({{"type", "image_url"},
                        {"image_url", {{"url", "data:image/jpeg;base64," + base64}}}});
 
@@ -203,18 +203,13 @@ OpenAIVisionResponse OpenAIStandard::send_to_vision(const std::string &data, con
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
 #ifdef DEBUG
-        std::cout << "OpenAI 返回的原始消息：" << data << std::endl;
+        std::cout << "OpenAI 返回的原始消息：" << Data.choice_message_content << std::endl;
 #endif
-        // 判断数据合格性
-        // if (!isMessageComplete(data))
-        // {
-        //     return {};
-        // }
         // 响应数据格式化
-        OpenAIVisionResponse responseFormat = this->vision_json_parse(data);
-        // 无误返回
-        std::cout << "无误返回:" << data << std::endl;
-        return responseFormat;
+        nlohmann::json doc = nlohmann::json::parse(Data.choice_message_content);
+        std::cout << "无误返回:" << doc.dump() << std::endl;
+        Data.choice_message_content = doc.dump().c_str();
+        return Data;
     }
 
     OpenAIVisionResponse tmp;
@@ -223,11 +218,11 @@ OpenAIVisionResponse OpenAIStandard::send_to_vision(const std::string &data, con
 }
 
 // 调用绘图模型
-OpenAIImageResponse OpenAIStandard::send_to_draw(const std::string &prompt, std::string model, std::string endpoint, std::string api_key)
+OpenAIImageResponse OpenAIStandard::send_to_draw(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt)
 {
     // api和端点纠正
-    endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
-    api_key = OpenAIStandard::filterNonNormalChars(api_key);
+    // endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
+    // api_key = OpenAIStandard::filterNonNormalChars(api_key);
 
     CURL *curl;
     CURLcode res;
@@ -296,6 +291,15 @@ OpenAIChatResponse OpenAIStandard::chat_json_parse(const std::string &response)
     {
         nlohmann::json json_data = nlohmann::json::parse(response);
         OpenAIChatResponse responseFormat;
+
+        // 获取错误信息
+        if (json_data.contains("error") && json_data.is_object())
+        {
+            auto error = json_data["error"];
+            responseFormat.error_message = error.value("message", "");
+            responseFormat.error_type = error.value("type", "");
+        }
+
         responseFormat.id = json_data.value("id", "");
         responseFormat.object = json_data.value("object", "");
         responseFormat.created = json_data.value("created", 0);
@@ -378,6 +382,9 @@ OpenAIVisionResponse OpenAIStandard::vision_json_parse(const std::string &respon
         if (doc["choice"].is_array() && !doc["choice"].empty() && doc["choice"][0].is_object())
         {
             nlohmann::json choice = doc["choice"][0];
+
+            Data.finish_reason = choice.value("finish_reason", "stop");
+
             if (choice["message"].is_object())
             {
                 Data.choice_message_content = choice["message"].value("content", "");
@@ -402,6 +409,7 @@ OpenAIVisionResponse OpenAIStandard::vision_json_parse(const std::string &respon
         LOG_ERROR("返回的内容不是有效的Json对象。详细：" + std::string(e.what()));
         return {};
     }
+    return Data;
 }
 
 // 回调函数
@@ -420,49 +428,6 @@ size_t OpenAIStandard::write_callback_chat(char *ptr, size_t size, size_t nmemb,
     }
     return newLength;
 }
-
-// 消息完整性判断
-// bool OpenAIStandard::isMessageComplete(std::string &message)
-// {
-//     // 若出现以下问题，则消息不完整
-//     if (isTimeOut(message) || isKeyError(message))
-//     {
-//         return false;
-//     }
-//     else if (message.size() < 100)
-//     {
-//         return false;
-//     }
-
-//     // ...这里设置其他错误判断
-
-//     return true;
-// }
-
-// 超时判断
-// bool OpenAIStandard::isTimeOut(std::string &message)
-// {
-//     // 所有来自OpenAI的错误代码都将注册在此处
-//     std::vector<std::string> errorCode;
-//     errorCode.push_back("<head><title>504 Gateway Time-out</title></head>");
-//     errorCode.push_back("error code: 524");
-//     // 此处push_back其他错误代码...
-
-//     for (const auto str : errorCode)
-//     {
-//         if (message.find(str) != message.npos)
-//         {
-//             LOG_ERROR(message);
-//             message = "系统提示：时间超时,请重新发送...";
-// #ifdef DEBUG
-//             std::cout << "时间超时..." << std::endl;
-// #endif
-//             return true;
-//         }
-//     }
-//     return false;
-// }
-
 // Key 错误判断
 bool OpenAIStandard::isKeyError(std::string &message)
 {

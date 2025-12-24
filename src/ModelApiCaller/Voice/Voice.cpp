@@ -1,4 +1,6 @@
 #include "Voice.h"
+#include "../../Library/nlohmann/json.hpp"
+#include <filesystem>
 
 Voice::Voice() {}
 
@@ -11,34 +13,25 @@ size_t so_VIST_WriteCallback(void *contents, size_t size, size_t nmemb, void *us
     return totalSize;
 }
 
-int Voice::toAudio(std::string &text)
+std::string Voice::toAudio(const std::string &text)
 {
     LOG_INFO("使用了文本转语音");
     /*
      * 目前文本转语音仅支持中文
      */
 
-    // 检查文本是否合格
-    if (text.size() < 4)
-    {
-        text = "系统提示：未检查到文本...";
-        return -1;
-    }
-
     // 创建语音文件
     auto now = std::chrono::system_clock::now();
     std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
-    std::string filename = std::to_string(timestamp); // 获取时间戳作为文件名
-    filename += ".wav";
-    std::string filePath = ConfigManager::getInstance().configVariable("VITS_FILE_SAVE_PATH") + filename;
+    std::filesystem::path filePath = ConfigManager::getInstance().configVariable("VITS_FILE_SAVE_PATH");
+    filePath /= std::to_string(timestamp) + ".wav";
 
     // 创建文件用来保存音频数据
     std::ofstream audioFile(filePath, std::ios::binary);
     if (!audioFile.is_open())
     {
-        std::cerr << "无法创建输出文件" << std::endl;
-        text = "系统提示：内部错误！";
-        return -1;
+        LOG_ERROR("无法创建输出文件");
+        return "系统提示：无法创建输出文件";
     }
 
     CURL *curl;
@@ -46,14 +39,14 @@ int Voice::toAudio(std::string &text)
 
     // 指定必要内容
     std::string url = ConfigManager::getInstance().configVariable("VITS_API_URL") + ":" + ConfigManager::getInstance().configVariable("VITS_API_PORT") + "/tts"; // "127.0.0.1:9880/tts";
-    std::string postData = "{\n";
-    postData += "\t\"text\":\"" + text + "\",\n";
-    postData += "\t\"text_lang\":\"zh\",\n";
-    postData += "\t\"ref_audio_path\":\"" + ConfigManager::getInstance().configVariable("VITS_REFERVOICE_PATH") + "\",\n";
-    postData += "\t\"prompt_text\":\"" + ConfigManager::getInstance().configVariable("VITS_REFERVOICE_TEXT") + "\",\n";
-    postData += "\t\"prompt_lang\":\"zh\",\n";
-    postData += "\t\"streaming_mode\":false\n"; // 流模式默认关闭（用于实现实时推理跟播放）
-    postData += "}";
+    nlohmann::json doc = {
+        {"text", text},
+        {"text_lang", "zh"},
+        {"ref_audio_path", ConfigManager::getInstance().configVariable("VITS_REFERVOICE_PATH")},
+        {"prompt_text", ConfigManager::getInstance().configVariable("VITS_REFERVOICE_TEXT")},
+        {"prompt_lang", "zh"},
+        {"streaming_mode", false}};
+    std::string postData = doc.dump();
 
     // 初始化CURL
     curl = curl_easy_init();
@@ -77,23 +70,20 @@ int Voice::toAudio(std::string &text)
         // 检查执行结果
         if (res != CURLE_OK)
         {
-            std::cerr << "请求失败: " << curl_easy_strerror(res) << std::endl;
-            text = "系统提示：请求失败:" + std::string(curl_easy_strerror(res));
-            // 释放
             curl_easy_cleanup(curl);
             curl_slist_free_all(headers);
-            return -1;
+            LOG_ERROR("请求失败: " + std::string(curl_easy_strerror(res)));
+            return "系统提示：请求失败。";
         }
         else
         {
             audioFile.close();
             curl_easy_cleanup(curl);
             curl_slist_free_all(headers);
-            text = filePath;
-            return 1;
+            return filePath;
         }
     }
-    return -1;
+    return {};
 }
 
 std::string Voice::dataToBase64(const std::string &input)

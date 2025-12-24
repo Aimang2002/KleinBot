@@ -1,5 +1,6 @@
 #include "../ModelApiCaller/StableDiffusion/StableDiffusion.h"
 #include "../ModelApiCaller/Realesrgan/Realesrgan.h"
+#include "../ModelApiCaller/Dock.hpp"
 #include "../submodules/CloudMusicID/CloudMusicID.h"
 #include "Message.h"
 #include <iomanip>
@@ -19,7 +20,7 @@ Message::Message()
 	this->dock = std::make_unique<Dock>();
 
 	// 内置成员属性初始化
-	this->user_messages = new std::map<uint64_t, Person>;
+	this->user_messages = new std::unordered_map<uint64_t, Person>;
 	this->accessibility_chat = ConfigManager::getInstance().configVariable("GLOBAL_VOICE") == "true" ? true : false;
 	this->global_Voice = ConfigManager::getInstance().configVariable("ACCESSIBLITY_CHAT") == "true" ? true : false;
 	this->system_message_format = R"({"role": "user", "content": ")"; // system
@@ -109,206 +110,194 @@ bool Message::addUsers(uint64_t user_id)
 	return false;
 }
 
-// string Message::handleMessage(uint64_t user_id, string message, string message_type)
-std::string Message::handleMessage(JsonData &data)
+void Message::handleMessage(JsonData &current_data)
 {
 	try
 	{
 		// type类型默认为text，如需要更改需要重新指定
-		data.type = "text";
+		current_data.type = "text";
 
 		// 新建用户
-		if (this->user_messages->find(data.user_id) == this->user_messages->end())
+		if (this->user_messages->find(current_data.user_id) == this->user_messages->end())
 		{
-			this->addUsers(data.user_id);
+			this->addUsers(current_data.user_id);
 		}
 
 		// 判断是否是群消息
-		if (data.message_type == "group")
+		if (current_data.message_type == "group")
 		{
 			// 移除CQ码
-			this->removeGroupCQCode(data.raw_message);
+			this->removeGroupCQCode(current_data.raw_message);
 		}
 
 		// 显示用户输入的问题
-		std::cout << "[" << data.message_type << "]" << data.user_id << ":" << data.raw_message << std::endl;
+		std::cout << "[" << current_data.message_type << "]" << current_data.user_id << ":" << current_data.raw_message << std::endl;
 
 		// 管理员权限判断
-		if (this->permissionVerification(data.user_id))
+		if (this->permissionVerification(current_data.user_id))
 		{
 			// 管理员可操作的命令
-			bool result = this->adminTerminal(data.raw_message, data.user_id);
-			if (result)
+			auto [success, message_] = this->adminTerminal(current_data.raw_message, current_data.user_id);
+			if (success)
 			{
-				return data.raw_message;
+				current_data.raw_message = message_;
 			}
+			// 否则不是管理员的消息
 		}
 
 		// 内置回复判断
-
-		if (data.raw_message.find("#图片超分") != data.raw_message.npos)
+		if (current_data.raw_message.find("#图片超分") != current_data.raw_message.npos)
 		{
-			this->call_fixImageSizeTo4K(data.raw_message);
-			data.type = "CQ";
+			this->call_fixImageSizeTo4K(current_data.raw_message);
+			current_data.type = "CQ";
 		}
-		/*
-		else if (message.find("#精美图片") != message.npos)
+		else if (current_data.raw_message.find("CQ:image") != std::string::npos && !current_data.message_data_url.empty())
 		{
-			questPictureID(message);
-			LOG_DEBUG(message);
+			this->provideImageRecognition(current_data.user_id, current_data.raw_message, current_data.message_data_url);
 		}
-		*/
-		else if (data.raw_message == ConfigManager::getInstance().configVariable("QBOT_NAME"))
+		else if (current_data.raw_message.find("#搜歌:") != std::string::npos || current_data.raw_message.find("#搜歌：") != std::string::npos)
 		{
-			SpeechSound(data.raw_message);
+			current_data.type = "CQ";
+			current_data.raw_message = musicShareMessage(current_data.raw_message, 1);
 		}
-		else if (data.raw_message.find("CQ:image") != std::string::npos &&
-						 data.raw_message.find("file") != std::string::npos &&
-						 data.raw_message.find("url=") != std::string::npos &&
-						 data.raw_message.find("file_size=") != std::string::npos &&
-						 data.raw_message.size() > 200) // 这个判断很蠢，我目前找不到更好的办法
-		{
-			this->provideImageRecognition(data.user_id, data.raw_message, data.type);
-		}
-		else if (data.raw_message.find("#搜歌:") != std::string::npos || data.raw_message.find("#搜歌：") != std::string::npos)
-		{
-			data.type = "CQ";
-			musicShareMessage(data.raw_message, 1);
-		}
-		else if (data.raw_message.compare("#帮助") == 0)
+		else if (current_data.raw_message.compare("#帮助") == 0)
 		{
 			std::ifstream ifs(ConfigManager::getInstance().configVariable("HELP_PATH"));
 			if (!ifs.is_open())
 			{
 				LOG_ERROR("帮助文件打开失败！请检查...");
-				data.raw_message = "正在编辑中 .>_<.";
+				current_data.raw_message = "正在编辑中 .>_<.";
 			}
 			else
 			{
-				data.raw_message.assign((std::istreambuf_iterator<char>(ifs.rdbuf())), std::istreambuf_iterator<char>());
+				current_data.raw_message.assign((std::istreambuf_iterator<char>(ifs.rdbuf())), std::istreambuf_iterator<char>());
 				ifs.close();
 			}
 		}
-		else if (!strcmp(data.raw_message.c_str(), "#人格帮助"))
+		else if (!strcmp(current_data.raw_message.c_str(), "#人格帮助"))
 		{
 			std::ifstream ifs(ConfigManager::getInstance().configVariable("HELP_PERSONALITY_PATH"));
 			if (!ifs.is_open())
 			{
 				LOG_ERROR("file open failed!");
-				data.raw_message = "正在编辑中 .>_<.";
+				current_data.raw_message = "正在编辑中 .>_<.";
 			}
 			else
 			{
-				data.raw_message.assign((std::istreambuf_iterator<char>(ifs.rdbuf())), std::istreambuf_iterator<char>());
+				current_data.raw_message.assign((std::istreambuf_iterator<char>(ifs.rdbuf())), std::istreambuf_iterator<char>());
 				ifs.close();
 			}
 		}
-		else if (data.raw_message.find("#设置人格:") != std::string::npos || data.raw_message.find("#设置人格：") != std::string::npos)
+		else if (current_data.raw_message.find("#设置人格:") != std::string::npos || current_data.raw_message.find("#设置人格：") != std::string::npos)
 		{
-			this->setPersonality(data.raw_message, data.user_id);
+			auto [success, result] = this->setPersonality(current_data.raw_message, current_data.user_id);
 		}
-		else if (data.raw_message.find("#轻量型人格:") != std::string::npos || data.raw_message.find("#轻量型人格：") != std::string::npos)
+		else if (current_data.raw_message.find("#轻量型人格:") != std::string::npos ||
+				 current_data.raw_message.find("#轻量型人格：") != std::string::npos)
 		{
-			this->setPersonality(data.raw_message, data.user_id, 1);
+			auto [success, result] = this->setPersonality(current_data.raw_message, current_data.user_id, 1);
 		}
-		else if (data.raw_message.find("#人格还原") != std::string::npos)
+		else if (current_data.raw_message.find("#人格还原") != std::string::npos)
 		{
-			this->setPersonality(data.raw_message, data.user_id);
+			auto [success, result] = this->setPersonality(current_data.raw_message, current_data.user_id);
 		}
-		else if (data.raw_message.compare("#重置对话") == 0)
+		else if (current_data.raw_message.compare("#重置对话") == 0)
 		{
-			this->resetChat(data.raw_message, data.user_id);
+			current_data.raw_message = this->resetChat(current_data.user_id);
 		}
-		else if (data.raw_message.find("#话题:") != std::string::npos || data.raw_message.find("#话题：") != std::string::npos)
+		else if (current_data.raw_message.find("#话题:") != std::string::npos || current_data.raw_message.find("#话题：") != std::string::npos)
 		{
-			auto user = this->user_messages->find(data.user_id);
+			auto user = this->user_messages->find(current_data.user_id);
 			if (user == this->user_messages->end())
 			{
-				this->addUsers(data.user_id);
+				this->addUsers(current_data.user_id);
 			}
-			data.raw_message = data.raw_message.substr(data.raw_message.find("#话题") + 7); // 截断
-			user->second.user_chatHistory[0].first = (this->users_message_format + JsonParse::getInstance().toJson(data.raw_message) + "\"},");
+			current_data.raw_message = current_data.raw_message.substr(current_data.raw_message.find("#话题") + 7); // 截断
+			user->second.user_chatHistory[0].first = (this->users_message_format + JsonParse::getInstance().toJson(current_data.raw_message) + "\"},");
 			user->second.user_chatHistory[0].second = time(nullptr);
 			user->second.user_chatHistory[1].first = (this->bot_message_format + "OK!I will use Chinses answer \"},");
 			user->second.user_chatHistory[1].second = time(nullptr);
 
-			data.raw_message = "好的，接下来我会围绕此话题进行对话";
+			current_data.raw_message = "好的，接下来我会围绕此话题进行对话";
 			std::lock_guard<std::mutex> lock(mutex_message);
-			this->user_messages->find(data.user_id)->second = user->second;
+			this->user_messages->find(current_data.user_id)->second = user->second;
 		}
-		else if (data.raw_message.compare("#当前气温") == 0)
+		else if (current_data.raw_message.compare("#当前气温") == 0)
 		{
 		}
-		else if (data.raw_message.compare("#设置定时") == 0)
+		else if (current_data.raw_message.compare("#设置定时") == 0)
 		{
-			data.raw_message = TimingTast::getInstance().setFixedRemind(data.raw_message, data.user_id);
+			current_data.raw_message = TimingTast::getInstance().setFixedRemind(current_data.raw_message, current_data.user_id);
 		}
-		else if (data.raw_message.find("#切换模型") != std::string::npos || data.raw_message.find("#模型切换") != std::string::npos)
+		else if (current_data.raw_message.find("#切换模型") != std::string::npos || current_data.raw_message.find("#模型切换") != std::string::npos)
 		{
-			this->switchModel(data.raw_message, data.user_id);
+			current_data.raw_message = this->switchModel(current_data.raw_message, current_data.user_id);
 		}
-		else if (data.raw_message.find("#查询当前模型") != std::string::npos)
+		else if (current_data.raw_message.find("#查询当前模型") != std::string::npos)
 		{
-			data.raw_message = "你当前的模型为：" + this->user_messages->find(data.user_id)->second.user_models.first;
+			current_data.raw_message = "你当前的模型为：" + this->user_messages->find(current_data.user_id)->second.user_models.first;
 		}
-		else if (data.raw_message.find("#开启语音") != std::string::npos)
+		else if (current_data.raw_message.find("#开启语音") != std::string::npos)
 		{
 			if (!this->global_Voice)
 			{
-				data.raw_message = "管理员临时关闭了该功能，可能是在维护...";
+				current_data.raw_message = "管理员临时关闭了该功能，可能是在维护...";
 			}
 			else
 			{
-				this->user_messages->find(data.user_id)->second.isOpenVoiceMode = true;
-				data.raw_message = "已开启！";
+				this->user_messages->find(current_data.user_id)->second.isOpenVoiceMode = true;
+				current_data.raw_message = "已开启！";
 			}
 		}
-		else if (data.raw_message.find("#关闭语音") != std::string::npos)
+		else if (current_data.raw_message.find("#关闭语音") != std::string::npos)
 		{
-			this->user_messages->find(data.user_id)->second.isOpenVoiceMode = false;
-			data.raw_message = "已关闭！";
+			this->user_messages->find(current_data.user_id)->second.isOpenVoiceMode = false;
+			current_data.raw_message = "已关闭！";
 		}
-		else if (data.raw_message.find("#生成图片：") != std::string::npos || data.raw_message.find("#生成图片:") != std::string::npos)
+		else if (current_data.raw_message.find("#生成图片：") != std::string::npos || current_data.raw_message.find("#生成图片:") != std::string::npos)
 		{
-			data.type = "CQ";
-			this->provideImageCreation(data.user_id, data.raw_message);
+			current_data.type = "CQ";
+			this->provideImageCreation(current_data.user_id, current_data.raw_message);
 		}
-		else if (data.raw_message.find("#删除上条对话") != std::string::npos)
+		else if (current_data.raw_message.find("#删除上条对话") != std::string::npos)
 		{
-			data.raw_message = this->removePreviousContext(data.user_id);
+			current_data.raw_message = this->removePreviousContext(current_data.user_id);
 		}
 		// else if (message.substr(1, 12).find(message.find("#SD绘图")) != message.npos)
-		else if (data.raw_message.find("#SD绘图") != std::string::npos)
+		else if (current_data.raw_message.find("#SD绘图") != std::string::npos)
 		{
-			data.type = "CQ";
-			this->SDImageCreation(data.raw_message);
+			current_data.type = "CQ";
+			this->SDImageCreation(current_data.raw_message);
 		}
-		else if (data.raw_message.compare("#模型列表") == 0)
+		else if (current_data.raw_message.compare("#模型列表") == 0)
 		{
-			data.raw_message = "当前支持如下模型：\n";
+			current_data.raw_message = "当前支持如下模型：\n";
 			if (chatModels.size() < 1)
 			{
-				data.raw_message = "未配置模型";
+				current_data.raw_message = "未配置模型";
 			}
 			// 遍历模型
 			for (const auto &pair : chatModels)
 			{
 				for (const auto &name : pair.first)
 				{
-					data.raw_message.append("\n" + name + "\n");
+					current_data.raw_message.append("\n" + name + "\n");
 				}
 			}
 		}
 		else
 		{
-			characterMessage(data);
+			if (this->global_Voice && this->user_messages->find(current_data.user_id)->second.isOpenVoiceMode)
+			{
+				current_data.type = "CQ";
+			}
+			current_data.raw_message = characterMessage(current_data);
 		}
 	}
 	catch (const std::exception &e)
 	{
 		std::cerr << e.what() << '\n';
 	}
-	return data.raw_message;
 }
 
 bool Message::messageFilter(std::string message_type, std::string message)
@@ -335,21 +324,22 @@ bool Message::messageFilter(std::string message_type, std::string message)
 	return true;
 }
 
-bool Message::removeGroupCQCode(std::string &message)
+std::string Message::removeGroupCQCode(const std::string &message)
 {
 	// 为了防止CQ码和普通文本出现冲突，这里选择半硬编码查找，减少冲突，但不一定彻底解决
-	std::string specificCQCode = "[CQ:at,qq=" + ConfigManager::getInstance().configVariable("BOT_QQ"); // [CQ:at,qq=2333
-	int begin = message.find(specificCQCode);
-	if (begin == message.npos)
+	std::string res = message;
+	std::string specificCQCode = "[CQ:at,qq=" + ConfigManager::getInstance().configVariable("BOT_QQ");
+	int begin = res.find(specificCQCode);
+	if (begin == res.npos)
 	{
 		LOG_WARNING("该消息CQ码格式异常或者不存在CQ码!\n源消息:" + message);
-		return false;
+		return res;
 	}
-	int end = message.find("]", begin);
+	int end = res.find("]", begin);
 	// 移除CQ码
-	message.erase(begin, end - begin + 2); // 硬编码不可取！！！
+	res.erase(begin, end - begin + 2);
 
-	return true;
+	return res;
 }
 
 /*此重载供cq函数使用*/
@@ -397,13 +387,10 @@ void Message::questPictureID(std::string &message)
 	*/
 }
 
-void Message::SpeechSound(std::string &message)
+std::string Message::characterMessage(const JsonData &data)
 {
-	message = "你好，我是克莱茵，请问有什么可以帮到你。";
-}
+	std::string choices_message_content;
 
-void Message::characterMessage(JsonData &data)
-{
 	// 获取用户当前使用的模型
 	// auto models = this->user_messages->find(data.user_id)->second.user_models;
 
@@ -430,10 +417,10 @@ void Message::characterMessage(JsonData &data)
 		}
 		else // 判断消息是否达到最大token限度
 		{
-			short c_size = 0; // 这里存储的是占用的字节数
+			int c_size = 0; // 这里存储的是占用的字节数
+
 			// 这部分可以优化，现在为了进度先暂时搁置
 			c_size = user_vector.begin()->first.size() + (user_vector.begin() + 1)->first.size(); // 统计首部长度
-			// for (auto it = user_vector.end() - 1; it > user_vector.begin() + 1; it--)
 			for (auto it = user_vector.begin() + this->default_message_line; it != user_vector.end(); it++)
 			{
 				c_size += it->first.size();
@@ -451,117 +438,141 @@ void Message::characterMessage(JsonData &data)
 			}
 		}
 
-		data.raw_message = JsonParse::getInstance().toJson(data.raw_message);
-		std::string format = this->users_message_format + data.raw_message + "\"}";
+		// 将当前聊天内容添加到上下文（临时存储）
+		std::string content = JsonParse::getInstance().toJson(data.raw_message);
+		std::string format = this->users_message_format + content + "\"}";
 		user_vector.push_back(make_pair(format, time(nullptr)));
 
-		data.raw_message = "";
+		content = "";
 		// 拼接上下文
 		for (std::vector<std::pair<std::string, time_t>>::const_iterator it = user_vector.begin(); it != user_vector.end(); it++)
 		{
-			data.raw_message += "\t" + it->first + '\n';
+			content += it->first;
 		}
-		data.raw_message.insert(0, "[\n");
-		data.raw_message.insert(data.raw_message.size(), "]");
+		content.insert(0, "[");
+		content.insert(content.size(), "]");
+		std::cout << content << std::endl;
 
 		// 将内容发送至模型
 		std::cout << "Send to model..." << std::endl;
-		auto response = this->dock->RequestChat(data.raw_message, &this->user_messages->find(data.user_id)->second);
-		// 消息完整性验证
-		std::string errorSubstr = data.raw_message.substr(0, 10);
-		// 判断此消息是否为错误消息
-		if (errorSubstr.find("error") != errorSubstr.npos)
+		auto response = this->dock->RequestChat(content, &this->user_messages->find(data.user_id)->second);
+		if (response.code == 200)
 		{
-			// 提取错误问题
-			if (data.raw_message.find("message"))
+			choices_message_content = response.choices_message_content;
+			if (choices_message_content.empty())
 			{
-				int begin_index = data.raw_message.find("message") + 10;
-				int end_index = data.raw_message.find("type") - 3;
-				data.raw_message = data.raw_message.substr(begin_index, end_index - begin_index);
-				LOG_ERROR(data.raw_message);
+				choices_message_content = "系统提示：模型无返回内容！";
+				return choices_message_content;
 			}
-			data.raw_message.insert(0, "系统提示：未知错误,建议清除上下文后重新发送！\n错误消息：");
-		}
-		else if (data.raw_message.size() > 100) // 当收到的消息大于100个字节则表示为合法消息
-		{
-			data.raw_message = JsonParse::getInstance().getJsonKeyValue(data.raw_message, "content");
-			std::cout << "content:" << data.raw_message << std::endl;
-
-			user_vector.back().first.push_back(','); // 格式调整
-			std::string JsonData = JsonParse::getInstance().toJson(data.raw_message);
-			std::cout << "变成Json后：" << JsonData << std::endl;
-
-			// 保存回答信息
-			format = this->bot_message_format + JsonData + "\"},"; // 数据格式化
-			user_vector.push_back(make_pair(format, time(nullptr)));
-
-			// 判断数据是否超出额定值
-			short c_size = 0;
-
-			// 这部分可以优化，现在为了进度先暂时搁置
-			c_size = user_vector.begin()->first.size() + (user_vector.begin() + 1)->first.size(); // 提前统计首部长度
-			for (auto it = user_vector.end() - 1; it > user_vector.begin() + 1; it--)
+			else
 			{
-				c_size += it->first.size();
-				// 删除早期聊天记录
-				if ((c_size / 3) >= contextMax - 512) //  预留512 token，保证判断正常
+				user_vector.back().first.push_back(',');							  // 格式调整
+				format = this->bot_message_format + choices_message_content + "\"},"; // 数据格式化
+				user_vector.push_back(make_pair(format, time(nullptr)));			  // 保存结果
+
+				// 判断数据是否超出额定值
+				int c_size = 0;
+
+				// 这部分可以优化，现在为了进度先暂时搁置
+				c_size = user_vector.begin()->first.size() + (user_vector.begin() + 1)->first.size(); // 提前统计首部长度
+				for (auto it = user_vector.end() - 1; it > user_vector.begin() + 1; it--)
 				{
-					LOG_WARNING("Chat message delete over!");
-					LOG_DEBUG(__LINE__ + "使用了erase");
-					user_vector.erase(user_vector.begin() + this->default_message_line, it + 2);
-					std::lock_guard<std::mutex> lock(mutex_message);
-					this->user_messages->find(data.user_id)->second.user_chatHistory = user_vector;
-					break;
+					c_size += it->first.size();
+					// 删除早期聊天记录
+					if ((c_size / 3) >= contextMax - 512) //  预留512 token，保证判断正常
+					{
+						LOG_WARNING("Chat message delete over!");
+						LOG_DEBUG(__LINE__ + "使用了erase");
+						user_vector.erase(user_vector.begin() + this->default_message_line, it + 2);
+						std::lock_guard<std::mutex> lock(mutex_message);
+						this->user_messages->find(data.user_id)->second.user_chatHistory = user_vector;
+						break;
+					}
+				}
+
+				// 确认无误，聊天记录更新
+				std::lock_guard<std::mutex> lock(mutex_message);
+				this->user_messages->find(data.user_id)->second.user_chatHistory = user_vector;
+
+				// 针对reason状态做处理
+				if (response.choices_finish_reason == "length") // 模型max_tokens达到最大长度限制
+				{
+					LOG_WARNING("该模型的回答长度超出了管理员设定的最大限制...");
+					choices_message_content += "\n模型已超出最大长度限制，回答可能不全。";
+				}
+				else if (response.choices_finish_reason == "content_filter") // 违反AI道德规范
+				{
+					LOG_WARNING("该模型的回答内容被AI morality filter拦截...");
+					choices_message_content += "\n模型返回内容被AI morality filter拦截...";
 				}
 			}
-
-			// 确认无误，聊天记录更新
-			std::lock_guard<std::mutex> lock(mutex_message);
-			this->user_messages->find(data.user_id)->second.user_chatHistory = user_vector;
 		}
 		else
 		{
-			LOG_ERROR("小于100字节的消息：" + data.raw_message);
-			if (data.raw_message.find("系统提示") == std::string::npos)
-			{
-				data.raw_message = "系统提示：未收到正确的回答，请重写发送问题...";
-			}
+			LOG_ERROR("OpenAI response error: " + std::to_string(response.code));
+			choices_message_content = "系统提示：模型无返回内容！";
+			return choices_message_content;
 		}
 	}
 	else
 	{
 		// 不开启上下文
 		LOG_INFO("当前聊天不支持上下文模式...");
-		data.raw_message = JsonParse::getInstance().toJson(data.raw_message);
-		std::string format = this->users_message_format + data.raw_message + "\"}";
-		data.raw_message = format;
-		data.raw_message.insert(0, "[\n");
-		data.raw_message.insert(data.raw_message.size(), "]");
+		std::string content = JsonParse::getInstance().toJson(data.raw_message);
+		content = this->users_message_format + content + "\"}";
+		content.insert(0, "[\n");
+		content.insert(content.size(), "]");
 		std::cout << "send to model..." << std::endl;
-		this->dock->RequestGPT(data.raw_message,
-													 &this->user_messages->find(data.user_id)->second);
-		if (data.raw_message.size() > 100)
+		auto response = this->dock->RequestChat(content, &this->user_messages->find(data.user_id)->second);
+
+		std::string choices_message_content;
+		if (response.code == 200)
 		{
-			data.raw_message = JsonParse::getInstance().getJsonKeyValue(data.raw_message, "content");
-			// cout << "OpenAI response: " << message << endl;
+			choices_message_content = response.choices_message_content;
+			if (choices_message_content.empty())
+			{
+				choices_message_content = "系统提示：模型无返回内容！";
+				return choices_message_content;
+			}
+			else
+			{
+				// 针对reason状态做处理
+				if (response.choices_finish_reason == "length") // 模型max_tokens达到最大长度限制
+				{
+					LOG_WARNING("该模型的回答长度超出了管理员设定的最大限制...");
+					choices_message_content += "\n模型已超出最大长度限制，回答可能不全。";
+				}
+				else if (response.choices_finish_reason == "content_filter") // 违反AI道德规范
+				{
+					LOG_WARNING("该模型的回答内容被AI morality filter拦截...");
+					choices_message_content += "\n模型返回内容被AI morality filter拦截...";
+				}
+			}
+		}
+		else
+		{
+			LOG_ERROR("OpenAI response error: " + std::to_string(response.code));
+			choices_message_content = "系统提示：模型无返回内容！";
+			return choices_message_content;
 		}
 	}
 
 	// 打印回复内容
 	std::cout << "\033[32m"
-						<< "OpenAI response: "
-						<< "\033[0m" << data.raw_message << std::endl;
+			  << "OpenAI response: "
+			  << "\033[0m" << choices_message_content << std::endl;
 
 	// 判断是否需要提供文本转语音
 	if (this->global_Voice && this->user_messages->find(data.user_id)->second.isOpenVoiceMode)
 	{
 		// LOG_INFO(std::to_string(data.user_id) + "需要使用文本转语音...");
-		data.type = "CQ";
-		this->textToVoice(data.raw_message, data.type);
+		// current_data.type = "CQ";
+		choices_message_content = this->textToVoice(choices_message_content);
 	}
+	return choices_message_content;
 }
 
-void Message::musicShareMessage(std::string &message, short platform)
+std::string Message::musicShareMessage(const std::string &message, short platform)
 {
 	// 提取歌手或歌曲
 	auto result = message.find(":");
@@ -578,6 +589,7 @@ void Message::musicShareMessage(std::string &message, short platform)
 	CloudMusicID cm;
 	int num = 0;
 	uint64_t songID = 0;
+
 	switch (platform)
 	{
 	case 1:
@@ -591,11 +603,10 @@ void Message::musicShareMessage(std::string &message, short platform)
 		{
 			std::cerr << "捕获异常：" << e.what() << '\n';
 		}
-		message = CQCode("music", "type", "163", "id", res);
-		break;
+		return CQCode("music", "type", "163", "id", res);
 	}
 	default:
-		break;
+		return {};
 	}
 }
 
@@ -617,13 +628,16 @@ void Message::atAllMessage(std::string &message)
 	message = CQCode("at", "all");
 }
 
-void Message::setPersonality(std::string &roleName, uint64_t user_id)
+std::tuple<bool, std::string> Message::setPersonality(const std::string &roleName, uint64_t user_id)
 {
 	// 判断用户是否存在
 	if (this->user_messages->find(user_id) == this->user_messages->begin())
 	{
 		this->addUsers(user_id);
 	}
+
+	std::string response;
+	bool success;
 
 	if (roleName.find("人格还原") != roleName.npos)
 	{
@@ -641,8 +655,9 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 		std::lock_guard<std::mutex> lock(this->mutex_message);
 		this->user_messages->find(user_id) = user;
 
-		roleName = "人格已还原";
-		return;
+		response = "人格已还原";
+		success = true;
+		return {success, response};
 	}
 
 	// 提取人格名称
@@ -655,14 +670,14 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 	{
 		result = roleName.find("：") + 3;
 	}
-	roleName = roleName.substr(result);
+	std::string name = roleName.substr(result);
 
 	// 读取人格文件
-	std::string path = ConfigManager::getInstance().configVariable("PERSONALITY_PATH") + roleName + ".txt";
+	std::string path = ConfigManager::getInstance().configVariable("PERSONALITY_PATH") + name + ".txt";
 	std::ifstream ifs;
 #if defined(__WIN32) || defined(__WIN64)
 	std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter; // 创建宽字符转换器
-	std::wstring wpath = converter.from_bytes(path);									// string转wstring
+	std::wstring wpath = converter.from_bytes(path);				  // string转wstring
 	std::filesystem::path filePath = wpath;
 	ifs.open(filePath);
 #else
@@ -671,8 +686,9 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 	if (!ifs.is_open())
 	{
 		LOG_WARNING("文件打开失败，文件路径:" + path);
-		roleName = "系统提示：“" + roleName + "”人格不存在！";
-		return;
+		response = "系统提示：“" + name + "”人格不存在！";
+		success = false;
+		return {success, response};
 	}
 	std::stringstream *buffer = new std::stringstream;
 	*buffer << ifs.rdbuf();
@@ -695,7 +711,8 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 		if (begin == std::string::npos || range < 1)
 		{
 			LOG_ERROR("配置文件有误！");
-			roleName = "系统提示：“" + roleName + "”人格未找到！";
+			response = "系统提示：“" + name + "”人格未找到！";
+			success = false;
 			return false;
 		}
 		return true;
@@ -704,7 +721,8 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 	begin = originData->find("Personlity") + 12;
 	range = originData->find("}") - begin;
 	if (!myLambda())
-		return;
+	{
+	}
 
 	personality = originData->substr(begin, range);
 	personality = JsonParse::getInstance().toJson(personality);
@@ -713,7 +731,9 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 	begin = originData->find("Temperature") + 15;
 	range = originData->find("}") - begin;
 	if (!myLambda())
-		return;
+	{
+		return {success, response};
+	}
 
 	temperature = originData->substr(begin, range);
 	originData->erase(0, originData->find("}") + 1);
@@ -721,7 +741,9 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 	begin = originData->find("Top_p") + 7;
 	range = originData->find("}") - begin;
 	if (!myLambda())
-		return;
+	{
+		return {success, response};
+	}
 
 	top_p = originData->substr(begin, range);
 	originData->erase(0, originData->find("}") + 1);
@@ -729,7 +751,9 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 	begin = originData->find("Frequency_penalty") + 19;
 	range = originData->find("}") - begin;
 	if (!myLambda())
-		return;
+	{
+		return {success, response};
+	}
 
 	frequency_penalty = originData->substr(begin, range);
 	originData->erase(0, originData->find("}") + 1);
@@ -737,7 +761,9 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 	begin = originData->find("Presence_penalty") + 18;
 	range = originData->find("}") - begin;
 	if (!myLambda())
-		return;
+	{
+		return {success, response};
+	}
 
 	presence_penalty = originData->substr(begin, range);
 	originData->erase(0, originData->find("}") + 1);
@@ -794,10 +820,12 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id)
 	std::lock_guard<std::mutex> lock(mutex_message);
 	this->user_messages->find(user_id) = user;
 
-	roleName = "启用“" + roleName + "”人格。";
+	response = "启用“" + name + "”人格。";
+	success = true;
+	return {success, response};
 }
 
-void Message::setPersonality(std::string &roleName, uint64_t user_id, int tag)
+std::tuple<bool, std::string> Message::setPersonality(const std::string &roleName, const uint64_t user_id, int tag)
 {
 	// 判断用户是否存在
 	if (this->user_messages->find(user_id) == this->user_messages->begin())
@@ -805,10 +833,16 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id, int tag)
 		this->addUsers(user_id);
 	}
 
+	bool success = false;
+	std::string response;
+	std::string name; // 人格名称
+
 	if (this->LightweightPersonalityList.size() < 1)
 	{
 		LOG_ERROR("轻量型人格数据库为空！");
-		roleName = "设置失败！";
+		response = "设置失败！";
+		success = false;
+		return {success, response};
 	}
 
 	bool flog = true;
@@ -816,7 +850,7 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id, int tag)
 	{
 		if (roleName.find(it->first) != roleName.npos)
 		{
-			roleName = it->second;
+			name = it->second;
 			flog = false;
 			break;
 		}
@@ -825,16 +859,19 @@ void Message::setPersonality(std::string &roleName, uint64_t user_id, int tag)
 	if (flog)
 	{
 		LOG_WARNING("人格参数未空或不为内置参数");
-		roleName = "系统提示：未找到此人格！";
-		return;
+		response = "系统提示：未找到此人格！";
+		success = false;
+		return {success, response};
 	}
 
 	std::lock_guard<std::mutex> lock(mutex_message);
 	this->user_messages->find(user_id)->second.user_chatHistory[0].first = system_message_format + roleName;
-	roleName = "设置成功";
+	response = "设置成功";
+	success = true;
+	return {success, response};
 }
 
-void Message::resetChat(std::string &roleName, uint64_t user_id)
+std::string Message::resetChat(const uint64_t user_id)
 {
 	auto user = this->user_messages->find(user_id);
 	if (user == this->user_messages->end())
@@ -846,74 +883,75 @@ void Message::resetChat(std::string &roleName, uint64_t user_id)
 		// 重置对话会删除之前的所有信息，但不包括人格信息
 		user->second.user_chatHistory.erase(user->second.user_chatHistory.begin() + 2, user->second.user_chatHistory.end());
 		std::lock_guard<std::mutex>
-				lock(mutex_message);
+			lock(mutex_message);
 		this->user_messages->find(user_id)->second = user->second;
 	}
-	roleName = "会话重置完成！";
+	return "会话重置完成！";
 }
 
-bool Message::adminTerminal(std::string &message, uint64_t user_id)
+std::tuple<bool, std::string> Message::adminTerminal(const std::string &message, uint64_t user_id)
 {
-	std::string str = message;
+	std::string str;
 	if (message.find("#开启无障碍聊天") != message.npos)
 	{
 		this->accessibility_chat = true;
-		message = "无障碍聊天已开启！";
+		str = "无障碍聊天已开启！";
 	}
 	else if (message.find("#关闭无障碍聊天") != message.npos)
 	{
 		this->accessibility_chat = false;
-		message = "无障碍聊天已关闭！";
+		str = "无障碍聊天已关闭！";
 	}
 	else if (message.find("#刷新配置文件") != message.npos)
 	{
-		ConfigManager::getInstance().refreshConfiguation("config.json");
+		ConfigManager::getInstance().refreshConfiguation();
 		this->readModelName();
-		message = "配置文件已刷新";
+		str = "配置文件已刷新";
 	}
 	else if (message.find("#激活语音") != message.npos)
 	{
 		this->global_Voice = true;
-		message = "已激活！";
+		str = "已激活！";
 	}
 	else if (message.find("#冻结语音") != message.npos)
 	{
 		this->global_Voice = false;
-		message = "已冻结！";
+		str = "已冻结！";
 	}
 	else if (message.find("#获取服务器inet4") != message.npos)
 	{
-		message = this->PCStatus->getInet4();
+		str = this->PCStatus->getInet4();
 	}
 	else if (message.find("#获取服务器inet6") != message.npos)
 	{
-		message = this->PCStatus->getInet6();
+		str = this->PCStatus->getInet6();
 	}
 	else if (message.find("#获取服务器公网IP") != message.npos)
 	{
-		message = this->PCStatus->getPublicIP();
+		str = this->PCStatus->getPublicIP();
 	}
-	// 若message被修改，判断为走内置消息
-	return str != message ? true : false;
+	bool success = !str.empty();
+	std::string message_ = std::string(success ? message : str);
+	return {success, message_};
 }
 
-void Message::switchModel(std::string &message, uint64_t user_id)
+std::string Message::switchModel(const std::string &message, const uint64_t user_id)
 {
 	if (message.size() < 14)
 	{
 		LOG_WARNING("未指定模型...");
-		message = "系统提示：请选择要切换的模型！";
-		return;
+		return "系统提示：请选择要切换的模型！";
 	}
 
 	// 模型名称提取
+	std::string model;
 	if (message.find(":") != std::string::npos)
 	{
-		message = message.substr(message.find(":") + 1);
+		model = message.substr(message.find(":") + 1);
 	}
 	else
 	{
-		message = message.substr(message.find("：") + 3);
+		model = message.substr(message.find("：") + 3);
 	}
 	std::string modelName = message;
 
@@ -934,8 +972,7 @@ void Message::switchModel(std::string &message, uint64_t user_id)
 			newModel.second.push_back(entry.second[1]);
 			newModel.second.push_back(entry.second[2]);
 			this->user_messages->find(user_id)->second.user_models = newModel;
-			message = "设置成功，当前模型为:" + this->user_messages->find(user_id)->second.user_models.first;
-			return;
+			return std::string("设置成功，当前模型为:" + this->user_messages->find(user_id)->second.user_models.first);
 		}
 	}
 	/*
@@ -949,7 +986,7 @@ void Message::switchModel(std::string &message, uint64_t user_id)
 		}
 	}
 	*/
-	message = "系统提示：不存在的模型!";
+	return "系统提示：不存在的模型!";
 }
 
 bool Message::permissionVerification(uint64_t user_id)
@@ -967,24 +1004,24 @@ size_t write_data(void *ptr, size_t size, size_t nmemb, std::string *data)
 void Message::call_fixImageSizeTo4K(std::string &message)
 {
 	Realesrgan *rlg = new Realesrgan;
-	int res = rlg->fixImageSizeTo4K(message);
+	std::string imagePath = rlg->fixImageSizeTo4K(message);
 
-	if (res == -1)
+	if (imagePath.empty())
 	{
 		LOG_ERROR("返回内容少于20字节");
 		return;
 	}
-	if (res == 1)
+	else
 	{
 		// 路径传输
 		message.insert(0, "file://");
 		message = CQCode("image", "file", message);
 	}
-	else if (res == 2)
-	{
-		// base64传输
-		message = CQCode("image", "file=base64://" + message);
-	}
+	// else if (res == 2)
+	// {
+	// 	// base64传输
+	// 	message = CQCode("image", "file=base64://" + message);
+	// }
 
 	delete rlg;
 }
@@ -993,9 +1030,9 @@ void Message::call_fixImageSizeTo4K(std::string &message)
 std::string Message::dataToBase64(const std::string &input)
 {
 	const std::string base64_chars =
-			"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-			"abcdefghijklmnopqrstuvwxyz"
-			"0123456789+/";
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		"abcdefghijklmnopqrstuvwxyz"
+		"0123456789+/";
 
 	std::string encoded;
 	int val = 0;
@@ -1050,27 +1087,12 @@ std::string Message::encodeToURL(const std::string &input)
 			escaped << std::nouppercase;
 		}
 	}
-
 	return escaped.str();
 }
 
-bool Message::provideImageRecognition(const uint64_t user_id, std::string &message, std::string &type)
+std::string Message::provideImageRecognition(const uint64_t user_id, const std::string &message, const std::string &message_data_url)
 {
-	std::string conversation = message.substr(0, message.find("[CQ:image"));																		// 提取对话，如果有的话
-	std::string url = message.substr(message.find("url=") + 4, message.find("]") - (message.find("url=") + 4)); // 提取URL
-
-	// URL纠正
-	size_t index = 0;
-	do
-	{
-		std::string findWord = "&amp;";
-		index = url.find(findWord);
-		if (index != std::string::npos)
-		{
-			url.erase(index, findWord.size());
-			url.insert(index, "&");
-		}
-	} while (index != std::string::npos);
+	std::string conversation = message.substr(0, message.find("[CQ:image")); // 提取对话（如果有的话）
 
 	// 若不存在prompt，则设置默认prompt
 	if (conversation.size() < 6)
@@ -1083,8 +1105,8 @@ bool Message::provideImageRecognition(const uint64_t user_id, std::string &messa
 	CURL *curl_handle = curl_easy_init();
 	if (!curl_handle)
 	{
-		LOG_ERROR("Failed to initialize curl handle.");
-		return false;
+		LOG_ERROR("curl 无法初始化。");
+		return {};
 	}
 	CURLcode res;
 	std::string input;
@@ -1098,7 +1120,7 @@ bool Message::provideImageRecognition(const uint64_t user_id, std::string &messa
 		curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 2L);	 // 验证证书中的主机名
 		curl_easy_setopt(curl_handle, CURLOPT_CAINFO, "cacert.pem"); // 指定CA根证书
 #endif
-		curl_easy_setopt(curl_handle, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl_handle, CURLOPT_URL, message_data_url.c_str());
 		curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_data);
 		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &input);
 
@@ -1108,13 +1130,13 @@ bool Message::provideImageRecognition(const uint64_t user_id, std::string &messa
 		{
 			LOG_ERROR("Failed to download image: " + std::string(curl_easy_strerror(res)));
 			curl_easy_cleanup(curl_handle);
-			return false;
+			return {};
 		}
 	}
 	else
 	{
 		LOG_ERROR("Failed to initialize curl handle.");
-		return false;
+		return {};
 	}
 	curl_easy_cleanup(curl_handle);
 
@@ -1125,36 +1147,49 @@ bool Message::provideImageRecognition(const uint64_t user_id, std::string &messa
 
 	// 封装消息，向OpenAI发送  这里可以检查收到的信息是否合法
 	std::cout << "send to vision model..." << std::endl;
-	OpenAIStandard::send_to_vision(conversation, base64,
-																 ConfigManager::getInstance().configVariable("VISION_MODEL"),
-																 ConfigManager::getInstance().configVariable("VISION_MODEL_ENDPOINT"),
-																 ConfigManager::getInstance().configVariable("VISION_MODEL_API_KEY"));
+	std::string endpoint = ConfigManager::getInstance().configVariable("VISION_MODEL_ENDPOINT");
+	std::string api_key = ConfigManager::getInstance().configVariable("VISION_MODEL_API_KEY");
+	std::string model = ConfigManager::getInstance().configVariable("VISION_MODEL");
 
-	// 获取结果
-	message = conversation;
-	if (message.size() > 100)
+	auto response = this->dock->RequestVision(endpoint, api_key, model, conversation, base64);
+
+	std::string answer = response.choice_message_content;
+	if (response.code == 200)
 	{
-		message = JsonParse::getInstance().getJsonKeyValue(message, "content");
-		if (message.size() < 10)
+
+		if (response.finish_reason == "length")
 		{
-			LOG_ERROR(conversation);
+			answer += "\n系统提示：返回的内容超过管理员设定的最大长度。";
+		}
+		else if (response.finish_reason == "content_filter")
+		{
+			answer = response.choice_message_refusal;
 		}
 		else
 		{
 			std::cout << "OpenAI response: " << message << std::endl;
-			// 判断是否需要转语音
-			if (this->user_messages->find(user_id)->second.isOpenVoiceMode)
+			answer = response.choice_message_content;
+		}
+
+		// 判断是否需要转语音
+		if (this->user_messages->find(user_id)->second.isOpenVoiceMode)
+		{
+			answer = this->textToVoice(answer);
+			if (answer.find(".wav") == std::string::npos)
 			{
-				this->textToVoice(message, type);
+				answer = "系统提示：语音模块异常。";
 			}
 		}
+		// return CQCode("reply", "message", answer);
+		return answer;
 	}
 	else
 	{
-		message = "系统提示：分析超时，请重试。";
-		return false;
+		LOG_ERROR("OpenAI response: " + response.choice_message_content);
+		answer = "系统提示：分析超时，请重试。";
 	}
-	return true;
+
+	return {};
 }
 
 // 专供 textToVoice 函数的回调函数
@@ -1168,34 +1203,26 @@ size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
 	}
 	return realsize;
 }
-int Message::textToVoice(std::string &text, std::string &type)
+std::string Message::textToVoice(const std::string &text)
 {
-	type = "CQ";
-	text = JsonParse::getInstance().toJson(text);
+	std::string response;
+
 	// LOG_DEBUG("转语音的内容：" + text);
-	int res = this->voice->toAudio(text);
-	if (res = 1)
+	std::string audioPath = this->voice->toAudio(JsonParse::getInstance().toJson(text));
+	if (audioPath.find(".wav") != std::string::npos)
 	{
 		// 使用路径传输
 		std::string URL = "file://" + text;
-		text = CQCode("record", "file", URL);
-		return 0;
-	}
-	else if (res = 2)
-	{
-		// 使用base64编码传输
-		// 很遗憾的是，record不支持base64编码
-		LOG_WARNING("开发出现错误，你使用了base64编码的方式传输，但是CQ码并不支持这种方式...");
-		return -1;
+		response = CQCode("record", "file", URL);
+		return response;
 	}
 	else
 	{
-		// 错误返回内容
-		return -1;
+		return audioPath; // 这里面是错误信息
 	}
 }
 
-bool Message::provideImageCreation(const uint64_t user_id, std::string &text)
+std::string Message::provideImageCreation(const uint64_t user_id, const std::string &text)
 {
 	// 提取prompt
 	std::string prompt;
@@ -1210,17 +1237,11 @@ bool Message::provideImageCreation(const uint64_t user_id, std::string &text)
 
 	if (prompt.size() < 3)
 	{
-		text = "系统提示：描述过短！至少存在1个汉字或者3个字符...";
-		return false;
+		return "系统提示：描述过短！至少存在1个汉字或者3个字符...";
 	}
 
 	// 开始请求OpenAI
 	std::cout << "send to Model..." << std::endl;
-	OpenAIStandard::text_translate(prompt,
-																 ConfigManager::getInstance().configVariable("TEXTTRANSLATE_MODEL"),
-																 "EN", ConfigManager::getInstance().configVariable("TEXTTRANSLATE_MODEL_ENDPOINT"),
-																 ConfigManager::getInstance().configVariable("TEXTTRANSLATE_MODEL_API_KEY"));
-	LOG_INFO("文本翻译完成。");
 	prompt = JsonParse::getInstance().toJson(prompt);
 	std::pair<std::string, std::vector<std::string>> p;
 	p.first = ConfigManager::getInstance().configVariable("DRAW_MODEL");
@@ -1229,45 +1250,14 @@ bool Message::provideImageCreation(const uint64_t user_id, std::string &text)
 	p.second.push_back(ConfigManager::getInstance().configVariable("DRAW_MODEL_APISTANDARD"));
 	auto result = this->user_messages->find(user_id)->second; // 值拷贝
 	result.user_models = p;
-	Dock::RequestGPT(prompt, &result);
+	auto response = this->dock->RequestDraw(prompt);
 
-	if (prompt.size() < 100)
+	if (response.code >= 400)
 	{
-		prompt = "网络异常...";
-		return false;
+		return "网络异常...";
 	}
-
-	std::string url;
-	if (prompt.rfind("invalid_request_error") != prompt.npos)
-	{
-		LOG_ERROR("触发官方保护!");
-		prompt = prompt.substr(prompt.find("message") + 10); // 前缀分割
-		text = prompt.substr(0, prompt.find("request id") - 10);
-		url = "";
-		// LOG_DEBUG(text);
-		return false;
-	}
-	else
-	{
-		// Json解析
-		bool result = JsonParse::getInstance().findKeyAndValue(prompt, "url", url);
-		if (!result)
-		{
-			text = "Json数据中未找到URL";
-			LOG_ERROR("Json数据中未找到URL，源数据为：" + prompt);
-			return false;
-		}
-
-		std::string outputPath;
-
-		// 封装格式(采用RUL)
-		outputPath = url;
-		// 格式封装
-		// outputPath.insert(0, "file://"); // 采用绝对路径
-		prompt = CQCode("image", "file", outputPath); // 采用网路路径
-		text = prompt;
-		return true;
-	}
+	std::string URL = response.data_base64;
+	return CQCode("image", "base64", URL);
 }
 
 std::string Message::removePreviousContext(const uint64_t user_id)
@@ -1294,14 +1284,14 @@ std::string Message::removePreviousContext(const uint64_t user_id)
 	return std::string("上条对话已被删除！");
 }
 
-void Message::SDImageCreation(std::string &message)
+std::string Message::SDImageCreation(const std::string &message)
 {
+	std::string response;
 	// 提取出prompt
 	if (message.size() < 14)
 	{
 		LOG_WARNING("用户未描述图像");
-		message = "系统提示：请描述图像...";
-		return;
+		return "系统提示：请描述图像...";
 	}
 
 	std::string prompt;
@@ -1315,23 +1305,24 @@ void Message::SDImageCreation(std::string &message)
 	}
 
 	// prompt翻译成英文
-	OpenAIStandard::text_translate(prompt,
-																 ConfigManager::getInstance().configVariable("TEXTTRANSLATE_MODEL"),
-																 "EN", ConfigManager::getInstance().configVariable("TEXTTRANSLATE_MODEL_ENDPOINT"),
-																 ConfigManager::getInstance().configVariable("TEXTTRANSLATE_MODEL_API_KEY"));
 
 	// 调用StableDiffusion
 	std::string base64_code;
-	base64_code = StableDiffusion::connectStableDiffusion(prompt);
+
+	std::unique_ptr<StableDiffusion> SD = std::make_unique<StableDiffusion>();
+
+	// StableDiffusion &SD =
+	base64_code = SD->connectStableDiffusion(prompt);
 
 	if (base64_code.size() < 128)
 	{
-		message = "系统提示：数据返回有误！";
-		return;
+		return "系统提示：数据返回有误！";
 	}
-	message = "[CQ:image,file=base64://";
-	message.append(base64_code);
-	message.append("]");
+	response = "[CQ:image,file=base64://";
+	response.append(base64_code);
+	response.append("]");
+
+	return response;
 }
 
 void Message::readModelName()
@@ -1404,17 +1395,5 @@ Message::~Message()
 	{
 		delete this->user_messages;
 		this->user_messages = nullptr;
-	}
-
-	if (this->PCStatus != nullptr)
-	{
-		delete this->PCStatus;
-		this->PCStatus = nullptr;
-	}
-
-	if (this->voice != nullptr)
-	{
-		delete this->voice;
-		this->voice = nullptr;
 	}
 }

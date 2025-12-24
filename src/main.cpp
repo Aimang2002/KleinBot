@@ -18,8 +18,6 @@
 void pollingThread()
 {
 	std::string message;
-	std::string content;
-	std::string JsonFormatData;
 	std::string getGOCQJsonData;
 	std::string webSocketDataPakage;
 	uint64_t user_id;
@@ -32,14 +30,14 @@ void pollingThread()
 		std::tm *local_time = std::localtime(&now);
 		if (local_time->tm_hour == 8 && local_time->tm_min == 0 && local_time->tm_sec < 4) // 每日定时
 		{
-			content = "早上好，请跟我打招呼的同时来一句元气满满的句子，让我一整天都有活力（直接说就好，不要在前面加上语气词例如“好的”）";
+			message = "早上好，请跟我打招呼的同时来一句元气满满的句子，让我一整天都有活力（直接说就好，不要在前面加上语气词例如“好的”）";
 			user_id = stoi(ConfigManager::getInstance().configVariable("MANAGER_QQ")); // 当前版本仅限于管理员账号，后期可选择对外提供服务
 			LOG_INFO("每日早安即将发送，亲爱的管理员，早上好。");
 			tag = true;
 		}
 		else if (!TimingTast::getInstance().Event->empty() && TimingTast::getInstance().Event->begin()->first <= TimingTast::getInstance().getPresentTime())
 		{
-			content = JsonParse::getInstance().toJson(TimingTast::getInstance().Event->begin()->second.second);
+			message = JsonParse::getInstance().toJson(TimingTast::getInstance().Event->begin()->second.second);
 			user_id = TimingTast::getInstance().Event->begin()->second.first;
 			TimingTast::getInstance().Event->erase(TimingTast::getInstance().Event->begin()); // 删除定时事件
 			tag = true;
@@ -48,11 +46,11 @@ void pollingThread()
 		if (tag)
 		{
 			// 数据处理&发送
-			message = "“";
-			message += content;
-			JsonFormatData = "[\n\t";
-			JsonFormatData += R"({"role": "user", "content": ")" + message + "\"}\n]";
-			// std::pair<std::string, std::vector<std::string>> p;
+			nlohmann::json payload = {
+				{"role", "user"},
+				{"content", message}};
+
+			// 构建用户信息
 			Person p;
 			p.frequency_penalty = ConfigManager::getInstance().configVariable("frequency_penalty");
 			p.isOpenVoiceMode = false;
@@ -64,11 +62,17 @@ void pollingThread()
 			p.user_models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_ENDPOINT"));
 			p.user_models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_APISTANDARD"));
 
-			Dock::RequestGPT(JsonFormatData, &p);
-			if (JsonFormatData.size() > 100)
-				JsonFormatData = JsonParse::getInstance().getAttributeFromChoices(JsonFormatData, "content");
-
-			MessageQueue::pending_push_queue(JsonFormatData, ConfigManager::getInstance().configVariable("PRIVATE_API"), user_id, "text");
+			std::unique_ptr<Dock> dock = std::make_unique<Dock>();
+			auto response = dock->RequestChat(payload, &p);
+			if (response.code >= 400)
+			{
+				LOG_ERROR("请求失败，请检查API密钥是否正确，或者网络是否正常。");
+				if (response.choices_message_content.size() < 1)
+				{
+					response.choices_message_content = "早上好。我可能无法连接到网络，建议调试。\n错误代码：" + std::to_string(response.code);
+				}
+			}
+			MessageQueue::pending_push_queue(response.choices_message_content, ConfigManager::getInstance().configVariable("PRIVATE_API"), user_id, "text");
 			tag = false;
 		}
 		std::this_thread::sleep_for(std::chrono::seconds(3));
@@ -101,8 +105,9 @@ void send_message(Message &messageClass, JsonData &data, bool isErrorTransfer)
 	{
 		if (strcmp(data.message_type.c_str(), "group") == 0)
 		{
-			getResponse = messageClass.handleMessage(data);
-			if (getResponse.size() > 5000 && getResponse.size() <= 15000) // GO-CQHTTP插件的单次发送最大长度为5000，而模型单次回复可能达到4096*3的长度
+			messageClass.handleMessage(data);
+			getResponse = data.raw_message;
+			if (getResponse.size() > 5000 && getResponse.size() <= 15000)
 			{
 				// 截取两段
 				LOG_WARNING("文本过长，将使用分批次发送");
@@ -126,12 +131,12 @@ void send_message(Message &messageClass, JsonData &data, bool isErrorTransfer)
 		}
 		else
 		{
-			getResponse = messageClass.handleMessage(data);
-			if (getResponse.size() > 4096) // && getResponse.size() <= 15000
+			messageClass.handleMessage(data);
+			getResponse = data.raw_message;
+			if (getResponse.size() > 4096 && getResponse.size() <= 14500)
 			{
 				// 字符串完整截取
-				auto cut_utf8_front =
-					[](std::string &str, size_t max_chars) -> std::string
+				auto cut_utf8_front = [](std::string &str, size_t max_chars) -> std::string
 				{
 					size_t end_byte_pos = 0;
 					size_t char_count = 0;
@@ -174,6 +179,7 @@ void send_message(Message &messageClass, JsonData &data, bool isErrorTransfer)
 			}
 			else
 			{
+				LOG_DEBUG("发送内容：" + getResponse);
 				MessageQueue::pending_push_queue(getResponse, ConfigManager::getInstance().configVariable("PRIVATE_API"), data.user_id, data.type);
 			}
 		}

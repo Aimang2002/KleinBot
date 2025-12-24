@@ -19,11 +19,16 @@ public:
      *
      * @param message 	源数据
      *
-     *@return   返回-1.处理有误；
-                返回1，使用路径传输;
-                返回2，使用base64编码传输;
+     *@return   正常返回音频文件的绝对路径，错误则返回空字符串
      */
-    int toAudio(std::string &text);
+    std::string toAudio(const std::string &text);
+    /**
+     * @brief 获取base64编码
+     *
+     * @param input 	源数据
+     *
+     *@return   正常返回base64编码，错误则返回空字符串
+     */
     std::string dataToBase64(const std::string &input);
     ~Voice();
 

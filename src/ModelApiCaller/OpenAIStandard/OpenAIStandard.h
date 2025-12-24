@@ -1,10 +1,10 @@
 
-#pragma once
-#ifndef OPENAI_HPP
-#define OPENAI_HPP
+#ifndef OPENAI_STANDARD_H
+#define OPENAI_STANDARD_H
 
 #include <iostream>
 #include "../../ConfigManager/ConfigManager.h"
+#include "../JsonParse/JsonParse.h"
 #include <curl/curl.h>
 
 // 聊天响应结构体
@@ -22,6 +22,10 @@ struct OpenAIChatResponse
     int usage_prompt_tokens;             // 输入提示消耗的token数量
     int usage_completion_tokens;         // 生成回复消耗的token数量
     int usage_total_tokens;              // 总共消耗的token数量
+
+    // 错误信息
+    std::string error_message;
+    std::string error_type;
 };
 
 // 图片创造响应结构体
@@ -52,6 +56,7 @@ struct OpenAIVisionResponse
 
     std::string choice_message_content; // 返回的描述内容
     std::string choice_message_refusal; // 当content为null时，返回的拒绝理由
+    std::string finish_reason;          // 停止生成的原因
 
     int usage_completion_tokens; // 输出token数
     int usage_prompt_tokens;     // 输入token数
@@ -62,19 +67,17 @@ struct OpenAIVisionResponse
 class OpenAIStandard
 {
 public:
-    OpenAIStandard() = default;
-
     // 文本翻译
-    bool text_translate(std::string &text, const std::string model, std::string language, const std::string endpoint, const std::string api_key);
+    bool text_translate(const std::string endpoint, const std::string api_key, std::string &text, const std::string model, std::string language);
 
-    // 调用聊天模型
-    OpenAIChatResponse send_to_chat(const nlohmann::json &body, const std::string endpoint, std::string api_key);
+    // 发送至聊天模型
+    OpenAIChatResponse send_to_chat(const std::string endpoint, std::string api_key, const nlohmann::json &body);
 
     // 调用视觉模型
-    OpenAIVisionResponse send_to_vision(const std::string &data, const std::string &base64, std::string model, const std::string endpoint, const std::string api_key);
+    OpenAIVisionResponse send_to_vision(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt, const std::string &base64);
 
     // 调用dall-e-3模型
-    OpenAIImageResponse send_to_draw(const std::string &prompt, std::string model, const std::string endpoint, const std::string api_key);
+    OpenAIImageResponse send_to_draw(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt);
 
 private:
     /**
@@ -118,7 +121,7 @@ private:
     OpenAIVisionResponse vision_json_parse(const std::string &response);
 
     // 回调函数
-    size_t write_callback_chat(char *ptr, size_t size, size_t nmemb, std::string *userdata);
+    static size_t write_callback_chat(char *ptr, size_t size, size_t nmemb, std::string *userdata);
 
     // KEY错误判断
     bool isKeyError(std::string &message);
@@ -132,9 +135,7 @@ private:
     // 证证书合法性(windows下)
     void VerifyCertificate(CURL *curl);
 
-    ~OpenAIStandard() = default;
-
 private:
 };
 
-#endif
+#endif // OPENAI_STANDARD_H

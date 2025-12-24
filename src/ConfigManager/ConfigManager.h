@@ -9,7 +9,7 @@ class ConfigManager
 {
 public:
     static ConfigManager &getInstance();
-    bool refreshConfiguation(const std::string configPath);
+    bool refreshConfiguation(const std::string configPath = "config.json");
     std::string configVariable(const std::string varriable);
 
 private:
@@ -21,6 +21,7 @@ private:
 
 private:
     std::unordered_map<std::string, std::string> configuration;
+    static ConfigManager *instance;
 };
 
 #endif

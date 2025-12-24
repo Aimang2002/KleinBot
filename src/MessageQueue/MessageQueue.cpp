@@ -125,6 +125,8 @@ bool MessageQueue::pending_pop()
 // 封装GO-CQ格式数据
 std::string MessageQueue::privateGOCQFormat(std::string message, uint64_t user_id, const std::string type)
 {
+    std::cout << "message = " << message << std::endl;
+
     std::stringstream json_data;
     if (type.compare("text") == 0)
     {

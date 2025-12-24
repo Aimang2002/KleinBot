@@ -3,35 +3,46 @@
 
 #include "OpenAIStandard/OpenAIStandard.h"
 #include "../Message/Person.hpp"
+#include "../Log/Log.h"
+#include <string>
 
 class Dock
 {
 public:
-    // 聊天请求
-    OpenAIChatResponse RequestChat(const nlohmann::json &context, Person *user = nullptr)
+    // 构造函数
+    Dock() {}
+
+    /**
+     * @brief 聊天请求
+     * @param context 上下文
+     * @param user 用户
+     * @return 返回一个被序列化的Json的结构体
+     */
+    OpenAIChatResponse RequestChat(const std::string &context, Person *user = nullptr)
     {
-        nlohmann::json json_data;
+        nlohmann::json payload;
+        payload["model"] = user->user_models.first;
         OpenAIChatResponse response;
+
+        std::string api_key = user->user_models.second[0];
+        std::string endpoint = user->user_models.second[1];
 
         // 指定超参数
         if (user == nullptr)
         {
             LOG_WARNING("超参数使用默认值");
-            json_data["model"] = user->user_models.first;
-            json_data["messages"] = context;
-            json_data["temperature"] = ConfigManager::getInstance().configVariable("temperature");
-            json_data["frequency_penalty"] = ConfigManager::getInstance().configVariable("frequency_penalty");
-            json_data["presence_penalty"] = ConfigManager::getInstance().configVariable("presence_penalty");
+            payload["messages"] = nlohmann::json::parse(context);
+            payload["temperature"] = std::stof(ConfigManager::getInstance().configVariable("temperature"));
+            payload["frequency_penalty"] = std::stof(ConfigManager::getInstance().configVariable("frequency_penalty"));
+            payload["presence_penalty"] = std::stof(ConfigManager::getInstance().configVariable("presence_penalty"));
         }
         else
         {
-            json_data["model"] = user->user_models.first;
-            json_data["messages"] = context;
-            json_data["temperature"] = user->temperature;
-            json_data["frequency_penalty"] = user->frequency_penalty;
-            json_data["presence_penalty"] = user->presence_penalty;
+            payload["messages"] = nlohmann::json::parse(context);
+            payload["temperature"] = std::stof(user->temperature);
+            payload["frequency_penalty"] = std::stof(user->frequency_penalty);
+            payload["presence_penalty"] = std::stof(user->presence_penalty);
         }
-
         // 判断用户目前使用的模型调用对应的接口
         if (user->user_models.second[2] == "OpenAI")
         {
@@ -39,7 +50,7 @@ public:
             format.append(user->user_models.second[0] + "\n");
             format.append(user->user_models.second[1] + "\n");
             format.append(user->user_models.second[2] + "\n");
-            response = openai.send_to_chat(json_data, user->user_models.second[1], user->user_models.second[0]);
+            response = openai.send_to_chat(endpoint, api_key, payload);
         }
         else
         {
@@ -49,8 +60,42 @@ public:
         return response;
     }
 
+    /**
+     * @brief 图片分析请求
+     * @param endpoint 接口地址
+     * @param api_key API密钥
+     * @param prompt 提示词
+     * @param user 用户
+     */
+    OpenAIVisionResponse RequestVision(std::string &endpoint, std::string &api_key, const std::string &model, const std::string &prompt, const std::string &base64)
+    {
+        OpenAIVisionResponse response;
+        response = openai.send_to_vision(endpoint, api_key, model, prompt, base64);
+        return response;
+    }
+
+    /**
+     * @brief 图片生成请求
+     * @param prompt 提示词
+     * @param user 用户
+     * @return 返回一个被序列化的Json的结构体
+     */
+    OpenAIImageResponse RequestDraw(std::string prompt)
+    {
+        OpenAIImageResponse response;
+        // response = openai.send_to_draw(prompt, user->user_models.first, user->user_models.second[1], user->user_models.second[0]);
+
+        return response;
+    }
+
+    // 析构函数
+    ~Dock() {}
+
 private:
-    // API&endpoint空白字符去除
+    /**
+     * @brief 过滤非正常字符
+     * @param str 输入字符串
+     */
     std::string filterNonNormalChars(std::string str)
     {
         std::string result;

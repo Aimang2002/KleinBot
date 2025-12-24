@@ -7,20 +7,21 @@
 
 struct JsonData
 {
-	uint64_t bot_qq;		  // 机器人QQ
-	uint64_t user_id;		  // 发送者QQ
-	int message_timestamp;	  // 消息时间戳
-	int message_id;			  // 消息ID
-	int message_seq;		  // 消息序列号（同一用户连续消息相同）
-	std::string message_type; // 消息类型
-	std::string nickname;	  // 发送者昵称
-	std::string raw_message;  // 原始消息
-	std::string sub_type;	  // 子类型
-	std::string post_type;	  // 上报类型
-	std::string card;		  // ?
-	uint64_t group_id = 0;	  // 群号
-	std::string type;		  // 发送的文本类型（text为文本类型）
-	int error_code;			  // 错误代码
+	uint64_t bot_qq;			  // 机器人QQ
+	uint64_t user_id;			  // 发送者QQ
+	int message_timestamp;		  // 消息时间戳
+	int message_id;				  // 消息ID
+	int message_seq;			  // 消息序列号（同一用户连续消息相同）
+	std::string message_type;	  // 消息类型
+	std::string message_data_url; // 有可能有URL
+	std::string nickname;		  // 发送者昵称
+	std::string raw_message;	  // 原始消息
+	std::string sub_type;		  // 子类型
+	std::string post_type;		  // 上报类型
+	std::string card;			  // ?
+	uint64_t group_id = 0;		  // 群号
+	std::string type;			  // 发送的文本类型（text为文本类型）
+	int error_code;				  // 错误代码
 };
 
 class JsonParse
@@ -29,6 +30,12 @@ public:
 	static JsonParse &getInstance();
 	JsonData jsonReader(std::string &json_str); // json数据解析
 	std::string getAttributeFromChoices(std::string &json_str, std::string Attribute_type);
+
+	/**
+	 * @brief 对传入进来的字符串进行转义、去双引号
+	 * @param message 需要转义的字符串
+	 * @return 返回结果
+	 */
 	std::string toJson(std::string message);
 	void CQCodeSeparation(std::string &message);
 	bool findKeyAndValue(const std::string &json, const std::string &key, std::string &value);

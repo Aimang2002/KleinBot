@@ -5,7 +5,7 @@
 
 Log::Log()
 {
-    maxLength = 256;
+    maxLength = 1024;
     isRunning = false;
 }
 

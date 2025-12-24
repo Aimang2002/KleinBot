@@ -13,12 +13,9 @@ public:
      *
      * @param message 	源数据
      *
-     *@return   返回-30，文件超过限定发送的最大值；
-                返回-1.处理有误；
-                返回1，使用路径传输;
-                返回2，使用base64编码传输;
+     *@return  返回文件路径
      */
-    short fixImageSizeTo4K(std::string &message);
+    std::string fixImageSizeTo4K(const std::string &message);
     std::vector<std::string> getFileSuffix(const std::string directoryPath);
     ~Realesrgan();
 

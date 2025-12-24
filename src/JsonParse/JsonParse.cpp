@@ -131,6 +131,13 @@ JsonData JsonParse::jsonReader(std::string &json_str)
 		{
 			data.type = firstMsg["type"].get<std::string>();
 		}
+
+		// 如果有URL，则提取
+		if (firstMsg.contains("data") && firstMsg["data"].is_object())
+		{
+			const auto &firstMsg_data = firstMsg["data"];
+			data.message_data_url = firstMsg_data.value("url", "");
+		}
 	}
 
 	data.bot_qq = doc.value("self_id", 0LL);
@@ -186,8 +193,23 @@ std::string JsonParse::getAttributeFromChoices(std::string &json_str, std::strin
 
 std::string JsonParse::toJson(std::string message)
 {
-	LOG_WARNING("用了已经废弃的函数");
-	return message;
+	try
+	{
+		// 使用nlohmann::json来转义字符串中的特殊字符
+		std::string escaped = nlohmann::json(message).dump();
+		// 去掉外层的引号，因为调用者会在外面添加引号
+		if (!escaped.empty() && escaped[0] == '"' && escaped.back() == '"')
+		{
+			return escaped.substr(1, escaped.length() - 2);
+		}
+		return escaped;
+	}
+	catch (const std::exception& e)
+	{
+		// 如果转义失败，返回原始字符串（不转义）
+		LOG_ERROR("JSON转义失败: " + std::string(e.what()) + ", 输入: " + message);
+		return message;
+	}
 }
 
 bool JsonParse::findValueByKey(const nlohmann::json &node, const std::string &key, std::string &value)
