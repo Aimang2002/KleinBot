@@ -1206,7 +1206,7 @@ std::string Message::textToVoice(const std::string &text)
 	if (audioPath.find(".wav") != std::string::npos)
 	{
 		// 使用路径传输
-		std::string URL = "file://" + text;
+		std::string URL = "file://" + audioPath;
 		response = CQCode("record", "file", URL);
 		return response;
 	}

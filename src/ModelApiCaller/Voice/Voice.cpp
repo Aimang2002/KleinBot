@@ -26,6 +26,8 @@ std::string Voice::toAudio(const std::string &text)
     std::filesystem::path filePath = ConfigManager::getInstance().configVariable("VITS_FILE_SAVE_PATH");
     filePath /= std::to_string(timestamp) + ".wav";
 
+    LOG_DEBUG("语音文件：" + filePath.string());
+
     // 创建文件用来保存音频数据
     std::ofstream audioFile(filePath, std::ios::binary);
     if (!audioFile.is_open())
