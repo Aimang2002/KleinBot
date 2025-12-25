@@ -82,6 +82,7 @@ OpenAIChatResponse OpenAIStandard::send_to_chat(const std::string endpoint, std:
         curl_easy_setopt(curl, CURLOPT_URL, this->filterNonNormalChars(endpoint).c_str());
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, message.c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, message.length());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_chat);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
@@ -147,7 +148,6 @@ OpenAIVisionResponse OpenAIStandard::send_to_vision(const std::string endpoint, 
     nlohmann::json payload = {
         {"model", model},
         {"messages", messages}};
-    std::string json_string = payload.dump();
 
     CURL *curl;
     CURLcode res;
@@ -167,15 +167,17 @@ OpenAIVisionResponse OpenAIStandard::send_to_vision(const std::string endpoint, 
             {"model", model},
             {"messages", messages}};
 
+        std::string message = payload_send_char_message.dump();
         std::string response;
         // 封装HTTP POST数据报 + 设置libcurl选项
-        curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str()); // 添加端点
+        curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_send_char_message.dump().c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, message.c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, message.length());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_chat);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
-        OpenAIVisionResponse Data;
+        OpenAIVisionResponse responseFormat;
         long http_code;
 
         // 执行HTTP请求
@@ -194,22 +196,21 @@ OpenAIVisionResponse OpenAIStandard::send_to_vision(const std::string endpoint, 
         }
         if (request < 1)
         {
-            Data.choice_message_content = "系统提示：无法将问题发送给OpenAI，请稍后再重试或联系管理员...";
+            responseFormat.choice_message_content = "系统提示：无法将问题发送给OpenAI，请稍后再重试或联系管理员...";
             LOG_ERROR("无法请求...");
-            return Data;
+            return responseFormat;
         }
 
         // 清理资源
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
 #ifdef DEBUG
-        std::cout << "OpenAI 返回的原始消息：" << Data.choice_message_content << std::endl;
+        std::cout << "OpenAI 返回的原始消息：" << response << std::endl;
 #endif
         // 响应数据格式化
-        nlohmann::json doc = nlohmann::json::parse(Data.choice_message_content);
-        std::cout << "无误返回:" << doc.dump() << std::endl;
-        Data.choice_message_content = doc.dump().c_str();
-        return Data;
+        responseFormat = this->vision_json_parse(response);
+        responseFormat.code = http_code;
+        return responseFormat;
     }
 
     OpenAIVisionResponse tmp;
@@ -301,18 +302,11 @@ OpenAIChatResponse OpenAIStandard::chat_json_parse(const std::string &response)
         }
 
         responseFormat.id = json_data.value("id", "");
+        responseFormat.model = json_data.value("model", "");
         responseFormat.object = json_data.value("object", "");
         responseFormat.created = json_data.value("created", 0);
-        responseFormat.model = json_data.value("model", "");
-        if (json_data.contains("usage") && json_data["usage"].is_object())
-        {
-            auto &usage = json_data["usage"];
-            responseFormat.usage_prompt_tokens = usage.value("prompt_tokens", 0);
-            responseFormat.usage_completion_tokens = usage.value("completion_tokens", 0);
-            responseFormat.usage_total_tokens = usage.value("total_tokens", 0);
-        }
 
-        if (json_data["choices"].is_array())
+        if (json_data["choices"].is_array() && json_data["choices"].size() > 0)
         {
             for (auto &choice : json_data["choices"])
             {
@@ -326,6 +320,19 @@ OpenAIChatResponse OpenAIStandard::chat_json_parse(const std::string &response)
                 responseFormat.choices_finish_reason = choice.value("finish_reason", "");
             }
         }
+        else
+        {
+            responseFormat.choices_message_content = "没有choices字段";
+        }
+
+        if (json_data.contains("usage") && json_data["usage"].is_object())
+        {
+            auto &usage = json_data["usage"];
+            responseFormat.usage_prompt_tokens = usage.value("prompt_tokens", 0);
+            responseFormat.usage_completion_tokens = usage.value("completion_tokens", 0);
+            responseFormat.usage_total_tokens = usage.value("total_tokens", 0);
+        }
+
         return responseFormat;
     }
     catch (const std::exception &e)
@@ -377,18 +384,19 @@ OpenAIVisionResponse OpenAIStandard::vision_json_parse(const std::string &respon
     try
     {
         nlohmann::json doc = nlohmann::json::parse(response);
+        Data.id = doc.value("id", "");
+        Data.model = doc.value("model", "");
+        Data.created = doc.value("created", -1);
 
-        // 获取 choice 中的内容
-        if (doc["choice"].is_array() && !doc["choice"].empty() && doc["choice"][0].is_object())
+        // 获取 choices 中的内容
+        if (doc["choices"].is_array() && !doc["choices"].empty() && doc["choices"][0].is_object())
         {
-            nlohmann::json choice = doc["choice"][0];
-
-            Data.finish_reason = choice.value("finish_reason", "stop");
-
-            if (choice["message"].is_object())
+            nlohmann::json choices = doc["choices"][0];
+            Data.finish_reason = choices.value("finish_reason", "");
+            if (choices["message"].is_object())
             {
-                Data.choice_message_content = choice["message"].value("content", "");
-                Data.choice_message_refusal = choice["message"].value("refusal", "");
+                Data.choice_message_content = choices["message"].value("content", "");
+                Data.choice_message_refusal = choices["message"].value("refusal", "");
             }
         }
 
@@ -400,14 +408,11 @@ OpenAIVisionResponse OpenAIStandard::vision_json_parse(const std::string &respon
             Data.usage_prompt_tokens = usage.value("prompt_tokens", 0);
             Data.usage_total_tokens = usage.value("total_tokens", 0);
         }
-
-        Data.model = doc.value("model", "");
-        Data.created = doc.value("created", 0);
     }
     catch (const std::exception &e)
     {
         LOG_ERROR("返回的内容不是有效的Json对象。详细：" + std::string(e.what()));
-        return {};
+        Data.choice_message_content = "系统提示：非法的Json";
     }
     return Data;
 }

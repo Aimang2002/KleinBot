@@ -153,7 +153,7 @@ void Message::handleMessage(JsonData &current_data)
 		}
 		else if (current_data.raw_message.find("CQ:image") != std::string::npos && !current_data.message_data_url.empty())
 		{
-			this->provideImageRecognition(current_data.user_id, current_data.raw_message, current_data.message_data_url);
+			current_data.raw_message = this->provideImageRecognition(current_data.user_id, current_data.raw_message, current_data.message_data_url);
 		}
 		else if (current_data.raw_message.find("#搜歌:") != std::string::npos || current_data.raw_message.find("#搜歌：") != std::string::npos)
 		{
@@ -1125,7 +1125,6 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &input);
 
 		res = curl_easy_perform(curl_handle);
-
 		if (res != CURLE_OK)
 		{
 			LOG_ERROR("Failed to download image: " + std::string(curl_easy_strerror(res)));
@@ -1139,13 +1138,12 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 		return {};
 	}
 	curl_easy_cleanup(curl_handle);
-
-	LOG_INFO("图片下载完成");
+	LOG_INFO("图片下载完成，大小为：" + std::to_string(input.size() / 1024.0) + "KB");
 
 	// 下载完成，将数据转为base64编码
 	std::string base64 = this->dataToBase64(input);
 
-	// 封装消息，向OpenAI发送  这里可以检查收到的信息是否合法
+	// 封装消息，向OpenAI发送  这里可以检查收到的信息是否合法text
 	std::cout << "send to vision model..." << std::endl;
 	std::string endpoint = ConfigManager::getInstance().configVariable("VISION_MODEL_ENDPOINT");
 	std::string api_key = ConfigManager::getInstance().configVariable("VISION_MODEL_API_KEY");
@@ -1154,9 +1152,10 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 	auto response = this->dock->RequestVision(endpoint, api_key, model, conversation, base64);
 
 	std::string answer = response.choice_message_content;
+	std::cout << "OpenAI response: " << answer << std::endl;
+
 	if (response.code == 200)
 	{
-
 		if (response.finish_reason == "length")
 		{
 			answer += "\n系统提示：返回的内容超过管理员设定的最大长度。";
@@ -1164,11 +1163,6 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 		else if (response.finish_reason == "content_filter")
 		{
 			answer = response.choice_message_refusal;
-		}
-		else
-		{
-			std::cout << "OpenAI response: " << message << std::endl;
-			answer = response.choice_message_content;
 		}
 
 		// 判断是否需要转语音

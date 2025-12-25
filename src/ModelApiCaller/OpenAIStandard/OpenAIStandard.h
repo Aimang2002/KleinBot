@@ -47,6 +47,7 @@ struct OpenAIImageResponse
     int usage_total_tokens;
 };
 
+// 图片识别
 struct OpenAIVisionResponse
 {
     int code;

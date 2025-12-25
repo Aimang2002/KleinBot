@@ -103,6 +103,7 @@ void send_message(Message &messageClass, JsonData &data, bool isErrorTransfer)
 	}
 	else
 	{
+		// 正常内容发送
 		if (strcmp(data.message_type.c_str(), "group") == 0)
 		{
 			messageClass.handleMessage(data);

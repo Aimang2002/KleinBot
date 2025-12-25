@@ -12,7 +12,7 @@ std::mutex MessageQueue::pending_mutex = std::mutex();
 void MessageQueue::original_push_queue(std::string task)
 {
 #ifdef DEBUG
-    LOG_DEBUG("入列消息：" + task);
+    LOG_DEBUG("original_push_queue的入列消息：" + task);
 #endif
     // std::lock_guard(original_mutex);
     original_mutex.lock();
@@ -23,15 +23,14 @@ void MessageQueue::original_push_queue(std::string task)
 void MessageQueue::pending_push_queue(const std::string task, std::string API, uint64_t id, const std::string type)
 {
 #ifdef DEBUG
-    LOG_DEBUG("入列消息：" + task);
+    LOG_DEBUG("pending_push_queue的入列消息：" + task);
 #endif
 
     // 数据封装
-    std::string JsonFormatData;      // 用于接收格式化的json数据
-    std::string getGOCQJsonData;     // 用于接收装有cq码的Json数据
-    std::string webSocketDataPakage; // 用于接收websocket的数据包格式
+    std::string JsonFormatData = task; // 用于接收格式化的json数据
+    std::string getGOCQJsonData;       // 用于接收装有cq码的Json数据
+    std::string webSocketDataPakage;   // 用于接收websocket的数据包格式
 
-    JsonFormatData = JsonParse::getInstance().toJson(task);
     // 判断是群消息还是私聊消息
     if (API.compare(ConfigManager::getInstance().configVariable("GROUP_API")) == 0)
     {
@@ -125,8 +124,6 @@ bool MessageQueue::pending_pop()
 // 封装GO-CQ格式数据
 std::string MessageQueue::privateGOCQFormat(std::string message, uint64_t user_id, const std::string type)
 {
-    std::cout << "message = " << message << std::endl;
-
     std::stringstream json_data;
     if (type.compare("text") == 0)
     {
