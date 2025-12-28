@@ -70,7 +70,7 @@ public:
      *
      * @return 返回一个被序列化的Json的结构体
      */
-    OpenAIVisionResponse RequestVision(std::string &endpoint, std::string &api_key, const std::string &model, const std::string &prompt, const std::string &base64)
+    OpenAIVisionResponse RequestVision(const std::string &endpoint, const std::string &api_key, const std::string &model, const std::string &prompt, const std::string &base64)
     {
         OpenAIVisionResponse response;
         response = openai.send_to_vision(endpoint, api_key, model, prompt, base64);
@@ -85,10 +85,10 @@ public:
      * @param user 用户
      * @return 返回一个被序列化的Json的结构体
      */
-    OpenAIImageResponse RequestDraw(std::string prompt)
+    OpenAIImageResponse RequestDraw(const std::string endpoint, const std::string api_key, const std::string model, const std::string prompt)
     {
         OpenAIImageResponse response;
-        // response = openai.send_to_draw(prompt, user->user_models.first, user->user_models.second[1], user->user_models.second[0]);
+        response = openai.send_to_draw(endpoint, api_key, model, prompt);
         return response;
     }
 

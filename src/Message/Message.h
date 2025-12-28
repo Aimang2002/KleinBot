@@ -207,6 +207,8 @@ private:
 	 *
 	 * @param user_id 	用户QQ
 	 * @param text		文本
+	 *
+	 * @return 			返回带有CQ码的数据
 	 */
 	std::string provideImageCreation(const uint64_t user_id, const std::string &text);
 
@@ -247,15 +249,15 @@ private:
 	std::string bot_message_format;
 	std::string system_message_format;
 	short default_message_line;
-	bool accessibility_chat;																																			// true为开启
-	bool global_Voice;																																						// true为开启
-	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList;									// 轻量型人格
-	std::unordered_map<uint64_t, Person> *user_messages;																					// key = QQ,second = 用户信息
-	std::mutex mutex_message;																																			// message类的锁
-	std::unique_ptr<ComputerStatus> PCStatus;																											// 监控计算机状态
+	bool accessibility_chat;																	  // true为开启
+	bool global_Voice;																			  // true为开启
+	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList;				  // 轻量型人格
+	std::unordered_map<uint64_t, Person> *user_messages;										  // key = QQ,second = 用户信息
+	std::mutex mutex_message;																	  // message类的锁
+	std::unique_ptr<ComputerStatus> PCStatus;													  // 监控计算机状态
 	std::vector<std::pair<std::unordered_set<std::string>, std::vector<std::string>>> chatModels; // 存储模型   first存储该端点的模型名称，second存储该模型的api、端点、API标准
-	std::unique_ptr<Voice> voice;																																	// 语音识别模块
-	std::unique_ptr<Dock> dock;																																		// 对话模块
+	std::unique_ptr<Voice> voice;																  // 语音识别模块
+	std::unique_ptr<Dock> dock;																	  // 对话模块
 };
 
 #endif

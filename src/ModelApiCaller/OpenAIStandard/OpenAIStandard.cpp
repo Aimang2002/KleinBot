@@ -221,14 +221,28 @@ OpenAIVisionResponse OpenAIStandard::send_to_vision(const std::string endpoint, 
 // 调用绘图模型
 OpenAIImageResponse OpenAIStandard::send_to_draw(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt)
 {
-    // api和端点纠正
-    // endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
-    // api_key = OpenAIStandard::filterNonNormalChars(api_key);
-
     CURL *curl;
     CURLcode res;
 
-    // 初始化Curl
+    if (endpoint.empty() || api_key.empty())
+    {
+        LOG_ERROR("endpoint 或 api_key 为空，无法发送请求");
+        OpenAIImageResponse errorResponse;
+        errorResponse.error_message = "系统提示：endpoint或api_key参数无效";
+        errorResponse.code = 400;
+        return errorResponse;
+    }
+
+    // // 检查 prompt 是否包含非法字符（比如 @）
+    // if (prompt.find('@') != std::string::npos)
+    // {
+    //     LOG_ERROR("prompt 参数中包含非法字符 '@'");
+    //     OpenAIImageResponse errorResponse;
+    //     errorResponse.error_message = "系统提示：prompt中不能包含非法字符'@'";
+    //     errorResponse.code = 400;
+    //     return errorResponse;
+    // }
+
     curl = curl_easy_init();
     if (curl)
     {
@@ -243,14 +257,22 @@ OpenAIImageResponse OpenAIStandard::send_to_draw(const std::string endpoint, con
         headers = curl_slist_append(headers, authorization.c_str());
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
-        // 设置请求体
+        // 构造请求体
         nlohmann::json postData;
         postData["model"] = model;
         postData["prompt"] = prompt;
         postData["n"] = 1;
+        postData["quality"] = "hd";
+        postData["user"] = "string";
         postData["size"] = "1024x1024";
 
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postData.dump().c_str());
+        std::string payload = postData.dump();
+
+        LOG_DEBUG(payload);
+
+        // curl_easy_setopt 如果直接传 c_str()，生命周期需要保证，故用变量存储
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload.size());
 
         // 设置响应回调函数
         std::string response;
@@ -270,16 +292,23 @@ OpenAIImageResponse OpenAIStandard::send_to_draw(const std::string endpoint, con
             // LOG_DEBUG(prompt);
         }
 
-        // 解析内容
-        OpenAIImageResponse responseFormat = this->draw_json_parse(prompt);
-        responseFormat.code = static_cast<int>(http_code);
+#ifdef DEBUG
+        LOG_DEBUG("原始内容：" + response);
+#endif
 
         // 清理
         curl_easy_cleanup(curl);
         curl_slist_free_all(headers);
+
+        // 解析内容
+        OpenAIImageResponse responseFormat = this->draw_json_parse(response);
+        responseFormat.code = http_code;
         return responseFormat;
     }
-    return {};
+    OpenAIImageResponse errorResponse;
+    errorResponse.error_message = "系统提示：无法初始化CURL，请联系管理员...";
+    errorResponse.code = 500;
+    return errorResponse;
 }
 
 OpenAIChatResponse OpenAIStandard::chat_json_parse(const std::string &response)
@@ -299,6 +328,7 @@ OpenAIChatResponse OpenAIStandard::chat_json_parse(const std::string &response)
             auto error = json_data["error"];
             responseFormat.error_message = error.value("message", "");
             responseFormat.error_type = error.value("type", "");
+            return responseFormat;
         }
 
         responseFormat.id = json_data.value("id", "");
@@ -351,20 +381,30 @@ OpenAIImageResponse OpenAIStandard::draw_json_parse(const std::string &response)
 
     try
     {
-        nlohmann::json jsonData = nlohmann::json::parse(response);
         OpenAIImageResponse responseFormat;
-        responseFormat.created = jsonData.value("created", 0);
-        responseFormat.output_format = jsonData.value("output_format", "");
-        responseFormat.quality = jsonData.value("quality", "");
-        responseFormat.size = jsonData.value("size", "");
-        if (jsonData.contains("data") && jsonData["data"].is_array() && !jsonData["data"].empty())
+        nlohmann::json doc = nlohmann::json::parse(response);
+
+        // 获取错误信息
+        if (doc.contains("error") && doc.is_object())
         {
-            responseFormat.data_base64 = jsonData["data"][0].value("b64_json", "");
+            auto error = doc["error"];
+            responseFormat.error_message = error.value("message", "");
+            responseFormat.error_type = error.value("type", "");
+            return responseFormat;
         }
 
-        if (jsonData.contains("usage") && jsonData["usage"].is_object())
+        responseFormat.created = doc.value("created", 0);
+        responseFormat.output_format = doc.value("output_format", "");
+        responseFormat.quality = doc.value("quality", "");
+        responseFormat.size = doc.value("size", "");
+        if (doc.contains("data") && doc["data"].is_array() && !doc["data"].empty())
         {
-            const auto &data = jsonData["usage"];
+            responseFormat.data_base64 = doc["data"][0].value("b64_json", "");
+        }
+
+        if (doc.contains("usage") && doc["usage"].is_object())
+        {
+            const auto &data = doc["usage"];
             responseFormat.usage_input_tokens = data.value("input_tokens", 0);
             responseFormat.usage_output_tokens = data.value("output_tokens", 0);
             responseFormat.usage_total_tokens = data.value("total_tokens", 0);
@@ -373,6 +413,7 @@ OpenAIImageResponse OpenAIStandard::draw_json_parse(const std::string &response)
     }
     catch (const std::exception &e)
     {
+        LOG_ERROR("Json解析失败。error：" + std::string(e.what()));
         std::cerr << e.what() << '\n';
     }
     return {};
@@ -380,23 +421,33 @@ OpenAIImageResponse OpenAIStandard::draw_json_parse(const std::string &response)
 
 OpenAIVisionResponse OpenAIStandard::vision_json_parse(const std::string &response)
 {
-    OpenAIVisionResponse Data;
+    OpenAIVisionResponse responseFormat;
     try
     {
         nlohmann::json doc = nlohmann::json::parse(response);
-        Data.id = doc.value("id", "");
-        Data.model = doc.value("model", "");
-        Data.created = doc.value("created", -1);
+
+        // 获取错误信息
+        if (doc.contains("error") && doc.is_object())
+        {
+            auto error = doc["error"];
+            responseFormat.error_message = error.value("message", "");
+            responseFormat.error_type = error.value("type", "");
+            return responseFormat;
+        }
+
+        responseFormat.id = doc.value("id", "");
+        responseFormat.model = doc.value("model", "");
+        responseFormat.created = doc.value("created", -1);
 
         // 获取 choices 中的内容
         if (doc["choices"].is_array() && !doc["choices"].empty() && doc["choices"][0].is_object())
         {
             nlohmann::json choices = doc["choices"][0];
-            Data.finish_reason = choices.value("finish_reason", "");
+            responseFormat.finish_reason = choices.value("finish_reason", "");
             if (choices["message"].is_object())
             {
-                Data.choice_message_content = choices["message"].value("content", "");
-                Data.choice_message_refusal = choices["message"].value("refusal", "");
+                responseFormat.choice_message_content = choices["message"].value("content", "");
+                responseFormat.choice_message_refusal = choices["message"].value("refusal", "");
             }
         }
 
@@ -404,17 +455,17 @@ OpenAIVisionResponse OpenAIStandard::vision_json_parse(const std::string &respon
         if (doc["usage"].is_object())
         {
             nlohmann::json usage = doc["usage"];
-            Data.usage_completion_tokens = usage.value("completion_tokens", 0);
-            Data.usage_prompt_tokens = usage.value("prompt_tokens", 0);
-            Data.usage_total_tokens = usage.value("total_tokens", 0);
+            responseFormat.usage_completion_tokens = usage.value("completion_tokens", 0);
+            responseFormat.usage_prompt_tokens = usage.value("prompt_tokens", 0);
+            responseFormat.usage_total_tokens = usage.value("total_tokens", 0);
         }
     }
     catch (const std::exception &e)
     {
         LOG_ERROR("返回的内容不是有效的Json对象。详细：" + std::string(e.what()));
-        Data.choice_message_content = "系统提示：非法的Json";
+        responseFormat.choice_message_content = "系统提示：非法的Json";
     }
-    return Data;
+    return responseFormat;
 }
 
 // 回调函数

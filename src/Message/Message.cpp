@@ -257,7 +257,7 @@ void Message::handleMessage(JsonData &current_data)
 		else if (current_data.raw_message.find("#生成图片：") != std::string::npos || current_data.raw_message.find("#生成图片:") != std::string::npos)
 		{
 			current_data.type = "CQ";
-			this->provideImageCreation(current_data.user_id, current_data.raw_message);
+			current_data.raw_message = this->provideImageCreation(current_data.user_id, current_data.raw_message);
 		}
 		else if (current_data.raw_message.find("#删除上条对话") != std::string::npos)
 		{
@@ -1236,22 +1236,19 @@ std::string Message::provideImageCreation(const uint64_t user_id, const std::str
 
 	// 开始请求OpenAI
 	std::cout << "send to Model..." << std::endl;
-	prompt = JsonParse::getInstance().toJson(prompt);
-	std::pair<std::string, std::vector<std::string>> p;
-	p.first = ConfigManager::getInstance().configVariable("DRAW_MODEL");
-	p.second.push_back(ConfigManager::getInstance().configVariable("DRAW_MODEL_API_KEY"));
-	p.second.push_back(ConfigManager::getInstance().configVariable("DRAW_MODEL_ENDPOINT"));
-	p.second.push_back(ConfigManager::getInstance().configVariable("DRAW_MODEL_APISTANDARD"));
-	auto result = this->user_messages->find(user_id)->second; // 值拷贝
-	result.user_models = p;
-	auto response = this->dock->RequestDraw(prompt);
+	std::string endpoint = ConfigManager::getInstance().configVariable("DRAW_MODEL_ENDPOINT");
+	std::string api_key = ConfigManager::getInstance().configVariable("DRAW_MODEL_API_KEY");
+	std::string model = ConfigManager::getInstance().configVariable("DRAW_MODEL");
+
+	auto response = this->dock->RequestDraw(endpoint, api_key, model, prompt);
 
 	if (response.code >= 400)
 	{
-		return "网络异常...";
+		return "系统提示：网络异常...";
 	}
-	std::string URL = response.data_base64;
-	return CQCode("image", "base64", URL);
+	std::string base64 = response.data_base64;
+	std::string abc = CQCode("image", "base64", base64);
+	return abc;
 }
 
 std::string Message::removePreviousContext(const uint64_t user_id)

@@ -45,9 +45,13 @@ struct OpenAIImageResponse
     int usage_input_tokens;
     int usage_output_tokens;
     int usage_total_tokens;
+
+    // 错误提示
+    std::string error_message;
+    std::string error_type;
 };
 
-// 图片识别
+// 图片识别响应结构体
 struct OpenAIVisionResponse
 {
     int code;
@@ -62,6 +66,9 @@ struct OpenAIVisionResponse
     int usage_completion_tokens; // 输出token数
     int usage_prompt_tokens;     // 输入token数
     int usage_total_tokens;      // 总token数
+
+    std::string error_message;
+    std::string error_type;
 };
 
 // OpenAIStandard类
@@ -72,12 +79,38 @@ public:
     bool text_translate(const std::string endpoint, const std::string api_key, std::string &text, const std::string model, std::string language);
 
     // 发送至聊天模型
+    /**
+     * @brief 调用聊天模型
+     *
+     * @param endpoint 模型API的URL
+     * @param api_key 模型API的密钥
+     * @param body 请求体
+     * @return OpenAIChatResponse 模型返回的结果
+     */
     OpenAIChatResponse send_to_chat(const std::string endpoint, std::string api_key, const nlohmann::json &body);
 
-    // 调用视觉模型
+    /**
+     * @brief 调用视觉模型
+     *
+     * @param endpoint 模型API的URL
+     * @param api_key 模型API的密钥
+     * @param model 模型名称
+     * @param prompt 提示语
+     * @param base64 图片的base64编码
+     * @return OpenAIVisionResponse 模型返回的结果
+     */
     OpenAIVisionResponse send_to_vision(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt, const std::string &base64);
 
-    // 调用dall-e-3模型
+    /**
+     * @brief 调用绘图模型
+     *
+     * @param endpoint 模型API的URL
+     * @param api_key 模型API的密钥
+     * @param model 模型名称
+     * @param prompt 提示语
+     * @return OpenAIImageResponse 模型返回的结果
+
+     */
     OpenAIImageResponse send_to_draw(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt);
 
 private:
@@ -119,6 +152,16 @@ private:
      */
     OpenAIImageResponse draw_json_parse(const std::string &response);
 
+    /**
+     * @brief 解析 OpenAI Vision API 响应的 JSON 字符串
+     *
+     * 该函数将 OpenAI API 响应的 JSON 数据解析为 OpenAIVisionResponse 结构体。
+     * - 对字符串字段，如果 JSON 缺失则使用空字符串 "" 作为默认值。
+     * - 对整数字段，如果 JSON 缺失则使用 0 作为默认值。
+     * - 当 JSON 格式错误或解析失败时，会记录错误并返回空的 OpenAIVisionResponse。
+     * @param response JSON 格式的响应字符串，通常来自 OpenAI Vision API 响应。
+     * @return OpenAIVisionResponse 解析后的结果对象，如果解析失败则返回空对象。
+     */
     OpenAIVisionResponse vision_json_parse(const std::string &response);
 
     // 回调函数
