@@ -400,6 +400,11 @@ OpenAIImageResponse OpenAIStandard::draw_json_parse(const std::string &response)
         if (doc.contains("data") && doc["data"].is_array() && !doc["data"].empty())
         {
             responseFormat.data_base64 = doc["data"][0].value("b64_json", "");
+            std::string prefix = responseFormat.data_base64.substr(0, 22);
+            if (prefix.find("data:image/png;base64,") != std::string::npos)
+            {
+                responseFormat.data_base64 = responseFormat.data_base64.substr(22);
+            }
         }
 
         if (doc.contains("usage") && doc["usage"].is_object())

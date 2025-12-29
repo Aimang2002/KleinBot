@@ -193,7 +193,7 @@ void Message::handleMessage(JsonData &current_data)
 			auto [success, result] = this->setPersonality(current_data.raw_message, current_data.user_id);
 		}
 		else if (current_data.raw_message.find("#轻量型人格:") != std::string::npos ||
-				 current_data.raw_message.find("#轻量型人格：") != std::string::npos)
+						 current_data.raw_message.find("#轻量型人格：") != std::string::npos)
 		{
 			auto [success, result] = this->setPersonality(current_data.raw_message, current_data.user_id, 1);
 		}
@@ -284,6 +284,7 @@ void Message::handleMessage(JsonData &current_data)
 					current_data.raw_message.append("\n" + name + "\n");
 				}
 			}
+			current_data.raw_message = JsonParse::getInstance().toJson(current_data.raw_message);
 		}
 		else
 		{
@@ -466,9 +467,9 @@ std::string Message::characterMessage(const JsonData &data)
 			}
 			else
 			{
-				user_vector.back().first.push_back(',');							  // 格式调整
+				user_vector.back().first.push_back(',');															// 格式调整
 				format = this->bot_message_format + choices_message_content + "\"},"; // 数据格式化
-				user_vector.push_back(make_pair(format, time(nullptr)));			  // 保存结果
+				user_vector.push_back(make_pair(format, time(nullptr)));							// 保存结果
 
 				// 判断数据是否超出额定值
 				int c_size = 0;
@@ -559,8 +560,8 @@ std::string Message::characterMessage(const JsonData &data)
 
 	// 打印回复内容
 	std::cout << "\033[32m"
-			  << "OpenAI response: "
-			  << "\033[0m" << choices_message_content << std::endl;
+						<< "OpenAI response: "
+						<< "\033[0m" << choices_message_content << std::endl;
 
 	// 判断是否需要提供文本转语音
 	if (this->global_Voice && this->user_messages->find(data.user_id)->second.isOpenVoiceMode)
@@ -677,7 +678,7 @@ std::tuple<bool, std::string> Message::setPersonality(const std::string &roleNam
 	std::ifstream ifs;
 #if defined(__WIN32) || defined(__WIN64)
 	std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter; // 创建宽字符转换器
-	std::wstring wpath = converter.from_bytes(path);				  // string转wstring
+	std::wstring wpath = converter.from_bytes(path);									// string转wstring
 	std::filesystem::path filePath = wpath;
 	ifs.open(filePath);
 #else
@@ -883,7 +884,7 @@ std::string Message::resetChat(const uint64_t user_id)
 		// 重置对话会删除之前的所有信息，但不包括人格信息
 		user->second.user_chatHistory.erase(user->second.user_chatHistory.begin() + 2, user->second.user_chatHistory.end());
 		std::lock_guard<std::mutex>
-			lock(mutex_message);
+				lock(mutex_message);
 		this->user_messages->find(user_id)->second = user->second;
 	}
 	return "会话重置完成！";
@@ -1030,9 +1031,9 @@ void Message::call_fixImageSizeTo4K(std::string &message)
 std::string Message::dataToBase64(const std::string &input)
 {
 	const std::string base64_chars =
-		"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-		"abcdefghijklmnopqrstuvwxyz"
-		"0123456789+/";
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+			"abcdefghijklmnopqrstuvwxyz"
+			"0123456789+/";
 
 	std::string encoded;
 	int val = 0;
@@ -1247,8 +1248,9 @@ std::string Message::provideImageCreation(const uint64_t user_id, const std::str
 		return "系统提示：网络异常...";
 	}
 	std::string base64 = response.data_base64;
-	std::string abc = CQCode("image", "base64", base64);
-	return abc;
+	base64 = base64.insert(0, "base64://");
+	std::string result = CQCode("image", "file", base64);
+	return result;
 }
 
 std::string Message::removePreviousContext(const uint64_t user_id)

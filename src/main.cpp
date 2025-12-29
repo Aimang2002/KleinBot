@@ -47,7 +47,7 @@ void pollingThread()
 		{
 			// 数据处理&发送
 			nlohmann::json payload = {
-				{{"role", "user"}, {"content", message}}};
+					{{"role", "user"}, {"content", message}}};
 
 			// 构建用户信息
 			Person p;
@@ -241,8 +241,8 @@ void init()
  -------------------------------------------)";
 
 	std::cout << "\033[32m" << "\n"
-			  << Klein_logo << "\n"
-			  << "\033[0m" << std::endl; // 显示logo
+						<< Klein_logo << "\n"
+						<< "\033[0m" << std::endl; // 显示logo
 
 	// 版本
 	LOG_INFO("当前Klein版本：" + std::string(__KLEIN_VERSION__));
