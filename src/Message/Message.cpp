@@ -954,21 +954,19 @@ std::string Message::switchModel(const std::string &message, const uint64_t user
 	{
 		model = message.substr(message.find("：") + 3);
 	}
-	std::string modelName = message;
-
 	// 消除后缀空格
-	while (modelName.back() == ' ')
+	while (model.back() == ' ')
 	{
-		modelName.erase(modelName.size() - 1, 1);
+		model.erase(model.size() - 1, 1);
 	}
 
 	// 寻找相同的模型名称
 	std::pair<std::string, std::vector<std::string>> newModel;
 	for (auto &entry : this->chatModels)
 	{
-		if (entry.first.find(modelName) != entry.first.end())
+		if (entry.first.find(model) != entry.first.end())
 		{
-			newModel.first = modelName;
+			newModel.first = model;
 			newModel.second.push_back(entry.second[0]);
 			newModel.second.push_back(entry.second[1]);
 			newModel.second.push_back(entry.second[2]);
@@ -976,17 +974,6 @@ std::string Message::switchModel(const std::string &message, const uint64_t user
 			return std::string("设置成功，当前模型为:" + this->user_messages->find(user_id)->second.user_models.first);
 		}
 	}
-	/*
-	for (auto GPTModel = this->chatModels.begin(); GPTModel != this->chatModels.end(); GPTModel++)
-	{
-		if (GPTModel->first == modelName)
-		{
-			this->user_messages->find(user_id)->second.user_models = *GPTModel;
-			message = "设置成功，当前模型为:" + this->user_messages->find(user_id)->second.user_models.first;
-			return;
-		}
-	}
-	*/
 	return "系统提示：不存在的模型!";
 }
 
