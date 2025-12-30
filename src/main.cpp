@@ -55,7 +55,6 @@ void pollingThread()
 			p.isOpenVoiceMode = false;
 			p.presence_penalty = ConfigManager::getInstance().configVariable("presence_penalty");
 			p.temperature = ConfigManager::getInstance().configVariable("temperature");
-			p.top_p = ConfigManager::getInstance().configVariable("top_p");
 			p.user_models.first = ConfigManager::getInstance().configVariable("DEFAULT_MODEL");
 			p.user_models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_API_KEY"));
 			p.user_models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_ENDPOINT"));

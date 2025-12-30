@@ -26,7 +26,8 @@ Message::Message()
 	this->system_message_format = R"({"role": "user", "content": ")"; // system
 	this->bot_message_format = R"({"role": "assistant", "content": ")";
 	this->users_message_format = R"({"role": "user", "content": ")";
-	this->default_personality = "You are my assistant, your name is " + ConfigManager::getInstance().configVariable("QBOT_NAME") + "\"},";
+	this->default_personality = "You are my assistant, your name is " + ConfigManager::getInstance().configVariable("QBOT_NAME") +
+															"Solve my problem with simple and intuitive answers, and don't carry any emoji expressions.\"},";
 	this->default_message_line = 2;
 
 // 载入模型名称
@@ -99,7 +100,6 @@ bool Message::addUsers(uint64_t user_id)
 		person.user_models = models;
 		person.isOpenVoiceMode = false;
 		person.temperature = ConfigManager::getInstance().configVariable("temperature");
-		person.top_p = ConfigManager::getInstance().configVariable("top_p");
 		person.frequency_penalty = ConfigManager::getInstance().configVariable("frequency_penalty");
 		person.presence_penalty = ConfigManager::getInstance().configVariable("presence_penalty");
 
@@ -648,7 +648,6 @@ std::tuple<bool, std::string> Message::setPersonality(const std::string &roleNam
 
 		user->second.user_chatHistory[0].first = this->system_message_format + this->default_personality;
 		user->second.temperature = ConfigManager::getInstance().configVariable("temperature");
-		user->second.top_p = ConfigManager::getInstance().configVariable("top_p");
 		user->second.frequency_penalty = ConfigManager::getInstance().configVariable("frequency_penalty");
 		user->second.presence_penalty = ConfigManager::getInstance().configVariable("presence_penalty");
 
@@ -701,7 +700,6 @@ std::tuple<bool, std::string> Message::setPersonality(const std::string &roleNam
 
 	std::string personality;
 	std::string temperature;
-	std::string top_p;
 	std::string frequency_penalty;
 	std::string presence_penalty;
 	size_t begin = 0;
@@ -746,9 +744,6 @@ std::tuple<bool, std::string> Message::setPersonality(const std::string &roleNam
 		return {success, response};
 	}
 
-	top_p = originData->substr(begin, range);
-	originData->erase(0, originData->find("}") + 1);
-
 	begin = originData->find("Frequency_penalty") + 19;
 	range = originData->find("}") - begin;
 	if (!myLambda())
@@ -792,10 +787,6 @@ std::tuple<bool, std::string> Message::setPersonality(const std::string &roleNam
 		{
 			Lambda(presence_penalty);
 		}
-		if (std::stof(top_p) < 0.0 || std::stof(top_p) > 1.0)
-		{
-			Lambda(top_p);
-		}
 	}
 	catch (const std::exception &e)
 	{
@@ -804,7 +795,6 @@ std::tuple<bool, std::string> Message::setPersonality(const std::string &roleNam
 		temperature = "0";
 		presence_penalty = "0";
 		frequency_penalty = "0";
-		top_p = "0";
 	}
 
 	// 参数更新
@@ -813,7 +803,6 @@ std::tuple<bool, std::string> Message::setPersonality(const std::string &roleNam
 	this->mutex_message.unlock();
 	user->second.user_chatHistory[0].first = this->system_message_format + personality + "\"},";
 	user->second.temperature = temperature;
-	user->second.top_p = top_p;
 	user->second.frequency_penalty = frequency_penalty;
 	user->second.presence_penalty = presence_penalty;
 

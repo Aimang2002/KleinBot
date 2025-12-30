@@ -7,51 +7,6 @@
 #include <unistd.h>
 #include <string>
 
-// 文本翻译
-bool OpenAIStandard::text_translate(const std::string endpoint, const std::string api_key, std::string &text, const std::string model, std::string language)
-{
-    LOG_INFO("使用了文本翻译");
-    // 调整格式
-    std::string ss;
-    if (language == "EN")
-    {
-        ss = R"({"model":")" + model + "\",\"messages\":[";
-        ss += R"({"role": "system", "content": "You will be provided with a sentence in English, and your task is to translate it into English."},
-        {"role": "assistant", "content": "OK"},
-        {"role": "user", "content": ")" +
-              text + "\"}]";
-        ss += R"(,"temperature":0.1,"top_p":0.9,"frequency_penalty":0,"presence_penalty":0)" + std::string("}"); // 超参数
-    }
-    if (language == "ZH")
-    {
-        ss = R"("model":")" + model + "\",\"messages\":[";
-        ss += R"([
-        {"role": "system", "content": "翻译成中文"},
-        {"role": "assistant", "content": "好的"},
-        {"role": "user", "content": ")";
-        ss += text + "\"}]";
-        ss += R"(,"temperature":0.1,"top_p":0.9,"frequency_penalty":0,"presence_penalty":0)" + std::string("}");
-    }
-
-    text = ss;
-
-    send_to_chat(text, endpoint, api_key);
-
-    // json解析
-    if (text.find("choices") != text.npos)
-    {
-        text = text.substr(text.find("content") + 10); // 删除前缀
-        text = text.substr(0, text.find("}") - 1);
-    }
-    else
-    {
-        LOG_ERROR("翻译失败！错误消息：" + text);
-        return false;
-    }
-
-    return true;
-}
-
 OpenAIChatResponse OpenAIStandard::send_to_chat(const std::string endpoint, std::string api_key, const nlohmann::json &body)
 {
     /*
@@ -131,12 +86,6 @@ OpenAIChatResponse OpenAIStandard::send_to_chat(const std::string endpoint, std:
 // 调用视觉模型
 OpenAIVisionResponse OpenAIStandard::send_to_vision(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt, const std::string &base64)
 {
-    // api和端点纠正
-    // endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
-    // api_key = OpenAIStandard::filterNonNormalChars(api_key);
-    // endpoint = OpenAIStandard::filterNonNormalChars(endpoint);
-    // api_key = OpenAIStandard::filterNonNormalChars(api_key);
-
     nlohmann::json content = nlohmann::json::array();
     content.push_back({{"type", "text"}, {"text", prompt}});
     content.push_back({{"type", "image_url"},
@@ -232,16 +181,6 @@ OpenAIImageResponse OpenAIStandard::send_to_draw(const std::string endpoint, con
         errorResponse.code = 400;
         return errorResponse;
     }
-
-    // // 检查 prompt 是否包含非法字符（比如 @）
-    // if (prompt.find('@') != std::string::npos)
-    // {
-    //     LOG_ERROR("prompt 参数中包含非法字符 '@'");
-    //     OpenAIImageResponse errorResponse;
-    //     errorResponse.error_message = "系统提示：prompt中不能包含非法字符'@'";
-    //     errorResponse.code = 400;
-    //     return errorResponse;
-    // }
 
     curl = curl_easy_init();
     if (curl)
@@ -512,16 +451,6 @@ bool OpenAIStandard::isKeyError(std::string &message)
     }
     return false;
 }
-
-/*
-std::string OpenAIStandard::ResponseJsonVerify(std::string str, std::string sub)
-{
-    LOG_DEBUG("裁剪前：" + str);
-    // 该函数的主要目的是把json后面的东西给分割掉
-    return str.substr(0, str.rfind(sub) + sub.size());
-}
-*/
-
 void OpenAIStandard::VerifyCertificate(CURL *curl)
 {
 #if defined(__WIN32) || defined(__WIN64)

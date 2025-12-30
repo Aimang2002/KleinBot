@@ -91,7 +91,7 @@ bool ConfigManager::refreshConfiguation(std::string configPath)
 
 std::string ConfigManager::configVariable(std::string variable)
 {
-    std::string result = (this->configuration)[variable];
+    std::string result = this->configuration[variable];
     if (result.size() < 1)
     {
         LOG_FATAL("在寻找变量“" + variable + "”时不存在，可能会导致程序崩溃...");
@@ -224,5 +224,4 @@ void ConfigManager::validDetection()
     check_float("temperature", 0.0f, 2.0f);
     check_float("presence_penalty", -2.0f, 2.0f);
     check_float("frequency_penalty", -2.0f, 2.0f);
-    check_float("top_p", 0.0f, 1.0f);
 }

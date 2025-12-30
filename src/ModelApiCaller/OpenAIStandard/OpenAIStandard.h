@@ -75,9 +75,6 @@ struct OpenAIVisionResponse
 class OpenAIStandard
 {
 public:
-    // 文本翻译
-    bool text_translate(const std::string endpoint, const std::string api_key, std::string &text, const std::string model, std::string language);
-
     // 发送至聊天模型
     /**
      * @brief 调用聊天模型
