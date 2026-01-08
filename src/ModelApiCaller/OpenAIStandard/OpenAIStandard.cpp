@@ -64,13 +64,13 @@ OpenAIChatResponse OpenAIStandard::send_to_chat(const std::string endpoint, std:
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
 
-        if (http_code >= 400)
-        {
-            OpenAIChatResponse tmp = this->chat_json_parse(response);
-            tmp.code = http_code;
-            tmp.choices_message_content = "系统提示：无法将问题发送给OpenAI，请稍后再重试或联系管理员...";
-            return tmp;
-        }
+        // if (http_code >= 400)
+        // {
+        //     OpenAIChatResponse tmp = this->chat_json_parse(response);
+        //     tmp.code = http_code;
+        //     tmp.choices_message_content = "系统提示：无法将问题发送给OpenAI，请稍后再重试或联系管理员...";
+        //     return tmp;
+        // }
 
         // 响应格式化
         OpenAIChatResponse responseFormat = this->chat_json_parse(response);

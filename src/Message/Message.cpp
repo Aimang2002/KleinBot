@@ -27,7 +27,7 @@ Message::Message()
 	this->bot_message_format = R"({"role": "assistant", "content": ")";
 	this->users_message_format = R"({"role": "user", "content": ")";
 	this->default_personality = "You are my assistant, your name is " + ConfigManager::getInstance().configVariable("QBOT_NAME") +
-															"Solve my problem with simple and intuitive answers, and don't carry any emoji expressions.\"},";
+								"Solve my problem with simple and intuitive answers, and don't carry any emoji expressions.\"},";
 	this->default_message_line = 2;
 
 // 载入模型名称
@@ -193,7 +193,7 @@ void Message::handleMessage(JsonData &current_data)
 			auto [success, result] = this->setPersonality(current_data.raw_message, current_data.user_id);
 		}
 		else if (current_data.raw_message.find("#轻量型人格:") != std::string::npos ||
-						 current_data.raw_message.find("#轻量型人格：") != std::string::npos)
+				 current_data.raw_message.find("#轻量型人格：") != std::string::npos)
 		{
 			auto [success, result] = this->setPersonality(current_data.raw_message, current_data.user_id, 1);
 		}
@@ -467,9 +467,9 @@ std::string Message::characterMessage(const JsonData &data)
 			}
 			else
 			{
-				user_vector.back().first.push_back(',');															// 格式调整
+				user_vector.back().first.push_back(',');							  // 格式调整
 				format = this->bot_message_format + choices_message_content + "\"},"; // 数据格式化
-				user_vector.push_back(make_pair(format, time(nullptr)));							// 保存结果
+				user_vector.push_back(make_pair(format, time(nullptr)));			  // 保存结果
 
 				// 判断数据是否超出额定值
 				int c_size = 0;
@@ -510,8 +510,15 @@ std::string Message::characterMessage(const JsonData &data)
 		}
 		else
 		{
-			LOG_ERROR("OpenAI response error: " + std::to_string(response.code));
-			choices_message_content = "系统提示：模型无返回内容！";
+			LOG_ERROR("OpenAI response error code: " + std::to_string(response.code));
+			if (!response.error_message.empty())
+			{
+				choices_message_content = "系统提示：" + response.error_message;
+			}
+			else
+			{
+				choices_message_content = "系统提示：模型无返回内容！";
+			}
 			return choices_message_content;
 		}
 	}
@@ -560,8 +567,8 @@ std::string Message::characterMessage(const JsonData &data)
 
 	// 打印回复内容
 	std::cout << "\033[32m"
-						<< "OpenAI response: "
-						<< "\033[0m" << choices_message_content << std::endl;
+			  << "OpenAI response: "
+			  << "\033[0m" << choices_message_content << std::endl;
 
 	// 判断是否需要提供文本转语音
 	if (this->global_Voice && this->user_messages->find(data.user_id)->second.isOpenVoiceMode)
@@ -677,7 +684,7 @@ std::tuple<bool, std::string> Message::setPersonality(const std::string &roleNam
 	std::ifstream ifs;
 #if defined(__WIN32) || defined(__WIN64)
 	std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter; // 创建宽字符转换器
-	std::wstring wpath = converter.from_bytes(path);									// string转wstring
+	std::wstring wpath = converter.from_bytes(path);				  // string转wstring
 	std::filesystem::path filePath = wpath;
 	ifs.open(filePath);
 #else
@@ -873,7 +880,7 @@ std::string Message::resetChat(const uint64_t user_id)
 		// 重置对话会删除之前的所有信息，但不包括人格信息
 		user->second.user_chatHistory.erase(user->second.user_chatHistory.begin() + 2, user->second.user_chatHistory.end());
 		std::lock_guard<std::mutex>
-				lock(mutex_message);
+			lock(mutex_message);
 		this->user_messages->find(user_id)->second = user->second;
 	}
 	return "会话重置完成！";
@@ -1007,9 +1014,9 @@ void Message::call_fixImageSizeTo4K(std::string &message)
 std::string Message::dataToBase64(const std::string &input)
 {
 	const std::string base64_chars =
-			"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-			"abcdefghijklmnopqrstuvwxyz"
-			"0123456789+/";
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		"abcdefghijklmnopqrstuvwxyz"
+		"0123456789+/";
 
 	std::string encoded;
 	int val = 0;
