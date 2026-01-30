@@ -1,4 +1,5 @@
 #include "MyWebSocket.h"
+#include "../utils/Utils.hpp"
 
 void MyWebSocket::connectWebSocket(const std::string _url = "/")
 {
@@ -44,7 +45,7 @@ void MyWebSocket::connectWebSocket(const std::string _url = "/")
 #endif
 
                 // 消息类型过滤
-                if (!filterMessageType(message))
+                if (!utils::Noise_intercept(message))
                 {
                     // 加入消息队列
                     MessageQueue::original_push_queue(message);
@@ -52,7 +53,7 @@ void MyWebSocket::connectWebSocket(const std::string _url = "/")
                 else
                 {
 #ifdef DEBUG
-                    LOG_WARNING("过滤消息");
+                    LOG_INFO("过滤消息");
 #endif
                 }
             }
@@ -65,14 +66,4 @@ void MyWebSocket::connectWebSocket(const std::string _url = "/")
         LOG_FATAL("正向ws已失联，5秒后将重新连接...");
         std::this_thread::sleep_for(std::chrono::seconds(5)); // 休眠5秒后重连
     }
-}
-
-bool MyWebSocket::filterMessageType(std::string originalMessage)
-{
-    // 过滤非消息事件
-    if (originalMessage.find(R"("post_type":"message")") == originalMessage.npos)
-    {
-        return true;
-    }
-    return false;
 }
