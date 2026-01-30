@@ -127,22 +127,6 @@ std::string MessageQueue::privateGOCQFormat(std::string message, uint64_t user_i
     std::stringstream json_data;
     if (type.compare("text") == 0)
     {
-        // 转义“ [ ”
-        /*
-        auto position = message.find("[");
-        while (position != std::string::npos)
-        {
-            message.replace(position, 5, "&#91;");
-            position = message.find("[", position + 5);
-        }
-        // 转义转义“ ] ”
-        position = message.find("]");
-        while (position != std::string::npos)
-        {
-            message.replace(position, 5, "&#93;");
-            position = message.find("]", position + 5);
-        }
-        */
         json_data << R"({"type": "text",)";
         json_data << R"("user_id":)" << user_id << R"(,"message":")" << message << R"("})";
     }
@@ -158,22 +142,6 @@ std::string MessageQueue::groupGOCQFormat(std::string message, uint64_t group_id
     std::stringstream json_data;
     if (type.compare("text") == 0)
     {
-        // 转义“ [ ”
-        /*
-        auto position = message.find("[");
-        while (position != std::string::npos)
-        {
-            message.replace(position, 5, "&#91;");
-            position = message.find("[", position + 5);
-        }
-        // 转义转义“ ] ”
-        position = message.find("]");
-        while (position != std::string::npos)
-        {
-            message.replace(position, 5, "&#93;");
-            position = message.find("]", position + 5);
-        }
-        */
         json_data << R"({"type": "text",)";
         json_data << R"("group_id":)" << group_id << R"(,"message":")" << message << R"("})";
     }
