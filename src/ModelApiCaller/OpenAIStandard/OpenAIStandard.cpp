@@ -285,6 +285,21 @@ OpenAIChatResponse OpenAIStandard::chat_json_parse(const std::string &response)
                     auto &msg = choice["message"];
                     responseFormat.choices_message_role = msg.value("role", "");
                     responseFormat.choices_message_content = msg.value("content", "");
+                    // 过滤 <think> 内容
+                    std::string &s = responseFormat.choices_message_content;
+                    if (s.find("<think>") == 0)
+                    {
+                        auto end = s.find("</think>");
+                        if (end != std::string::npos)
+                        {
+                            s = s.erase(0, end + 8);
+                        }
+                    }
+                    // 去除前导换行
+                    while(s.front() == '\n')
+                    {
+                        s.erase(0, 1);
+                    }
                 }
                 responseFormat.choices_finish_reason = choice.value("finish_reason", "");
             }
