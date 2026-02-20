@@ -11,6 +11,7 @@ std::ostream &operator<<(std::ostream &os, const JsonData &data)
 	os << "  message_id: " << data.message_id << "\n";
 	os << "  message_seq: " << data.message_seq << "\n";
 	os << "  message_type: \"" << data.message_type << "\"\n";
+	os << "  message_data_url: \"" << data.message_data_url << "\"\n";
 	os << "  nickname: \"" << data.nickname << "\"\n";
 	os << "  raw_message: \"" << data.raw_message << "\"\n";
 	os << "  sub_type: \"" << data.sub_type << "\"\n";
@@ -124,15 +125,16 @@ JsonData JsonParse::jsonReader(std::string &json_str)
 		data.card = sender.value("card", "");
 	}
 
-	if (doc.contains("message") && doc["message"].is_array() && !doc["message"].empty())
+	if (doc.contains("message") && doc["message"].is_array() && doc["message"].size() > 1)
 	{
-		const auto &firstMsg = doc["message"][0];
+		auto &firstMsg = doc["message"][0];
 		if (firstMsg.contains("type") && firstMsg["type"].is_string())
 		{
 			data.type = firstMsg["type"].get<std::string>();
 		}
 
 		// 如果有URL，则提取
+		firstMsg = doc["message"][1];
 		if (firstMsg.contains("data") && firstMsg["data"].is_object())
 		{
 			const auto &firstMsg_data = firstMsg["data"];
@@ -204,7 +206,7 @@ std::string JsonParse::toJson(std::string message)
 		}
 		return escaped;
 	}
-	catch (const std::exception& e)
+	catch (const std::exception &e)
 	{
 		// 如果转义失败，返回原始字符串（不转义）
 		LOG_ERROR("JSON转义失败: " + std::string(e.what()) + ", 输入: " + message);
