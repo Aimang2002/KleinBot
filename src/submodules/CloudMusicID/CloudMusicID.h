@@ -3,12 +3,13 @@
 
 #include <iostream>
 #include <string>
+#include "../../../Library/nlohmann/json.hpp"
 
 class CloudMusicID
 {
 public:
     CloudMusicID();
-    std::string searchSong(const std::string songName);
+    nlohmann::json searchSong(const std::string songName);
     ~CloudMusicID();
 
 private:
