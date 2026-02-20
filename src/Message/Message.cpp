@@ -27,7 +27,7 @@ Message::Message()
 	this->bot_message_format = R"({"role": "assistant", "content": ")";
 	this->users_message_format = R"({"role": "user", "content": ")";
 	this->default_personality = "You are my assistant, your name is " + ConfigManager::getInstance().configVariable("QBOT_NAME") +
-								"Solve my problem with simple and intuitive answers, and don't carry any emoji expressions.\"},";
+								"\"},";
 	this->default_message_line = 2;
 
 // 载入模型名称
@@ -141,8 +141,8 @@ void Message::handleMessage(JsonData &current_data)
 			if (success)
 			{
 				current_data.raw_message = message_;
+				return;
 			}
-			// 否则不是管理员的消息
 		}
 
 		// 内置回复判断
@@ -159,6 +159,7 @@ void Message::handleMessage(JsonData &current_data)
 		{
 			current_data.type = "CQ";
 			current_data.raw_message = musicShareMessage(current_data.raw_message, 1);
+			current_data.raw_message = JsonParse::getInstance().toJson(current_data.raw_message);
 		}
 		else if (current_data.raw_message.compare("#帮助") == 0)
 		{
@@ -173,6 +174,7 @@ void Message::handleMessage(JsonData &current_data)
 				current_data.raw_message.assign((std::istreambuf_iterator<char>(ifs.rdbuf())), std::istreambuf_iterator<char>());
 				ifs.close();
 			}
+			current_data.raw_message = JsonParse::getInstance().toJson(current_data.raw_message);
 		}
 		else if (!strcmp(current_data.raw_message.c_str(), "#人格帮助"))
 		{
@@ -595,27 +597,27 @@ std::string Message::musicShareMessage(const std::string &message, short platfor
 	std::string musicName = message.substr(result);
 
 	CloudMusicID cm;
-	int num = 0;
 	uint64_t songID = 0;
 
 	switch (platform)
 	{
 	case 1:
 	{
-		std::string res = cm.searchSong(musicName);
-		try
+		nlohmann::json res = cm.searchSong(musicName);
+		if (res.contains("result") && res["result"].is_object())
 		{
-			songID = std::stoll(res);
+			auto r = res["result"];
+			if (r.contains("songs") && r["songs"].is_array() && !r["songs"].empty() && r["songs"][0].is_object())
+			{
+				songID = r["songs"][0].value("id", uint64_t(0));
+			}
 		}
-		catch (const std::exception &e)
-		{
-			std::cerr << "捕获异常：" << e.what() << '\n';
-		}
-		return CQCode("music", "type", "163", "id", res);
+		return CQCode("music", "type", "163", "id", songID);
 	}
 	default:
 		return {};
 	}
+	return {};
 }
 
 void Message::facePackageMessage(std::string &message)
@@ -927,9 +929,10 @@ std::tuple<bool, std::string> Message::adminTerminal(const std::string &message,
 	{
 		str = this->PCStatus->getPublicIP();
 	}
-	bool success = !str.empty();
-	std::string message_ = std::string(success ? message : str);
-	return {success, message_};
+	bool is_success = !str.empty();
+	std::string message_ = std::string(is_success ? str : message);
+	message_ = JsonParse::getInstance().toJson(message_);
+	return {is_success, message_};
 }
 
 std::string Message::switchModel(const std::string &message, const uint64_t user_id)
@@ -1122,7 +1125,7 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 		return {};
 	}
 	curl_easy_cleanup(curl_handle);
-	LOG_INFO("图片下载完成，大小为：" + std::to_string(input.size() / 1024.0) + "KB");
+	LOG_INFO("图片下载完成，大小为：" + std::to_string(input.size() / 1024.0 / 1024.0) + "MB");
 
 	// 下载完成，将数据转为base64编码
 	std::string base64 = this->dataToBase64(input);
