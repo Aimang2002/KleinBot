@@ -27,21 +27,20 @@ public:
         std::string api_key = user->user_models.second[0];
         std::string endpoint = user->user_models.second[1];
 
+        payload["messages"] = nlohmann::json::parse(context);
         // 指定超参数
         if (user == nullptr)
         {
             LOG_WARNING("超参数使用默认值");
-            payload["messages"] = nlohmann::json::parse(context);
-            payload["temperature"] = std::stof(ConfigManager::getInstance().configVariable("temperature"));
-            payload["frequency_penalty"] = std::stof(ConfigManager::getInstance().configVariable("frequency_penalty"));
-            payload["presence_penalty"] = std::stof(ConfigManager::getInstance().configVariable("presence_penalty"));
+            // payload["temperature"] = std::stof(ConfigManager::getInstance().configVariable("temperature"));
+            // payload["frequency_penalty"] = std::stof(ConfigManager::getInstance().configVariable("frequency_penalty"));
+            // payload["presence_penalty"] = std::stof(ConfigManager::getInstance().configVariable("presence_penalty"));
         }
         else
         {
-            payload["messages"] = nlohmann::json::parse(context);
-            payload["temperature"] = std::stof(user->temperature);
-            payload["frequency_penalty"] = std::stof(user->frequency_penalty);
-            payload["presence_penalty"] = std::stof(user->presence_penalty);
+            // payload["temperature"] = std::stof(user->temperature);
+            // payload["frequency_penalty"] = std::stof(user->frequency_penalty);
+            // payload["presence_penalty"] = std::stof(user->presence_penalty);
         }
         // 判断用户目前使用的模型调用对应的接口
         if (user->user_models.second[2] == "OpenAI")
