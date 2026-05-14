@@ -32,6 +32,8 @@ file(GLOB_RECURSE SRC
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/Library/rapidjson
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Command
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ComputerStatus
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ConfigManager
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Database
