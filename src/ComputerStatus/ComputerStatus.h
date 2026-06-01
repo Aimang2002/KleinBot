@@ -3,6 +3,9 @@
 
 ************************/
 
+#ifndef COMPUTERSTATUS_H
+#define COMPUTERSTATUS_H
+
 #include <iostream>
 
 class ComputerStatus
@@ -16,3 +19,5 @@ public:
 
 private:
 };
+
+#endif // COMPUTERSTATUS_H
