@@ -46,6 +46,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ModelApiCaller
     ${CMAKE_CURRENT_SOURCE_DIR}/src/submodules/CloudMusicID
     ${CMAKE_CURRENT_SOURCE_DIR}/src/UserSession
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ModelRegistry
 )
 
 # 只在 Windows 上设置 CURL 和 Boost 的特定路径
