@@ -16,10 +16,8 @@ void MessageQueue::original_push_queue(std::string task)
 #ifdef DEBUG
     LOG_DEBUG("original_push_queue的入列消息：" + task);
 #endif
-    // std::lock_guard(original_mutex);
-    original_mutex.lock();
+    std::lock_guard<std::mutex> locker(original_mutex);
     origina_queue->push(task);
-    original_mutex.unlock();
 }
 
 void MessageQueue::pending_push_queue(const std::string task, std::string API, uint64_t id, const std::string type)
@@ -46,25 +44,26 @@ void MessageQueue::pending_push_queue(const std::string task, std::string API, u
     }
 
     // 放入消息队列
-    pending_mutex.lock();
+    std::lock_guard<std::mutex> locker(pending_mutex);
     pending_queue->push(webSocketDataPakage);
-    pending_mutex.unlock();
 }
 
 // 判断消息队列是否为空
 bool MessageQueue::original_empty()
 {
+    std::lock_guard<std::mutex> locker(original_mutex);
     return origina_queue->empty();
 }
 bool MessageQueue::pending_empty()
 {
+    std::lock_guard<std::mutex> locker(pending_mutex);
     return pending_queue->empty();
 }
 
 // 获取第一个消息
 std::string MessageQueue::original_front_queue()
 {
-    std::lock_guard<std::mutex> lock(original_mutex);
+    std::lock_guard<std::mutex> locker(original_mutex);
     if (origina_queue->empty())
     {
         return "当前task为空!请判断队列是否存在数据再获取...";
@@ -82,10 +81,8 @@ std::string MessageQueue::pending_front_queue()
     }
 
     std::string result;
-    // std::lock_guard(pending_mutex);
-    pending_mutex.lock();
+    std::lock_guard<std::mutex> locker(pending_mutex);
     result = pending_queue->front();
-    pending_mutex.unlock();
     return result;
 }
 
@@ -98,10 +95,8 @@ bool MessageQueue::original_pop()
         return false;
     }
 
-    // std::lock_guard(original_mutex);
-    original_mutex.lock();
+    std::lock_guard<std::mutex> locker(original_mutex);
     origina_queue->pop();
-    original_mutex.unlock();
     return true;
 }
 
@@ -113,10 +108,8 @@ bool MessageQueue::pending_pop()
         return false;
     }
 
-    // std::lock_guard(pending_mutex);
-    original_mutex.lock();
+    std::lock_guard<std::mutex> locker(pending_mutex);
     pending_queue->pop();
-    original_mutex.unlock();
     return true;
 }
 
