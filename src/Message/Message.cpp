@@ -28,34 +28,29 @@ Message::Message()
 	this->PCStatus = std::make_unique<ComputerStatus>();
 	this->voice = std::make_unique<Voice>();
 	this->dock = std::make_unique<Dock>();
+	this->models.reload();
 
 	// 注册所有命令事件
 	this->registry.registryCommand(std::make_unique<HelpCommand>());
-	this->registry.registryCommand(std::make_unique<ModelListCommand>(this->chatModels));
+	this->registry.registryCommand(std::make_unique<ModelListCommand>(this->models));
 	this->registry.registryCommand(std::make_unique<SearchSongsCommand>());
 	this->registry.registryCommand(std::make_unique<QueryModelCommand>([&](uint64_t uid)
 																	   { return this->userSession.getModelName(uid); }));
 	this->registry.registryCommand(std::make_unique<GeneratePictureCommand>());
 	this->registry.registryCommand(std::make_unique<ResetChatCommand>(this->userSession));
 	this->registry.registryCommand(std::make_unique<SetSoulCommand>(this->userSession));
-	this->registry.registryCommand(std::make_unique<SwitchModelCommand>(this->userSession, this->chatModels));
+	this->registry.registryCommand(std::make_unique<SwitchModelCommand>(this->userSession, this->models));
 	this->registry.registryCommand(std::make_unique<VoiceSwitchCommand>(this->userSession, this->global_Voice));
 	this->registry.registryCommand(std::make_unique<RemoveContextCommand>(this->userSession));
 	this->registry.registryCommand(std::make_unique<AdminCommand>(*this->PCStatus, this->accessibility_chat, this->global_Voice, [this]()
 																  {		ConfigManager::getInstance().refreshConfiguation();
-																		this->readModelName(); }));
+																		this->models.reload(); }));
 
 	srand((unsigned int)time(NULL));
 
 	// 内置成员属性初始化
 	this->accessibility_chat = ConfigManager::getInstance().configVariable("ACCESSIBLITY_CHAT") == "true" ? true : false;
 	this->global_Voice = ConfigManager::getInstance().configVariable("GLOBAL_VOICE") == "true" ? true : false;
-
-// 载入模型名称
-#ifdef DEBUG
-	LOG_DEBUG("正在载入模型名称...");
-#endif
-	this->readModelName();
 
 	// 轻量型人格初始化
 #ifdef DEBUG
@@ -124,7 +119,7 @@ void Message::handleMessage(JsonData &current_data)
 		current_data.raw_message = characterMessage(current_data);
 
 		// 判断是否需要提供文本转语音
-		if (this->global_Voice && this->userSession.isVoiceModel(current_data.user_id))
+		if (this->global_Voice && this->userSession.isVoiceMode(current_data.user_id))
 		{
 			current_data.type = "CQ";
 			current_data.raw_message = this->textToVoice(current_data.raw_message);
@@ -504,7 +499,7 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 	{
 		conversation = "Please analyze this picture in all aspects and answer it in Chinese";
 	}
-	conversation = JsonParse::getInstance().toJson(conversation);
+	// conversation = JsonParse::getInstance().toJson(conversation);
 
 	// 初始化
 	CURL *curl_handle = curl_easy_init();
@@ -579,7 +574,6 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 				answer = "系统提示：语音模块异常。";
 			}
 		}
-		// return CQCode("reply", "message", answer);
 		return answer;
 	}
 	else
@@ -606,8 +600,7 @@ std::string Message::textToVoice(const std::string &text)
 {
 	std::string response;
 
-	// LOG_DEBUG("转语音的内容：" + text);
-	std::string audioPath = this->voice->toAudio(JsonParse::getInstance().toJson(text));
+	std::string audioPath = this->voice->toAudio(text);
 	if (audioPath.find(".wav") != std::string::npos)
 	{
 		// 使用路径传输
@@ -696,70 +689,6 @@ std::string Message::SDImageCreation(const std::string &message)
 	response.append("]");
 
 	return response;
-}
-
-void Message::readModelName()
-{
-	// 轻量型人格初始化
-#ifdef DEBUG
-	LOG_DEBUG("模型文件格初始化...");
-#endif
-	// 载入模型名称
-	std::ifstream ifsJson(ConfigManager::getInstance().configVariable("CHATMODELS_PATH"));
-	if (!ifsJson.is_open())
-	{
-		LOG_ERROR("模型配置文件打开失败！请检查该文件是否存在。");
-	}
-	std::string json((std::istreambuf_iterator<char>(ifsJson)), std::istreambuf_iterator<char>());
-	nlohmann::json document;
-	try
-	{
-		document = nlohmann::json::parse(json);
-		if (!document.contains("Models") || !document["Models"].is_array())
-		{
-			LOG_FATAL("JSON 数据中缺少 Models 字段或 Models 不是数组！");
-			return;
-		}
-
-		// 遍历 Models 数组
-		this->chatModels.clear();
-		const nlohmann::json &models = document["Models"];
-		for (int i = 0; i < models.size(); i++)
-		{
-			const nlohmann::json &model = models[i];
-			std::unordered_set<std::string> modelNames;
-			std::vector<std::string> otherInfo(3, ""); // 初始化为 3 个空字符串
-
-			// 提取 ModelName 或 name 字段
-			if (model.contains("ModelName") && model["ModelName"].is_array())
-			{
-				const nlohmann::json &modelNamesArray = model["ModelName"];
-				for (int j = 0; j < modelNamesArray.size(); j++)
-				{
-					modelNames.insert(modelNamesArray[j]);
-				}
-			}
-			else if (model.contains("name") && model["name"].is_array())
-			{
-				const nlohmann::json &modelNamesArray = model["name"];
-				for (int j = 0; j < modelNamesArray.size(); j++)
-				{
-					modelNames.insert(modelNamesArray[j]);
-				}
-			}
-
-			// 提取其余字段
-			otherInfo[0] = model.value("api_key", "");
-			otherInfo[1] = model.value("api_endpoint", "");
-			otherInfo[2] = model.value("APIStandard", "");
-			chatModels.push_back(std::make_pair(modelNames, otherInfo));
-		}
-	}
-	catch (const std::exception &e)
-	{
-		LOG_FATAL("Models JSON 解析失败！error:" + std::string(e.what()));
-		return;
-	}
 }
 
 Message::~Message()

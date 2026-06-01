@@ -7,6 +7,7 @@
 #include "../ComputerStatus/ComputerStatus.h"
 #include "../Command/CommandRegistry.h"
 #include "../UserSession/UserSessionService.h"
+#include "../ModelRegistry/ModelRegistry.h"
 #include <iostream>
 #include <random>
 #include <memory>
@@ -158,35 +159,23 @@ private:
 	 */
 	std::string SDImageCreation(const std::string &message);
 
-	/**
-	 * @brief 刷新模型配置文件
-	 *
-	 */
-	void readModelName();
 	// 在下面添加新的函数用于拓展其他内容...
 
 private:
 	std::string help_message;
-	// std::string default_personality;
-	// std::string users_message_format;
-	// std::string bot_message_format;
-	// std::string system_message_format;
-	// short default_message_line;
+
 	bool accessibility_chat;													 // true为开启
 	bool global_Voice;															 // true为开启
 	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList; // 轻量型人格
-	// std::unordered_map<uint64_t, Person> *user_messages;
-	// std::unique_ptr<std::unordered_map<uint64_t, Person>> user_messages;						  // key = QQ,second = 用户信息
-	// std::mutex mutex_message;																	  // message类的锁
-	std::unique_ptr<ComputerStatus> PCStatus;													  // 监控计算机状态
-	std::vector<std::pair<std::unordered_set<std::string>, std::vector<std::string>>> chatModels; // 存储模型   first存储该端点的模型名称，second存储该模型的api、端点、API标准
-	std::unique_ptr<Voice> voice;																  // 语音识别模块
-	std::unique_ptr<Dock> dock;																	  // 对话模块
+	std::unique_ptr<ComputerStatus> PCStatus;									 // 监控计算机状态
+	std::unique_ptr<Voice> voice;												 // 语音识别模块
+	std::unique_ptr<Dock> dock;													 // 对话模块
 
 	// 新增
 	CommandRegistry registry;
 	UserSessionService userSession;
+	ModelRegistry models;
 	// std::unique_ptr<LLMService> llmservice;
 };
 
-#endif
+#endif // MESSAGE_H
