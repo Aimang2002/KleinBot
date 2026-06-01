@@ -8,7 +8,7 @@ std::string StableDiffusion::connectStableDiffusion(const std::string prompt)
     // prompt = R"("lou tianyi")";
     // v2.2.4版本正向提示词硬编码写入，v2.3.0版本修改为软编码
     std::string revised_prompt = "(((best quality))),(((ultra detailed))),(((masterpiece))),illustration,";
-    std::string payload = JsonParse::getInstance().toJson(prompt);
+    std::string payload = prompt; // JsonParse::getInstance().toJson(prompt);
 
     // 构造请求的内容
     nlohmann::json HTTPPkage;
