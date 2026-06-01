@@ -115,7 +115,7 @@ void UserSessionService::voiceSwitch(const uint64_t user_id, const bool tag)
     user->second.isOpenVoiceMode = tag;
 }
 
-bool UserSessionService::isVoiceModel(const uint64_t user_id)
+bool UserSessionService::isVoiceMode(const uint64_t user_id)
 {
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);

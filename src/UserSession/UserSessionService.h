@@ -18,7 +18,7 @@ public:
     void resetPersonality(const uint64_t user_id);
     void switchModel(const uint64_t user_id, const std::pair<std::string, std::vector<std::string>> &modelName);
     void voiceSwitch(const uint64_t user_id, const bool tag);
-    bool isVoiceModel(const uint64_t user_id);
+    bool isVoiceMode(const uint64_t user_id);
     std::string removePreviousContext(const uint64_t user_id);
     std::vector<std::pair<std::string, time_t>> getChatHistory(const uint64_t user_id);
     void updateChatHistory(const uint64_t user_id, const std::vector<std::pair<std::string, time_t>> &history);
