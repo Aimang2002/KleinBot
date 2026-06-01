@@ -47,7 +47,7 @@ void pollingThread()
 		{
 			// 数据处理&发送
 			nlohmann::json payload = {
-					{{"role", "user"}, {"content", message}}};
+				{{"role", "user"}, {"content", message}}};
 
 			// 构建用户信息
 			Person p;
@@ -61,7 +61,7 @@ void pollingThread()
 			p.user_models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_APISTANDARD"));
 
 			std::unique_ptr<Dock> dock = std::make_unique<Dock>();
-			auto response = dock->RequestChat(payload.dump(), &p);
+			auto response = dock->RequestChat(payload.dump(), p);
 			if (response.code >= 400)
 			{
 				LOG_ERROR("请求失败，请检查API密钥是否正确，或者网络是否正常。");
@@ -240,8 +240,8 @@ void init()
  -------------------------------------------)";
 
 	std::cout << "\033[32m" << "\n"
-						<< Klein_logo << "\n"
-						<< "\033[0m" << std::endl; // 显示logo
+			  << Klein_logo << "\n"
+			  << "\033[0m" << std::endl; // 显示logo
 
 	// 版本
 	LOG_INFO("当前Klein版本：" + std::string(__KLEIN_VERSION__));
@@ -257,7 +257,6 @@ void init()
 		LOG_WARNING("配置文件不符合当前版本，程序可能会不稳定，建议使用适合版本的配置文件！");
 	}
 
-	Database::getInstance()->databaseEmpty();
 	createTimingTastThread(); // 创建子线程
 }
 

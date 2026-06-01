@@ -162,7 +162,7 @@ private:
     OpenAIVisionResponse vision_json_parse(const std::string &response);
 
     // 回调函数
-    static size_t write_callback_chat(char *ptr, size_t size, size_t nmemb, std::string *userdata);
+    static size_t write_callback_chat(char *ptr, size_t size, size_t nmemb, void *userdata);
 
     // KEY错误判断
     bool isKeyError(std::string &message);

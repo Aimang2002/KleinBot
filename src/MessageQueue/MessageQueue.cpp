@@ -1,11 +1,13 @@
 #include "MessageQueue.h"
 #include "../Network/MyReverseWebSocket.h"
+#include "../JsonParse/JsonParse.h"
 #include <sstream>
 
 // 静态成员初始化
-std::queue<std::string> *MessageQueue::origina_queue = new std::queue<std::string>;
+std::unique_ptr<std::queue<std::string>> MessageQueue::origina_queue = std::make_unique<std::queue<std::string>>();
 std::mutex MessageQueue::original_mutex = std::mutex();
-std::queue<std::string> *MessageQueue::pending_queue = new std::queue<std::string>;
+std::unique_ptr<std::queue<std::string>> MessageQueue::pending_queue = std::make_unique<std::queue<std::string>>();
+
 std::mutex MessageQueue::pending_mutex = std::mutex();
 
 // 消息入列
@@ -62,16 +64,13 @@ bool MessageQueue::pending_empty()
 // 获取第一个消息
 std::string MessageQueue::original_front_queue()
 {
+    std::lock_guard<std::mutex> lock(original_mutex);
     if (origina_queue->empty())
     {
         return "当前task为空!请判断队列是否存在数据再获取...";
     }
-
     std::string result;
-    // std::lock_guard(original_mutex);
-    original_mutex.lock();
     result = origina_queue->front();
-    original_mutex.unlock();
     return result;
 }
 
@@ -122,32 +121,24 @@ bool MessageQueue::pending_pop()
 }
 
 // 封装GO-CQ格式数据
-std::string MessageQueue::privateGOCQFormat(std::string message, uint64_t user_id, const std::string type)
+std::string MessageQueue::privateGOCQFormat(const std::string &message, const uint64_t &user_id, const std::string type)
 {
-    std::stringstream json_data;
-    if (type.compare("text") == 0)
-    {
-        json_data << R"({"type": "text",)";
-        json_data << R"("user_id":)" << user_id << R"(,"message":")" << message << R"("})";
-    }
-    else
-    {
-        json_data << R"({"user_id":)" << user_id << R"(,"message":")" << message << R"("})";
-    }
-    return json_data.str();
+    nlohmann::json json_data;
+    json_data["user_id"] = user_id;
+    json_data["message"] = message;
+    json_data["type"] = type;
+
+    return json_data.dump();
 }
 
-std::string MessageQueue::groupGOCQFormat(std::string message, uint64_t group_id, const std::string type)
+std::string MessageQueue::groupGOCQFormat(const std::string &message, const uint64_t &group_id, const std::string type)
 {
-    std::stringstream json_data;
-    if (type.compare("text") == 0)
+    nlohmann::json json_data;
+    json_data["group_id"] = group_id;
+    json_data["message"] = message;
+    if (type == "text")
     {
-        json_data << R"({"type": "text",)";
-        json_data << R"("group_id":)" << group_id << R"(,"message":")" << message << R"("})";
+        json_data["type"] = "text";
     }
-    else
-    {
-        json_data << R"({"group_id":)" << group_id << R"(,"message":")" << message << R"("})";
-    }
-    return json_data.str();
+    return json_data.dump();
 }

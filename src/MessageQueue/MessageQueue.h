@@ -6,6 +6,7 @@
 #include <queue>
 #include <string>
 #include <mutex>
+#include <memory>
 #include <iostream>
 
 class MessageQueue
@@ -30,15 +31,15 @@ public:
     static bool pending_pop();
 
 private:
-    static std::string privateGOCQFormat(std::string message, uint64_t user_id, const std::string type);
-    static std::string groupGOCQFormat(std::string message, uint64_t group_id, const std::string type);
+    static std::string privateGOCQFormat(const std::string& message, const uint64_t& user_id, const std::string type);
+    static std::string groupGOCQFormat(const std::string& message,const  uint64_t& group_id, const std::string type);
 
 private:
-    static std::queue<std::string> *origina_queue; // 原始消息队列
-    static std::mutex original_mutex;              // 原始锁
+    static std::unique_ptr<std::queue<std::string>> origina_queue; // 原始消息队列
+    static std::mutex original_mutex;                              // 原始锁
 
-    static std::queue<std::string> *pending_queue; // 待发送消息队列
-    static std::mutex pending_mutex;               // 待发送锁
+    static std::unique_ptr<std::queue<std::string>> pending_queue; // 待发送消息队列
+    static std::mutex pending_mutex;                               // 待发送锁
 };
 
 #endif // MESSAGETASK_H

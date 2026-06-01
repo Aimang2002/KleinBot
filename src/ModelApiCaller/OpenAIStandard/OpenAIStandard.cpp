@@ -193,7 +193,7 @@ OpenAIImageResponse OpenAIStandard::send_to_draw(const std::string endpoint, con
         postData["model"] = model;
         postData["prompt"] = prompt;
         postData["n"] = 1;
-        postData["quality"] = "hd";
+        postData["quality"] = "high";
         postData["user"] = "string";
         postData["size"] = "1024x1024";
 
@@ -420,12 +420,13 @@ OpenAIVisionResponse OpenAIStandard::vision_json_parse(const std::string &respon
 }
 
 // 回调函数
-size_t OpenAIStandard::write_callback_chat(char *ptr, size_t size, size_t nmemb, std::string *userdata)
+size_t OpenAIStandard::write_callback_chat(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
+    std::string *data = static_cast<std::string *>(userdata);
     size_t newLength = size * nmemb;
     try
     {
-        userdata->append(ptr, newLength);
+        data->append(ptr, newLength);
     }
     catch (std::bad_alloc &e)
     {

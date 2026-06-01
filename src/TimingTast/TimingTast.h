@@ -7,6 +7,7 @@
 #include <ctime>
 #include <map>
 #include <thread>
+#include <memory>
 #include <unistd.h>
 #include "../Log/Log.h"
 #include "../ConfigManager/ConfigManager.h"
@@ -33,7 +34,7 @@ private:
     ~TimingTast();
 
 public:
-    std::map<uint64_t, std::pair<uint64_t, std::string>> *Event; // first = 时间戳 pair.first = QQ号 second = 提醒内容
+    std::unique_ptr<std::map<uint64_t, std::pair<uint64_t, std::string>>> Event; // first = 时间戳 pair.first = QQ号 second = 提醒内容
     // ConnectPythonProcess *CPY;
 };
 

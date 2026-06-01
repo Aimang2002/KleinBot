@@ -8,7 +8,7 @@ TimingTast &TimingTast::getInstance()
 
 TimingTast::TimingTast()
 {
-    this->Event = new std::map<uint64_t, std::pair<uint64_t, std::string>>();
+    this->Event = std::make_unique<std::map<uint64_t, std::pair<uint64_t, std::string>>>();
 }
 
 uint64_t TimingTast::timeChange(std::string time)
@@ -19,7 +19,7 @@ uint64_t TimingTast::timeChange(std::string time)
     int hour = 0;
     int minute = 0;
 
-    // 判断是否符合格式
+    // 判断是否符合格式，abc
     try
     {
         std::string str;
@@ -57,7 +57,6 @@ uint64_t TimingTast::timeChange(std::string time)
             str.erase(str.begin());
             hour = atoi(str.c_str());
             time.erase(0, time.find(":") + 1);
-
             str = time.substr(0, time.find(":"));
             minute = atoi(str.c_str());
         }
@@ -120,9 +119,4 @@ std::string TimingTast::setFixedRemind(std::string message, uint64_t user_id)
 
 TimingTast::~TimingTast()
 {
-    if (this->Event != nullptr)
-    {
-        delete this->Event;
-        this->Event = nullptr;
-    }
 }

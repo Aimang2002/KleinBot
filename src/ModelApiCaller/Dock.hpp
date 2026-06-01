@@ -18,43 +18,30 @@ public:
      * @param user 用户
      * @return 返回一个被序列化的Json的结构体
      */
-    OpenAIChatResponse RequestChat(const std::string &context, Person *user = nullptr)
+    OpenAIChatResponse RequestChat(const std::string &context,const Person &user)
     {
         nlohmann::json payload;
-        payload["model"] = user->user_models.first;
+        payload["model"] = user.user_models.first;
         OpenAIChatResponse response;
 
-        std::string api_key = user->user_models.second[0];
-        std::string endpoint = user->user_models.second[1];
+        std::string api_key = user.user_models.second[0];
+        std::string endpoint = user.user_models.second[1];
 
         payload["messages"] = nlohmann::json::parse(context);
-        // 指定超参数
-        if (user == nullptr)
-        {
-            LOG_WARNING("超参数使用默认值");
-            // payload["temperature"] = std::stof(ConfigManager::getInstance().configVariable("temperature"));
-            // payload["frequency_penalty"] = std::stof(ConfigManager::getInstance().configVariable("frequency_penalty"));
-            // payload["presence_penalty"] = std::stof(ConfigManager::getInstance().configVariable("presence_penalty"));
-        }
-        else
-        {
-            // payload["temperature"] = std::stof(user->temperature);
-            // payload["frequency_penalty"] = std::stof(user->frequency_penalty);
-            // payload["presence_penalty"] = std::stof(user->presence_penalty);
-        }
+
         // 判断用户目前使用的模型调用对应的接口
-        if (user->user_models.second[2] == "OpenAI")
+        if (user.user_models.second[2] == "OpenAI")
         {
-            std::string format = user->user_models.first + "\n";
-            format.append(user->user_models.second[0] + "\n");
-            format.append(user->user_models.second[1] + "\n");
-            format.append(user->user_models.second[2] + "\n");
+            std::string format = user.user_models.first + "\n";
+            format.append(user.user_models.second[0] + "\n");
+            format.append(user.user_models.second[1] + "\n");
+            format.append(user.user_models.second[2] + "\n");
             response = openai.send_to_chat(endpoint, api_key, payload);
         }
         else
         {
             LOG_ERROR("错误的API规范");
-            response.choices_message_content = "你的服务API规范为：" + user->user_models.second[2] + "，当前并未支持";
+            response.choices_message_content = "你的服务API规范为：" + user.user_models.second[2] + "，当前并未支持";
         }
         response.choices_message_content = JsonParse::getInstance().toJson(response.choices_message_content);
         return response;

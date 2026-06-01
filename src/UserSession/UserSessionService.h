@@ -15,15 +15,20 @@ public:
     void resetChat(const uint64_t user_id);
     std::string getModelName(uint64_t user_id);
     void setPersonality(const uint64_t user_id, const std::string &Personality);
+    void resetPersonality(const uint64_t user_id);
     void switchModel(const uint64_t user_id, const std::pair<std::string, std::vector<std::string>> &modelName);
-    void voiceSwtich(const uint64_t user_id, const bool tag);
+    void voiceSwitch(const uint64_t user_id, const bool tag);
     bool isVoiceModel(const uint64_t user_id);
     std::string removePreviousContext(const uint64_t user_id);
+    std::vector<std::pair<std::string, time_t>> getChatHistory(const uint64_t user_id);
+    void updateChatHistory(const uint64_t user_id, const std::vector<std::pair<std::string, time_t>> &history);
+    Person getUserConfig(const uint64_t user_id);
+    std::string dumpUserMessage(const std::string &content);
+    std::string dumpBotMessage(const std::string &content);
+    std::string dumpSystemMessage(const std::string &content);
+    int getDefaultLine();
 
 private:
-    std::string users_message_format = R"({"role": "user", "content": ")";
-    std::string bot_message_format = R"({"role": "assistant", "content": ")";
-    std::string system_message_format = R"({"system": "user", "content": ")";
     std::mutex mutex_message;
     std::string default_personality;
     short default_message_line = 2;

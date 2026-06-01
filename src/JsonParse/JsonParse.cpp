@@ -125,21 +125,26 @@ JsonData JsonParse::jsonReader(std::string &json_str)
 		data.card = sender.value("card", "");
 	}
 
-	if (doc.contains("message") && doc["message"].is_array() && doc["message"].size() > 1)
+	if (doc.contains("message") && doc["message"].is_array())
 	{
 		auto &firstMsg = doc["message"][0];
 		if (firstMsg.contains("type") && firstMsg["type"].is_string())
 		{
 			data.type = firstMsg["type"].get<std::string>();
 		}
-
-		// 如果有URL，则提取
-		firstMsg = doc["message"][1];
 		if (firstMsg.contains("data") && firstMsg["data"].is_object())
 		{
 			const auto &firstMsg_data = firstMsg["data"];
 			data.message_data_url = firstMsg_data.value("url", "");
 		}
+
+		// 如果有URL，则提取
+		// firstMsg = doc["message"][1];
+		// if (firstMsg.contains("data") && firstMsg["data"].is_object())
+		// {
+		// 	const auto &firstMsg_data = firstMsg["data"];
+		// 	data.message_data_url = firstMsg_data.value("url", "");
+		// }
 	}
 
 	data.bot_qq = doc.value("self_id", 0LL);
