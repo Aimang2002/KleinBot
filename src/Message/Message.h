@@ -2,10 +2,11 @@
 #define MESSAGE_H
 
 #include "../TimingTast/TimingTast.h"
-#include "../Database/Database.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../ModelApiCaller/Voice/Voice.h"
 #include "../ComputerStatus/ComputerStatus.h"
+#include "../Command/CommandRegistry.h"
+#include "../UserSession/UserSessionService.h"
 #include <iostream>
 #include <random>
 #include <memory>
@@ -45,14 +46,6 @@ public:
 
 private:
 	/**
-	 * @brief 添加用户，用于添加新的用户
-	 *
-	 * @param user_id 	用户QQ
-	 * @return 			若返回true则表示创建成功
-	 */
-	bool addUsers(uint64_t user_id);
-
-	/**
 	 * @brief 添加用户
 	 *
 	 * @param message 	用户QQ
@@ -79,14 +72,6 @@ private:
 	std::string musicShareMessage(const std::string &message, short platform);
 
 	/**
-	 * @brief 表情包
-	 *
-	 * @param message	具体消息
-	 *
-	 */
-	void facePackageMessage(std::string &message);
-
-	/**
 	 * @brief 艾特群友
 	 *
 	 * @param message 	具体消息
@@ -102,61 +87,6 @@ private:
 	 *
 	 */
 	void atAllMessage(std::string &message);
-
-	/**
-	 * @brief 设置人格,可设置不同人格
-	 *
-	 * @param roleName 	人格名称
-	 * @param user_id 	用户QQ
-	 * @return 			返回是否内部处理状态(bool)和信息(string)，当bool为false表示经过内部处理
-	 */
-	std::tuple<bool, std::string> setPersonality(const std::string &roleName, const uint64_t user_id);
-
-	/**
-	 * @brief 设置人格(重载版本)
-	 *
-	 * @param roleName 	人格名称
-	 * @param user_id 	用户QQ
-	 * @param param3	int类型占位符
-	 *
-	 */
-	std::tuple<bool, std::string> setPersonality(const std::string &roleName, const uint64_t user_id, int);
-
-	/**
-	 * @brief 重置对话，将会清空所有上下文对话
-	 *
-	 * @param resetResult 	重置结果
-	 * @param user_id 	用户QQ
-	 *
-	 */
-	std::string resetChat(const uint64_t user_id);
-
-	/**
-	 * @brief 管理员终端，设置管理员命令
-	 *
-	 * @param message 	具体消息
-	 * @param user_id 	用户QQ
-	 * @return 			返回是否内部处理的状态(bool)和信息(string)，当bool为true表示经过内部处理
-	 *
-	 */
-	std::tuple<bool, std::string> adminTerminal(const std::string &message, const uint64_t user_id);
-
-	/**
-	 * @brief 管理员权限验证
-	 *
-	 * @param user_id 	管理员QQ
-	 *
-	 */
-	bool permissionVerification(const uint64_t user_id);
-
-	/**
-	 * @brief 切换人工智能模型
-	 *
-	 * @param message 	具体消息
-	 * @param user_id 	用户QQ
-	 *
-	 */
-	std::string switchModel(const std::string &message, const uint64_t user_id);
 
 	/**
 	 * @brief 调用图片修复接口
@@ -221,13 +151,6 @@ private:
 	std::string removeGroupCQCode(const std::string &message);
 
 	/**
-	 * @brief 移除上一次对话
-	 *
-	 * @param user_id 	需要进行该操作的QQ号
-	 */
-	std::string removePreviousContext(const uint64_t user_id);
-
-	/**
 	 * @brief 调用stable diffusion 实现图像创建
 	 *
 	 * @param message 	 提示
@@ -244,20 +167,26 @@ private:
 
 private:
 	std::string help_message;
-	std::string default_personality;
-	std::string users_message_format;
-	std::string bot_message_format;
-	std::string system_message_format;
-	short default_message_line;
-	bool accessibility_chat;																	  // true为开启
-	bool global_Voice;																			  // true为开启
-	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList;				  // 轻量型人格
-	std::unordered_map<uint64_t, Person> *user_messages;										  // key = QQ,second = 用户信息
-	std::mutex mutex_message;																	  // message类的锁
+	// std::string default_personality;
+	// std::string users_message_format;
+	// std::string bot_message_format;
+	// std::string system_message_format;
+	// short default_message_line;
+	bool accessibility_chat;													 // true为开启
+	bool global_Voice;															 // true为开启
+	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList; // 轻量型人格
+	// std::unordered_map<uint64_t, Person> *user_messages;
+	// std::unique_ptr<std::unordered_map<uint64_t, Person>> user_messages;						  // key = QQ,second = 用户信息
+	// std::mutex mutex_message;																	  // message类的锁
 	std::unique_ptr<ComputerStatus> PCStatus;													  // 监控计算机状态
 	std::vector<std::pair<std::unordered_set<std::string>, std::vector<std::string>>> chatModels; // 存储模型   first存储该端点的模型名称，second存储该模型的api、端点、API标准
 	std::unique_ptr<Voice> voice;																  // 语音识别模块
 	std::unique_ptr<Dock> dock;																	  // 对话模块
+
+	// 新增
+	CommandRegistry registry;
+	UserSessionService userSession;
+	// std::unique_ptr<LLMService> llmservice;
 };
 
 #endif

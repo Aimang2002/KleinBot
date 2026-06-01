@@ -18,7 +18,7 @@ public:
     std::string presence_penalty;                                 // 存在惩罚
 
     // 其他信息
-    bool isOpenVoiceMode; // 是否开启语音模式，默认为否
+    bool isOpenVoiceMode = false; // 是否开启语音模式，默认为否
 };
 
 #endif
