@@ -4,7 +4,9 @@
  * 语音切换命令
  */
 #include "Command.h"
+#include "../utils/Utils.hpp"
 #include "../UserSession/UserSessionService.h"
+
 class VoiceSwitchCommand : public Command
 {
 public:

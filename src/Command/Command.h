@@ -22,7 +22,6 @@ struct CommandResult
 {
     std::string message;                  // 回复的内容
     MessageType type = MessageType::Text; // 响应类型
-    bool handled = true;                  // 是否处理了这条消息
 };
 
 class Command

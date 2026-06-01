@@ -12,6 +12,6 @@ CommandResult ResetChatCommand::execute(const CommandContext &ctx)
     catch (const std::exception &e)
     {
         LOG_ERROR(e.what());
-        return {"重置对话失败！", MessageType::Text, false};
+        return {"重置对话失败！"};
     }
 }

@@ -5,7 +5,7 @@
 
 bool GeneratePictureCommand::canHandle(const std::string &message)
 {
-    if (message.size() > 10 && (message.substr(0, 10).find("#图片生成:") != std::string::npos || message.substr(0, 10).find("#图片生成：") != std::string::npos))
+    if (utils::check_command_exists(message, "#图片生成") || utils::check_command_exists(message, "#生成图片"))
     {
         return true;
     }
@@ -14,11 +14,15 @@ bool GeneratePictureCommand::canHandle(const std::string &message)
 
 CommandResult GeneratePictureCommand::execute(const CommandContext &ctx)
 {
-    std::string prompt = utils::commandPromptDraw(ctx.data.raw_message);
+    std::string prompt = utils::CP_split(ctx.data.raw_message, "#生成图片");
+    if (prompt.empty())
+    {
+        prompt = utils::CP_split(ctx.data.raw_message, "#图片生成");
+    }
     std::unique_ptr<Dock> dock = std::make_unique<Dock>();
     if (prompt.empty())
     {
-        return {"提示词为空！", MessageType::Text, false};
+        return {"提示词为空！"};
     }
     std::string endpoint = ConfigManager::getInstance().configVariable("DRAW_MODEL_ENDPOINT");
     std::string api_key = ConfigManager::getInstance().configVariable("DRAW_MODEL_API_KEY");
@@ -27,10 +31,10 @@ CommandResult GeneratePictureCommand::execute(const CommandContext &ctx)
 
     if (response.code >= 400)
     {
-        return {"网络异常！", MessageType::Text, false};
+        return {"网络异常！"};
     }
     std::string base64 = response.data_base64;
     base64 = base64.insert(0, "base64://");
     std::string result = utils::CQCode("image", "file", base64);
-    return {result, MessageType::CQ, true};
+    return {result, MessageType::CQ};
 }

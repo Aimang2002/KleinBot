@@ -1,16 +1,15 @@
 #include "SwitchModelCommand.h"
-#include "../utils/Utils.hpp"
 
 CommandResult SwitchModelCommand::execute(const CommandContext &ctx)
 {
     std::string modelName = utils::CP_split(ctx.data.raw_message, m_cmd);
     if (modelName.empty())
     {
-        return {"未找到模型名称！", MessageType::Text, false};
+        return {"未找到模型名称！"};
     }
     modelName = utils::trim(modelName);
 
-    for (auto model : this->chatModels)
+    for (const auto &model : this->chatModels)
     {
         if (model.first.find(modelName) != model.first.end())
         {
@@ -23,5 +22,5 @@ CommandResult SwitchModelCommand::execute(const CommandContext &ctx)
             return {"模型切换成功。"};
         }
     }
-    return {"模型切换失败", MessageType::Text, false};
+    return {"模型切换失败"};
 }

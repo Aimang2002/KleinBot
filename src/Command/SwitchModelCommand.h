@@ -6,6 +6,7 @@
  */
 #include "Command.h"
 #include "../UserSession/UserSessionService.h"
+#include "../utils/Utils.hpp"
 #include <unordered_set>
 #include <vector>
 

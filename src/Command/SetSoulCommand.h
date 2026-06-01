@@ -12,7 +12,7 @@ class SetSoulCommand : public Command
 {
 public:
     SetSoulCommand(UserSessionService &USS) : userSession(USS) {}
-    bool canHandle(const std::string &message) override { return utils::check_command_exists(message, m_cmd); };
+    bool canHandle(const std::string &message) override { return message == "#人格还原" || utils::check_command_exists(message, m_cmd); };
     CommandResult execute(const CommandContext &ctx) override;
     std::string help() const override { return "设置系统级的对话约束，实现Agent的身份绑定、行为规则约束、安全与边界、全局上下文注入等功能"; }
 

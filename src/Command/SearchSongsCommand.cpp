@@ -17,7 +17,7 @@ CommandResult SearchSongsCommand::execute(const CommandContext &ctx)
     std::string musicName = utils::commandPromptDraw(ctx.data.raw_message);
     if (musicName.empty())
     {
-        return {"未提取到歌曲名！", MessageType::Text, false};
+        return {"未提取到歌曲名！", MessageType::Text};
     }
 
     // 开始搜索
@@ -35,5 +35,5 @@ CommandResult SearchSongsCommand::execute(const CommandContext &ctx)
         }
     }
     std::string CQCode = utils::CQCode("music", "type", "163", "id", songID);
-    return {CQCode, MessageType::CQ, true};
+    return {CQCode, MessageType::CQ};
 }
