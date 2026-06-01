@@ -18,7 +18,7 @@ public:
      * @param user 用户
      * @return 返回一个被序列化的Json的结构体
      */
-    OpenAIChatResponse RequestChat(const std::string &context,const Person &user)
+    OpenAIChatResponse RequestChat(const std::string &context, const Person &user)
     {
         nlohmann::json payload;
         payload["model"] = user.user_models.first;
@@ -43,7 +43,7 @@ public:
             LOG_ERROR("错误的API规范");
             response.choices_message_content = "你的服务API规范为：" + user.user_models.second[2] + "，当前并未支持";
         }
-        response.choices_message_content = JsonParse::getInstance().toJson(response.choices_message_content);
+        // response.choices_message_content = JsonParse::getInstance().toJson(response.choices_message_content);
         return response;
     }
 
@@ -60,8 +60,8 @@ public:
     {
         OpenAIVisionResponse response;
         response = openai.send_to_vision(endpoint, api_key, model, prompt, base64);
-        response.choice_message_content = JsonParse::getInstance().toJson(response.choice_message_content);
-        response.choice_message_refusal = JsonParse::getInstance().toJson(response.choice_message_refusal);
+        // response.choice_message_content = JsonParse::getInstance().toJson(response.choice_message_content);
+        // response.choice_message_refusal = JsonParse::getInstance().toJson(response.choice_message_refusal);
         return response;
     }
 
