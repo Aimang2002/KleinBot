@@ -1,3 +1,9 @@
 .vscode
 .cursor
+.codex
 build
+.claude
+CLAUDE.md
+mermaid.md
+重构任务.md
+AGENTS.md
