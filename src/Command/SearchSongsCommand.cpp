@@ -14,7 +14,7 @@ bool SearchSongsCommand::canHandle(const std::string &message)
 CommandResult SearchSongsCommand::execute(const CommandContext &ctx)
 {
     // 提取歌曲名
-    std::string musicName = utils::commandPromptDraw(ctx.data.raw_message);
+    std::string musicName = utils::commandPromptDraw(ctx.data.plain_text);
     if (musicName.empty())
     {
         return {"未提取到歌曲名！", MessageType::Text};

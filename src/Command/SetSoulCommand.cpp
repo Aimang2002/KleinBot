@@ -3,14 +3,14 @@
 
 CommandResult SetSoulCommand::execute(const CommandContext &ctx)
 {
-    if (ctx.data.raw_message == "#人格还原")
+    if (ctx.data.plain_text == "#人格还原")
     {
         this->userSession.resetPersonality(ctx.user_id);
         return {"人格还原成功。"};
     }
     else
     {
-        std::string prompt = utils::CP_split(ctx.data.raw_message, this->m_cmd);
+        std::string prompt = utils::CP_split(ctx.data.plain_text, this->m_cmd);
         if (prompt.empty())
         {
             return {"未找到人格描述！"};

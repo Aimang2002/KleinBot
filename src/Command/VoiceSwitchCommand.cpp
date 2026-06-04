@@ -22,7 +22,7 @@ CommandResult VoiceSwitchCommand::execute(const CommandContext &ctx)
     }
 
     bool newStatus = false;
-    std::string cmd = utils::trim(ctx.data.raw_message);
+    std::string cmd = utils::trim(ctx.data.plain_text);
     newStatus = cmd == "#开启语音";
     this->userSession.voiceSwitch(ctx.user_id, newStatus);
 
