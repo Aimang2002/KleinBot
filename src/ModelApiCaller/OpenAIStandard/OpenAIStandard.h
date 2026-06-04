@@ -2,170 +2,34 @@
 #ifndef OPENAI_STANDARD_H
 #define OPENAI_STANDARD_H
 
-#include <iostream>
-#include "../../ConfigManager/ConfigManager.h"
-#include "../JsonParse/JsonParse.h"
+#include "../../Port/ChatResponse.h"
+#include "../../Port/ImageResponse.h"
+#include "../../Port/VisionResponse.h"
+#include "../../Port/LLMPort.h"
+#include "../../Port/ChatRequest.h"
 #include <curl/curl.h>
 
-// 聊天响应结构体
-struct OpenAIChatResponse
-{
-    int code;
-    std::string id;                      // API请求唯一标识符
-    std::string object;                  // 对象类型，固定为"chat.completion"
-    int created;                         // 请求创建时间（Unix时间戳，秒）
-    std::string model;                   // 使用的模型名称，如"gpt-4-turbo"
-    int choices_index;                   // 回复选项索引（多候选回复时使用，通常为0）
-    std::string choices_message_role;    // 回复消息的角色，固定为"assistant"
-    std::string choices_message_content; // 助理回复的实际内容
-    std::string choices_finish_reason;   // 停止生成的原因，如"stop"、"length"
-    int usage_prompt_tokens;             // 输入提示消耗的token数量
-    int usage_completion_tokens;         // 生成回复消耗的token数量
-    int usage_total_tokens;              // 总共消耗的token数量
-
-    // 错误信息
-    std::string error_message;
-    std::string error_type;
-};
-
-// 图片创造响应结构体
-struct OpenAIImageResponse
-{
-    // 基础信息
-    int code;
-    int created;
-
-    // 输出内容
-    std::string data_base64;
-    std::string output_format;
-    std::string quality;
-    std::string size;
-
-    // Token使用统计
-    int usage_input_tokens;
-    int usage_output_tokens;
-    int usage_total_tokens;
-
-    // 错误提示
-    std::string error_message;
-    std::string error_type;
-};
-
-// 图片识别响应结构体
-struct OpenAIVisionResponse
-{
-    int code;
-    std::string id;    // 请求的唯一标识符
-    std::string model; // 使用的模型名称
-    int created;       // 创建时间戳（Unix时间戳）
-
-    std::string choice_message_content; // 返回的描述内容
-    std::string choice_message_refusal; // 当content为null时，返回的拒绝理由
-    std::string finish_reason;          // 停止生成的原因
-
-    int usage_completion_tokens; // 输出token数
-    int usage_prompt_tokens;     // 输入token数
-    int usage_total_tokens;      // 总token数
-
-    std::string error_message;
-    std::string error_type;
-};
-
 // OpenAIStandard类
-class OpenAIStandard
+class OpenAIStandard : public LLMPort
 {
 public:
-    // 发送至聊天模型
-    /**
-     * @brief 调用聊天模型
-     *
-     * @param endpoint 模型API的URL
-     * @param api_key 模型API的密钥
-     * @param body 请求体
-     * @return OpenAIChatResponse 模型返回的结果
-     */
-    OpenAIChatResponse send_to_chat(const std::string endpoint, std::string api_key, const nlohmann::json &body);
+    ChatResponse request_chat(const ChatModel &model, const std::string &model_name, const ChatRequest &request) override;
 
-    /**
-     * @brief 调用视觉模型
-     *
-     * @param endpoint 模型API的URL
-     * @param api_key 模型API的密钥
-     * @param model 模型名称
-     * @param prompt 提示语
-     * @param base64 图片的base64编码
-     * @return OpenAIVisionResponse 模型返回的结果
-     */
-    OpenAIVisionResponse send_to_vision(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt, const std::string &base64);
+    VisionResponse request_vision(const ChatModel &model, const std::string &model_name, const std::string &prompt, const std::string &base64) override;
 
-    /**
-     * @brief 调用绘图模型
-     *
-     * @param endpoint 模型API的URL
-     * @param api_key 模型API的密钥
-     * @param model 模型名称
-     * @param prompt 提示语
-     * @return OpenAIImageResponse 模型返回的结果
-
-     */
-    OpenAIImageResponse send_to_draw(const std::string endpoint, const std::string api_key, std::string model, const std::string &prompt);
+    ImageResponse request_image(const ChatModel &model, const std::string &model_name, const std::string &prompt) override;
 
 private:
-    /**
-     * @brief 解析 OpenAI Chat Completion API 返回的 JSON 字符串
-     *
-     * 该函数将 OpenAI API 返回的 JSON 数据解析为 OpenAIChatResponse 结构体。
-     * - 对字符串字段，如果 JSON 缺失则使用空字符串 "" 作为默认值。
-     * - 对整数字段，如果 JSON 缺失则使用 0 作为默认值。
-     * - 只处理单个 choice，忽略其他可能存在的候选回复。
-     * - 当 JSON 格式错误或解析失败时，会记录错误日志并返回空的 OpenAIChatResponse。
-     *
-     * @param response JSON 格式的字符串，通常来自 OpenAI Chat Completion API 响应。
-     * @return OpenAIChatResponse 解析后的结果对象，如果解析失败则返回空对象。
-     *
-     * @note 该函数对 JSON 的健壮性做了处理：
-     *       - usage 字段缺失不会抛异常
-     *       - message 字段缺失或结构异常不会抛异常
-     *       - choices 数组为空也不会抛异常
-     */
-    OpenAIChatResponse chat_json_parse(const std::string &response);
+    std::pair<std::string, long> http_post(const std::string &url, const std::string &api_key, const std::string &payload);
 
-    /**
-     * @brief 解析 OpenAI Image API 返回的 JSON 字符串
-     *
-     * 该函数将 OpenAI API 返回的图像生成 JSON 数据解析为 OpenAIImageResponse 结构体。
-     * - 对字符串字段，如果 JSON 缺失则使用空字符串 "" 作为默认值。
-     * - 对整数字段，如果 JSON 缺失则使用 0 作为默认值。
-     * - 只取 data 数组中的第一个图片（b64_json）。
-     * - 当 JSON 格式错误或解析失败时，会记录错误并返回空的 OpenAIImageResponse。
-     *
-     * @param response JSON 格式的字符串，通常来自 OpenAI Image API 响应。
-     * @return OpenAIImageResponse 解析后的结果对象，如果解析失败则返回空对象。
-     *
-     * @note 该函数对 JSON 的健壮性做了处理：
-     *       - data 数组为空或缺失不会抛异常
-     *       - usage 对象缺失或字段缺失不会抛异常
-     *       - 类型不匹配（string/int）会使用默认值
-     */
-    OpenAIImageResponse draw_json_parse(const std::string &response);
+    ChatResponse chat_json_parse(const std::string &response);
 
-    /**
-     * @brief 解析 OpenAI Vision API 响应的 JSON 字符串
-     *
-     * 该函数将 OpenAI API 响应的 JSON 数据解析为 OpenAIVisionResponse 结构体。
-     * - 对字符串字段，如果 JSON 缺失则使用空字符串 "" 作为默认值。
-     * - 对整数字段，如果 JSON 缺失则使用 0 作为默认值。
-     * - 当 JSON 格式错误或解析失败时，会记录错误并返回空的 OpenAIVisionResponse。
-     * @param response JSON 格式的响应字符串，通常来自 OpenAI Vision API 响应。
-     * @return OpenAIVisionResponse 解析后的结果对象，如果解析失败则返回空对象。
-     */
-    OpenAIVisionResponse vision_json_parse(const std::string &response);
+    ImageResponse draw_json_parse(const std::string &response);
+
+    VisionResponse vision_json_parse(const std::string &response);
 
     // 回调函数
     static size_t write_callback_chat(char *ptr, size_t size, size_t nmemb, void *userdata);
-
-    // KEY错误判断
-    bool isKeyError(std::string &message);
 
     // API和端点修正
     std::string filterNonNormalChars(std::string str);
