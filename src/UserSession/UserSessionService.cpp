@@ -3,38 +3,22 @@
 #include "../JsonParse/JsonParse.h"
 #include "../Log/Log.h"
 
-UserSessionService::UserSessionService()
+UserSessionService::UserSessionService(const ModelRegistry &mr)
+    : registry(mr),
+      default_personality("You are my assistant, your name is " + ConfigManager::getInstance().configVariable("QBOT_NAME")),
+      user_messages(std::make_unique<std::unordered_map<uint64_t, Person>>())
 {
-    this->user_messages = std::make_unique<std::unordered_map<uint64_t, Person>>();
-    this->default_personality = "You are my assistant, your name is " + ConfigManager::getInstance().configVariable("QBOT_NAME");
 }
 
 Person UserSessionService::createDefaultPerson(const uint64_t user_id)
 {
-    // 添加默认数据
-    std::vector<std::pair<std::string, time_t>> userDefault;
-    std::pair<std::string, time_t> p;
-    p.first = this->dumpSystemMessage(this->default_personality);
-    p.second = time(nullptr); // 获取当前时间
-    userDefault.push_back(p);
-
-    p.first = this->dumpBotMessage("OK!I will use Chinses answer");
-    userDefault.push_back(p);
-
-    // 创建用户
     Person person;
-    person.user_chatHistory = userDefault;
-
-    std::pair<std::string, std::vector<std::string>> models;
-    models.first = ConfigManager::getInstance().configVariable("DEFAULT_MODEL"); // 默认模型
-    models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_API_KEY"));
-    models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_ENDPOINT"));
-    models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_APISTANDARD"));
-    person.user_models = models;
+    person.system_prompt = this->default_personality;
+    person.current_model = ConfigManager::getInstance().configVariable("DEFAULT_MODEL"); // 默认模型
     person.isOpenVoiceMode = false;
-    person.temperature = ConfigManager::getInstance().configVariable("temperature");
-    person.frequency_penalty = ConfigManager::getInstance().configVariable("frequency_penalty");
-    person.presence_penalty = ConfigManager::getInstance().configVariable("presence_penalty");
+    person.temperature = std::stod(ConfigManager::getInstance().configVariable("temperature"));
+    person.frequency_penalty = std::stod(ConfigManager::getInstance().configVariable("frequency_penalty"));
+    person.presence_penalty = std::stod(ConfigManager::getInstance().configVariable("presence_penalty"));
 
     return person;
 }
@@ -64,12 +48,8 @@ void UserSessionService::resetChat(const uint64_t user_id)
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     auto user = this->user_messages->find(user_id);
-    if (user->second.user_chatHistory.size() > 2)
-    {
-        // 重置对话会删除之前的所有信息，但不包括人格信息
-        user->second.user_chatHistory.erase(user->second.user_chatHistory.begin() + 2, user->second.user_chatHistory.end());
-        this->user_messages->find(user_id)->second = user->second;
-    }
+    // 重置对话会删除之前的所有信息，但不包括人格信息
+    user->second.user_chatHistory.clear();
 }
 
 std::string UserSessionService::getModelName(uint64_t user_id)
@@ -77,7 +57,7 @@ std::string UserSessionService::getModelName(uint64_t user_id)
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     auto res = this->user_messages->find(user_id);
-    return res->second.user_models.first;
+    return res->second.current_model;
 }
 
 void UserSessionService::setPersonality(const uint64_t user_id, const std::string &Personality)
@@ -85,11 +65,7 @@ void UserSessionService::setPersonality(const uint64_t user_id, const std::strin
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     auto user = this->user_messages->find(user_id);
-    user->second.user_chatHistory[0].first = this->dumpSystemMessage(Personality);
-    user->second.user_chatHistory[0].second = time(nullptr);
-    user->second.user_chatHistory[1].first = this->dumpBotMessage("OK!I will use Chinses answer");
-    user->second.user_chatHistory[1].second = time(nullptr);
-    this->user_messages->find(user_id)->second = user->second;
+    user->second.system_prompt = Personality;
 }
 
 void UserSessionService::resetPersonality(const uint64_t user_id)
@@ -97,14 +73,14 @@ void UserSessionService::resetPersonality(const uint64_t user_id)
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     auto user = this->user_messages->find(user_id);
-    user->second.user_chatHistory[0].first = this->dumpSystemMessage(this->default_personality);
+    user->second.system_prompt = this->default_personality;
 }
 
-void UserSessionService::switchModel(const uint64_t user_id, const std::pair<std::string, std::vector<std::string>> &newModel)
+void UserSessionService::switchModel(const uint64_t user_id, const std::string &newModel)
 {
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
-    this->user_messages->find(user_id)->second.user_models = newModel;
+    this->user_messages->find(user_id)->second.current_model = newModel;
 }
 
 void UserSessionService::voiceSwitch(const uint64_t user_id, const bool tag)
@@ -126,42 +102,27 @@ std::string UserSessionService::removePreviousContext(const uint64_t user_id)
 {
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
-    auto user_context = this->user_messages->find(user_id)->second.user_chatHistory;
-    if (user_context.size() <= this->default_message_line)
+    auto &user_context = this->user_messages->find(user_id)->second.user_chatHistory;
+
+    for (auto it = user_context.rbegin(); it != user_context.rend(); ++it)
     {
-        return std::string("没有上下文！");
-    }
-    // 删除最近的上下文
-    auto erase_begin = user_context.end();
-    for (auto it = erase_begin; it != user_context.begin() + this->default_message_line - 1;)
-    {
-        --it;
-        // 找到末尾第一个user
-        nlohmann::json j = nlohmann::json::parse(it->first);
-        if (j.value("role", "") == "user")
+        if (it->role == "user")
         {
-            erase_begin = it;
-            break;
+            user_context.erase(it.base() - 1, user_context.end());
+            return "上条对话已被删除！";
         }
     }
-    if (erase_begin == user_context.end())
-    {
-        LOG_ERROR("上下文格式异常");
-        return {"没有上下文！"};
-    }
-    user_context.erase(erase_begin, user_context.end());
-    this->user_messages->find(user_id)->second.user_chatHistory = user_context;
-    return {"上条对话已被删除！"};
+    return "没有上下文！";
 }
 
-std::vector<std::pair<std::string, time_t>> UserSessionService::getChatHistory(const uint64_t user_id)
+std::vector<TimestampedMessage> UserSessionService::getChatHistory(const uint64_t user_id)
 {
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     return this->user_messages->find(user_id)->second.user_chatHistory;
 }
 
-void UserSessionService::updateChatHistory(const uint64_t user_id, const std::vector<std::pair<std::string, time_t>> &history)
+void UserSessionService::updateChatHistory(const uint64_t user_id, const std::vector<TimestampedMessage> &history)
 {
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
@@ -175,31 +136,53 @@ Person UserSessionService::getUserConfig(const uint64_t user_id)
     return this->user_messages->find(user_id)->second;
 }
 
-std::string UserSessionService::dumpUserMessage(const std::string &content)
+std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_t &user_id)
 {
-    nlohmann::json j;
-    j["role"] = "user";
-    j["content"] = content;
-    return j.dump();
-}
+    std::lock_guard<std::mutex> locker(this->mutex_message);
+    this->ensureUserExistsUnlock(user_id);
+    const Person &p = this->user_messages->find(user_id)->second;
 
-std::string UserSessionService::dumpBotMessage(const std::string &content)
-{
-    nlohmann::json j;
-    j["role"] = "assistant";
-    j["content"] = content;
-    return j.dump();
-}
+    // 模型查找：找不到直接返回 nullopt，让上层报错
+    const ChatModel *modelPtr = registry.find(p.current_model);
+    if (modelPtr == nullptr)
+    {
+        LOG_ERROR("模型未注册：" + p.current_model);
+        return std::nullopt;
+    }
 
-std::string UserSessionService::dumpSystemMessage(const std::string &content)
-{
-    nlohmann::json j;
-    j["role"] = "system";
-    j["content"] = content;
-    return j.dump();
-}
+    ChatCallBundle result;
+    result.model = *modelPtr;
+    result.model_name = p.current_model;
 
-int UserSessionService::getDefaultLine()
-{
-    return this->default_message_line;
+    // 超参数 + system_prompt 直接拷贝
+    result.request.system_prompt = p.system_prompt;
+    result.request.temperature = p.temperature;
+    result.request.frequency_penalty = p.frequency_penalty;
+    result.request.presence_penalty = p.presence_penalty;
+
+    // ===== 临时裁切算法（占位，待 Phase 3 后期替换） =====
+    // 策略：
+    //   1. 丢弃超过存活时间的旧消息
+    //   2. 若剩余条数超过 MAX_TURNS，只保留末尾若干条
+    // 注意：本函数只读，不回写 user_chatHistory，原始历史保持完整
+    const time_t now = std::time(nullptr);
+    const time_t survival = std::stoll(
+        ConfigManager::getInstance().configVariable("MESSAGE_SURVIVAL_TIME"));
+    const size_t MAX_TURNS = 20;
+
+    std::vector<ChatMessage> filtered;
+    filtered.reserve(p.user_chatHistory.size());
+    for (const auto &tm : p.user_chatHistory)
+    {
+        if (tm.timestamp + survival < now)
+            continue;
+        filtered.push_back({tm.role, tm.content});
+    }
+    if (filtered.size() > MAX_TURNS)
+    {
+        filtered.erase(filtered.begin(), filtered.end() - MAX_TURNS);
+    }
+    result.request.history = std::move(filtered);
+
+    return result;
 }
