@@ -15,7 +15,7 @@
 #define __KLEIN_VERSION__ "v2.4.0"
 
 // 子线程
-void pollingThread()
+void pollingThread(Message &msg)
 {
 	std::string message;
 	std::string getGOCQJsonData;
@@ -45,32 +45,9 @@ void pollingThread()
 
 		if (tag)
 		{
-			// 数据处理&发送
-			nlohmann::json payload = {
-				{{"role", "user"}, {"content", message}}};
+			std::string response = msg.pushScheduled(user_id, message);
 
-			// 构建用户信息
-			Person p;
-			p.frequency_penalty = ConfigManager::getInstance().configVariable("frequency_penalty");
-			p.isOpenVoiceMode = false;
-			p.presence_penalty = ConfigManager::getInstance().configVariable("presence_penalty");
-			p.temperature = ConfigManager::getInstance().configVariable("temperature");
-			p.user_models.first = ConfigManager::getInstance().configVariable("DEFAULT_MODEL");
-			p.user_models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_API_KEY"));
-			p.user_models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_ENDPOINT"));
-			p.user_models.second.push_back(ConfigManager::getInstance().configVariable("DEFAULT_MODEL_APISTANDARD"));
-
-			std::unique_ptr<Dock> dock = std::make_unique<Dock>();
-			auto response = dock->RequestChat(payload.dump(), p);
-			if (response.code >= 400)
-			{
-				LOG_ERROR("请求失败，请检查API密钥是否正确，或者网络是否正常。");
-				if (response.choices_message_content.size() < 1)
-				{
-					response.choices_message_content = "早上好。我可能无法连接到网络，建议调试。\n错误代码：" + std::to_string(response.code);
-				}
-			}
-			MessageQueue::pending_push_queue(response.choices_message_content, ConfigManager::getInstance().configVariable("PRIVATE_API"), user_id, "text");
+			MessageQueue::pending_push_queue(response, ConfigManager::getInstance().configVariable("PRIVATE_API"), user_id, "text");
 			tag = false;
 		}
 		std::this_thread::sleep_for(std::chrono::seconds(3));
@@ -113,19 +90,19 @@ void send_message(Message &messageClass, JsonData &data, bool isErrorTransfer)
 				while (true)
 				{
 					std::string subStr = getResponse.substr(0, 5000);
-					MessageQueue::pending_push_queue(subStr, ConfigManager::getInstance().configVariable("GROUP_API"), data.group_id, data.type);
+					MessageQueue::pending_push_queue(subStr, ConfigManager::getInstance().configVariable("GROUP_API"), data.group_id, data.content_type);
 					getResponse.erase(0, 5000);
 					std::this_thread::sleep_for(std::chrono::milliseconds(500));
 					if (getResponse.size() < 4999)
 					{
-						MessageQueue::pending_push_queue(getResponse, ConfigManager::getInstance().configVariable("GROUP_API"), data.group_id, data.type);
+						MessageQueue::pending_push_queue(getResponse, ConfigManager::getInstance().configVariable("GROUP_API"), data.group_id, data.content_type);
 						break;
 					}
 				}
 			}
 			else
 			{
-				MessageQueue::pending_push_queue(getResponse, ConfigManager::getInstance().configVariable("GROUP_API"), data.group_id, data.type);
+				MessageQueue::pending_push_queue(getResponse, ConfigManager::getInstance().configVariable("GROUP_API"), data.group_id, data.content_type);
 			}
 		}
 		else
@@ -167,11 +144,11 @@ void send_message(Message &messageClass, JsonData &data, bool isErrorTransfer)
 				while (true)
 				{
 					std::string subStr = cut_utf8_front(getResponse, 4096);
-					MessageQueue::pending_push_queue(subStr, ConfigManager::getInstance().configVariable("PRIVATE_API"), data.user_id, data.type);
+					MessageQueue::pending_push_queue(subStr, ConfigManager::getInstance().configVariable("PRIVATE_API"), data.user_id, data.content_type);
 					std::this_thread::sleep_for(std::chrono::milliseconds(500));
 					if (getResponse.size() < 4999)
 					{
-						MessageQueue::pending_push_queue(getResponse, ConfigManager::getInstance().configVariable("PRIVATE_API"), data.user_id, data.type);
+						MessageQueue::pending_push_queue(getResponse, ConfigManager::getInstance().configVariable("PRIVATE_API"), data.user_id, data.content_type);
 						break;
 					}
 				}
@@ -179,7 +156,7 @@ void send_message(Message &messageClass, JsonData &data, bool isErrorTransfer)
 			else
 			{
 				LOG_DEBUG("发送内容：" + getResponse);
-				MessageQueue::pending_push_queue(getResponse, ConfigManager::getInstance().configVariable("PRIVATE_API"), data.user_id, data.type);
+				MessageQueue::pending_push_queue(getResponse, ConfigManager::getInstance().configVariable("PRIVATE_API"), data.user_id, data.content_type);
 			}
 		}
 	}
@@ -209,12 +186,11 @@ void workingThread(Message &messageClass, std::string originalJsonData)
 	send_message(messageClass, data, false);
 }
 
-void createTimingTastThread()
+void createTimingTastThread(Message &msg)
 {
 	// 创建子线程
-	std::thread t(pollingThread);
+	std::thread t(pollingThread, std::ref(msg));
 	t.detach(); // 线程分离
-	return;
 }
 
 // 资源释放
@@ -256,14 +232,13 @@ void init()
 	{
 		LOG_WARNING("配置文件不符合当前版本，程序可能会不稳定，建议使用适合版本的配置文件！");
 	}
-
-	createTimingTastThread(); // 创建子线程
 }
 
 int main()
 {
 	init();
 	Message messageClass;
+	createTimingTastThread(messageClass); // 创建子线程
 
 	// 正向WebSocket连接
 	std::thread t1(MyWebSocket::connectWebSocket, "/");
