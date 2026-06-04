@@ -11,7 +11,7 @@ bool AdminCommand::canHandle(const std::string &message)
 CommandResult AdminCommand::execute(const CommandContext &ctx)
 {
     std::string str;
-    std::string cmd = utils::trim(ctx.data.raw_message);
+    std::string cmd = utils::trim(ctx.data.plain_text);
     if (cmd == "#开启无障碍聊天")
     {
         this->m_accessibility_chat = true;
