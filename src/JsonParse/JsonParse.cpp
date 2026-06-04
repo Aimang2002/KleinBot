@@ -5,21 +5,18 @@
 std::ostream &operator<<(std::ostream &os, const JsonData &data)
 {
 	os << "JsonData {\n";
-	os << "  bot_qq: " << data.bot_qq << "\n";
 	os << "  user_id: " << data.user_id << "\n";
-	os << "  message_timestamp: " << data.message_timestamp << "\n";
-	os << "  message_id: " << data.message_id << "\n";
-	os << "  message_seq: " << data.message_seq << "\n";
-	os << "  message_type: \"" << data.message_type << "\"\n";
-	os << "  message_data_url: \"" << data.message_data_url << "\"\n";
 	os << "  nickname: \"" << data.nickname << "\"\n";
-	os << "  raw_message: \"" << data.raw_message << "\"\n";
-	os << "  sub_type: \"" << data.sub_type << "\"\n";
-	os << "  post_type: \"" << data.post_type << "\"\n";
 	os << "  card: \"" << data.card << "\"\n";
 	os << "  group_id: " << data.group_id << "\n";
-	os << "  type: \"" << data.type << "\"\n";
-	os << "  error_code: " << data.error_code << "\n";
+	os << "  message_type: \"" << data.message_type << "\"\n";
+	os << "  post_type: \"" << data.post_type << "\"\n";
+	os << "  raw_message: \"" << data.raw_message << "\"\n";
+	os << "  plain_text: \"" << data.plain_text << "\"\n";
+	os << "  message_data_url: \"" << data.message_data_url << "\"\n";
+	os << "  message_id: " << data.message_id << "\n";
+	os << "  message_timestamp: " << data.message_timestamp << "\n";
+	os << "  content_type: \"" << data.content_type << "\"\n";
 	os << "}";
 	return os;
 }
@@ -81,85 +78,54 @@ JsonParse &JsonParse::getInstance()
 
 JsonData JsonParse::jsonReader(std::string &json_str)
 {
-	// 数据提取
 	JsonData data;
 	nlohmann::json doc = nlohmann::json::parse(json_str);
 
-	// 如果Json解析失败
 	if (!doc.is_object())
 	{
-		std::cout << __LINE__ << ":";
 		LOG_ERROR("The JSON string does not contain an object.");
 		return {};
 	}
 
-#ifdef DEBUG
-	/* 输出json数据 */
-	for (auto &[key, val] : doc.items())
-	{
-		std::cout << "Key: " << key << ", Value: ";
-		if (val.is_string())
-		{
-			std::cout << val.get<std::string>() << std::endl;
-		}
-		else if (val.is_number_integer())
-		{
-			std::cout << val.get<int64_t>() << std::endl;
-		}
-		else if (val.is_number_unsigned())
-		{
-			std::cout << val.get<unsigned int>() << std::endl;
-		}
-		else
-		{
-			std::cout << "Unknown data type" << std::endl;
-		}
-	}
-#endif
-
-	// 提取键值对
+	// 发送者身份
+	data.user_id = doc.value("user_id", 0ULL);
 	if (doc.contains("sender") && doc["sender"].is_object())
 	{
-		nlohmann::json &sender = doc["sender"];
+		const auto &sender = doc["sender"];
 		data.nickname = sender.value("nickname", "");
-		data.card = sender.value("card", "");
+		data.card     = sender.value("card", "");
 	}
 
+	// 消息归属
+	data.group_id     = doc.value("group_id", 0ULL);
+	data.message_type = doc.value("message_type", "");
+	data.post_type    = doc.value("post_type", "");
+
+	// 消息内容
+	data.raw_message = doc.value("raw_message", "");
+
+	// 遍历 message[] 数组：提取纯文本 + 图片URL
 	if (doc.contains("message") && doc["message"].is_array())
 	{
-		auto &firstMsg = doc["message"][0];
-		if (firstMsg.contains("type") && firstMsg["type"].is_string())
+		for (const auto &msg : doc["message"])
 		{
-			data.type = firstMsg["type"].get<std::string>();
+			std::string t = msg.value("type", "");
+			if (t == "text" && msg.contains("data"))
+			{
+				data.plain_text += msg["data"].value("text", "");
+			}
+			else if (t == "image" && msg.contains("data"))
+			{
+				data.message_data_url = msg["data"].value("url", "");
+			}
 		}
-		if (firstMsg.contains("data") && firstMsg["data"].is_object())
-		{
-			const auto &firstMsg_data = firstMsg["data"];
-			data.message_data_url = firstMsg_data.value("url", "");
-		}
-
-		// 如果有URL，则提取
-		// firstMsg = doc["message"][1];
-		// if (firstMsg.contains("data") && firstMsg["data"].is_object())
-		// {
-		// 	const auto &firstMsg_data = firstMsg["data"];
-		// 	data.message_data_url = firstMsg_data.value("url", "");
-		// }
 	}
 
-	data.bot_qq = doc.value("self_id", 0LL);
-	data.user_id = doc.value("user_id", 0LL);
-	data.message_timestamp = doc.value("time", 0);
-	data.message_id = doc.value("message_id", 0);
-	data.message_type = doc.value("message_type", "");
-	data.message_seq = doc.value("message_seq", 0);
-	data.raw_message = doc.value("raw_message", "");
-	data.sub_type = doc.value("sub_type", "");
-	data.group_id = doc.value("group_id", 0LL);
-	data.post_type = doc.value("post_type", "");
+	// 消息元数据
+	data.message_id        = doc.value("message_id", 0LL);
+	data.message_timestamp = doc.value("time", 0LL);
 
 	std::cout << data << std::endl;
-
 	return data;
 }
 
