@@ -43,9 +43,14 @@ public:
 	 */
 	void handleMessage(JsonData &current_data);
 
+	std::string pushScheduled(uint64_t user_id, const std::string &prompt);
+
 	~Message();
 
 private:
+	// 消息意图分类
+	enum class Intent { Chat, Command, Vision, SystemEvent };
+	Intent classify(const JsonData &data);
 	/**
 	 * @brief 添加用户
 	 *
@@ -141,15 +146,7 @@ private:
 	 *
 	 * @return 			返回带有CQ码的数据
 	 */
-	std::string provideImageCreation(const uint64_t user_id, const std::string &text);
-
-	/**
-	 * @brief 去掉群聊内容的CQ码
-	 *
-	 * @param message 	传入进去的消息
-	 * @return 			返回处理完毕的数据
-	 */
-	std::string removeGroupCQCode(const std::string &message);
+	// std::string provideImageCreation(const uint64_t user_id, const std::string &text);
 
 	/**
 	 * @brief 调用stable diffusion 实现图像创建
@@ -158,7 +155,6 @@ private:
 	 * @return 			返回处理完毕的数据
 	 */
 	std::string SDImageCreation(const std::string &message);
-
 	// 在下面添加新的函数用于拓展其他内容...
 
 private:
@@ -172,9 +168,9 @@ private:
 	std::unique_ptr<Dock> dock;													 // 对话模块
 
 	// 新增
+	ModelRegistry models;
 	CommandRegistry registry;
 	UserSessionService userSession;
-	ModelRegistry models;
 	// std::unique_ptr<LLMService> llmservice;
 };
 
