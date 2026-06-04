@@ -49,7 +49,11 @@ private:
     std::condition_variable cv;           // 条件变量
 };
 
-#define LOG_DEBUG(message) Log::getInstance().debug(message)
+#ifdef DEBUG
+    #define LOG_DEBUG(message) Log::getInstance().debug(message)
+#else
+    #define LOG_DEBUG(message) ((void)0)
+#endif
 
 #define LOG_INFO(message) Log::getInstance().info(message)
 

@@ -80,7 +80,9 @@ void Log::info(std::string message)
 
 void Log::debug(std::string message)
 {
+#ifdef DEBUG
     std::cout << "\033[38;5;208m" << "[" << getCurrentTime("y+h") << "] " << "DEBUG: " << messageLengthCheck(message) << "\033[0m\n";
+#endif
 }
 
 void Log::warning(std::string message)
