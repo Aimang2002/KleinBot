@@ -1,5 +1,6 @@
 #include "OpenAIStandard.h"
 #include "../Log/Log.h"
+#include "../../ConfigManager/ConfigManager.h"
 #include "../../Library/nlohmann/json.hpp"
 #include <chrono>
 #include <thread>
@@ -124,6 +125,13 @@ std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, c
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload.length());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_chat);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+        // 可选 HTTP 代理：config.json 配置 "proxy" 非空时生效
+        std::string proxy = ConfigManager::getInstance().configVariableOpt("proxy");
+        if (!proxy.empty())
+        {
+            curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
+        }
 
         // 执行HTTP请求
         unsigned short attempts = 5;
