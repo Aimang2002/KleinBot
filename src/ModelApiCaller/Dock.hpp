@@ -2,6 +2,7 @@
 #define DOCK_H
 
 #include "OpenAIStandard/OpenAIStandard.h"
+#include "AnthropicStandard/AnthropicStandard.h"
 #include "../Message/Person.hpp"
 #include "../Port/ChatResponse.h"
 #include "../Port/VisionResponse.h"
@@ -19,6 +20,7 @@ public:
     Dock()
     {
         this->registryLLM.emplace("OpenAI", std::make_unique<OpenAIStandard>());
+        this->registryLLM.emplace("Anthropic", std::make_unique<AnthropicStandard>());
     }
 
     ChatResponse RequestChat(const ChatModel &model, const std::string &model_name, const ChatRequest &request)
