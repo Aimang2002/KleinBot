@@ -20,32 +20,13 @@ void MessageQueue::original_push_queue(std::string task)
     origina_queue->push(task);
 }
 
-void MessageQueue::pending_push_queue(const std::string task, std::string API, uint64_t id, const std::string type)
+void MessageQueue::pending_push_raw(const std::string &packed)
 {
 #ifdef DEBUG
-    LOG_DEBUG("pending_push_queue的入列消息：" + task);
+    LOG_DEBUG("pending_push_raw 入列：" + packed);
 #endif
-
-    // 数据封装
-    std::string JsonFormatData = task; // 用于接收格式化的json数据
-    std::string getGOCQJsonData;       // 用于接收装有cq码的Json数据
-    std::string webSocketDataPakage;   // 用于接收websocket的数据包格式
-
-    // 判断是群消息还是私聊消息
-    if (API.compare(ConfigManager::getInstance().configVariable("GROUP_API")) == 0)
-    {
-        getGOCQJsonData = groupGOCQFormat(JsonFormatData, id, type);
-        webSocketDataPakage = MyReverseWebSocket::messageEncapsulation(getGOCQJsonData, ConfigManager::getInstance().configVariable("GROUP_API"));
-    }
-    else
-    {
-        getGOCQJsonData = privateGOCQFormat(JsonFormatData, id, type);
-        webSocketDataPakage = MyReverseWebSocket::messageEncapsulation(getGOCQJsonData, ConfigManager::getInstance().configVariable("PRIVATE_API"));
-    }
-
-    // 放入消息队列
     std::lock_guard<std::mutex> locker(pending_mutex);
-    pending_queue->push(webSocketDataPakage);
+    pending_queue->push(packed);
 }
 
 // 判断消息队列是否为空
@@ -111,27 +92,4 @@ bool MessageQueue::pending_pop()
     std::lock_guard<std::mutex> locker(pending_mutex);
     pending_queue->pop();
     return true;
-}
-
-// 封装GO-CQ格式数据
-std::string MessageQueue::privateGOCQFormat(const std::string &message, const uint64_t &user_id, const std::string type)
-{
-    nlohmann::json json_data;
-    json_data["user_id"] = user_id;
-    json_data["message"] = message;
-    json_data["type"] = type;
-
-    return json_data.dump();
-}
-
-std::string MessageQueue::groupGOCQFormat(const std::string &message, const uint64_t &group_id, const std::string type)
-{
-    nlohmann::json json_data;
-    json_data["group_id"] = group_id;
-    json_data["message"] = message;
-    if (type == "text")
-    {
-        json_data["type"] = "text";
-    }
-    return json_data.dump();
 }

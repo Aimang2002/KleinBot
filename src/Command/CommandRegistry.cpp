@@ -18,7 +18,7 @@ std::optional<CommandResult> CommandRegistry::execute(const std::string &message
             {
                 uint64_t admin_id = std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
                 if (ctx.user_id != admin_id)
-                    return CommandResult{"权限不足！"};
+                    return CommandResult{TextMessage{"权限不足！"}};
             }
             return c->execute(ctx);
         }

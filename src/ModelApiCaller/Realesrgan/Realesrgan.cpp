@@ -192,7 +192,6 @@ std::string Realesrgan::fixImageSizeTo4K(const std::string &message)
 
     //     LOG_WARNING("文件打开失败，使用file方式发送图片(这种方式不能清除原图和4K图片)...");
     //     // outputPath.insert(0, "file://"); // =base64://
-    //     // message = CQCode("image", "file", outputPath);
     //     return outputPath;
 }
 

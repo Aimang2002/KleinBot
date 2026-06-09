@@ -16,7 +16,10 @@ public:
 
     // 消息入列
     static void original_push_queue(std::string task);
-    static void pending_push_queue(const std::string task, std::string API, uint64_t id, const std::string type);
+
+    // 入队已封装好的 WebSocket payload（完整的 {"action":..., "params":...} 字符串）
+    // 由 QQMessageSender 调用
+    static void pending_push_raw(const std::string &packed);
 
     // 判断消息队列是否为空
     static bool original_empty();
@@ -29,10 +32,6 @@ public:
     // 弹出第一个消息
     static bool original_pop();
     static bool pending_pop();
-
-private:
-    static std::string privateGOCQFormat(const std::string& message, const uint64_t& user_id, const std::string type);
-    static std::string groupGOCQFormat(const std::string& message,const  uint64_t& group_id, const std::string type);
 
 private:
     static std::unique_ptr<std::queue<std::string>> origina_queue; // 原始消息队列

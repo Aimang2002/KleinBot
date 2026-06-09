@@ -17,12 +17,12 @@ CommandResult SearchSongsCommand::execute(const CommandContext &ctx)
     std::string musicName = utils::commandPromptDraw(ctx.data.plain_text);
     if (musicName.empty())
     {
-        return {"未提取到歌曲名！", MessageType::Text};
+        return {TextMessage{"未提取到歌曲名！"}};
     }
 
     // 开始搜索
     CloudMusicID cm;
-    uint64_t songID = 0;
+    long long songID = 0;
     nlohmann::json response = cm.searchSong(musicName);
 
     // 提取结果
@@ -31,9 +31,13 @@ CommandResult SearchSongsCommand::execute(const CommandContext &ctx)
         auto r = response["result"];
         if (r.contains("songs") && r["songs"].is_array() && !r["songs"].empty() && r["songs"][0].is_object())
         {
-            songID = r["songs"][0].value("id", uint64_t(0));
+            songID = r["songs"][0].value("id", (long long)0);
         }
     }
-    std::string CQCode = utils::CQCode("music", "type", "163", "id", songID);
-    return {CQCode, MessageType::CQ};
+
+    if (songID == 0)
+    {
+        return {TextMessage{"未搜索到歌曲。"}};
+    }
+    return {MusicMessage{songID}};
 }

@@ -16,7 +16,6 @@ std::ostream &operator<<(std::ostream &os, const JsonData &data)
 	os << "  message_data_url: \"" << data.message_data_url << "\"\n";
 	os << "  message_id: " << data.message_id << "\n";
 	os << "  message_timestamp: " << data.message_timestamp << "\n";
-	os << "  content_type: \"" << data.content_type << "\"\n";
 	os << "}";
 	return os;
 }
@@ -232,18 +231,5 @@ bool JsonParse::findKeyAndValue(const std::string &json_str, const std::string &
 	{
 		LOG_ERROR("Json解析失败: {}" + std::string(e.what()));
 		return false;
-	}
-}
-
-void JsonParse::CQCodeSeparation(std::string &message)
-{
-	int begin = message.find("[CQ:");
-	while (begin != message.npos)
-	{
-		int i = begin;
-		while (message[++i] != ']')
-			; // 寻找需要删除的范围
-		message.erase(begin, i - begin + 1);
-		begin = message.find("[CQ:");
 	}
 }

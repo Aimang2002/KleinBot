@@ -8,21 +8,19 @@
 #include "../Command/CommandRegistry.h"
 #include "../UserSession/UserSessionService.h"
 #include "../ModelRegistry/ModelRegistry.h"
+#include "../Port/MessageSenderPort.h"
+#include "../Port/OutboundMessage.h"
 #include <iostream>
 #include <random>
 #include <memory>
 #include <unordered_set>
 
-/*
- * 任何功能函数，各司其职，需要完成自己的任务，例如textToVoice函数是用于完成文本转语音的操作，
- * 那么它返回的值，就是该函数所返回的语音数据（base64），并封装好CQ码。
- */
-
 // 消息类
 class Message
 {
 public:
-	Message();
+	// MessageSenderPort 由 main.cpp 装配并注入，Message 自身不负责生命周期
+	explicit Message(MessageSenderPort &sender);
 
 	/**
 	 * @brief 消息过滤，对某些消息进行过滤
@@ -33,15 +31,11 @@ public:
 	 */
 	bool messageFilter(std::string message_type, std::string message);
 
-	/**
-	 * @brief 处理私聊消息
-	 *
-	 * @param private_id 	用户QQ
-	 * @param message 	该用户所发送的信息
-	 * @param message_type 消息类型
-	 * @return 			返回封装好的CQ码
-	 */
-	void handleMessage(JsonData &current_data);
+	// 处理一条入站消息：分类 → 命令 / Vision / 普通对话，结果直接经由 sender 发出
+	void handleMessage(const JsonData &current_data);
+
+	// 错误消息分发：直接构造 TextMessage 发回去（替代 main.cpp 旧的 isErrorTransfer 分支）
+	void sendError(const JsonData &current_data, const std::string &text);
 
 	std::string pushScheduled(uint64_t user_id, const std::string &prompt);
 
@@ -51,13 +45,6 @@ private:
 	// 消息意图分类
 	enum class Intent { Chat, Command, Vision, SystemEvent };
 	Intent classify(const JsonData &data);
-	/**
-	 * @brief 添加用户
-	 *
-	 * @param message 	用户QQ
-	 *
-	 */
-	void questPictureID(std::string &message);
 
 	/**
 	 * @brief 个性化聊天（对接人工智能模块）
@@ -66,41 +53,6 @@ private:
 	 *
 	 */
 	std::string characterMessage(const JsonData &data);
-
-	/**
-	 * @brief 音乐分享
-	 *
-	 * @param message 	具体消息
-	 * @param platform 	音乐来自哪个平台，1为网易云...
-	 *
-	 * @return 			返回封装好的CQ码或者返回空字符串
-	 */
-	std::string musicShareMessage(const std::string &message, short platform);
-
-	/**
-	 * @brief 艾特群友
-	 *
-	 * @param message 	具体消息
-	 * @param user_id 	群友QQ
-	 *
-	 */
-	std::string atUserMassage(std::string message, const uint64_t user_id);
-
-	/**
-	 * @brief 艾特所有人
-	 *
-	 * @param message 	具体消息
-	 *
-	 */
-	void atAllMessage(std::string &message);
-
-	/**
-	 * @brief 调用图片修复接口
-	 *
-	 * @param message 	具体消息
-	 *
-	 */
-	void call_fixImageSizeTo4K(std::string &message);
 
 	/**
 	 * @brief 调用视觉模型对图片进行分析
@@ -130,31 +82,15 @@ private:
 	 */
 	std::string encodeToURL(const std::string &input);
 
-	/**
-	 * @brief 将文本转为语音
-	 *
-	 * @param text 	文本
-	 * @return  正常返回封装好的CQ码，否则返回错误信息
-	 */
+	// 文本 → 语音：成功返回本地 wav 路径，失败返回空字符串
+	// 协议封装（变成 VoiceMessage）由调用方完成，本函数只做 TTS
 	std::string textToVoice(const std::string &text);
 
-	/**
-	 * @brief 使用图片生成模型生成图片
-	 *
-	 * @param user_id 	用户QQ
-	 * @param text		文本
-	 *
-	 * @return 			返回带有CQ码的数据
-	 */
-	// std::string provideImageCreation(const uint64_t user_id, const std::string &text);
+	// 把 OutboundMessage 按 message_type 路由到 send_private / send_group
+	void dispatch(const JsonData &data, const OutboundMessage &msg);
 
-	/**
-	 * @brief 调用stable diffusion 实现图像创建
-	 *
-	 * @param message 	 提示
-	 * @return 			返回处理完毕的数据
-	 */
-	std::string SDImageCreation(const std::string &message);
+	// 文本超长自动分段发送（utf-8 安全切分）
+	void dispatchText(const JsonData &data, const std::string &text);
 	// 在下面添加新的函数用于拓展其他内容...
 
 private:
@@ -167,11 +103,10 @@ private:
 	std::unique_ptr<Voice> voice;												 // 语音识别模块
 	std::unique_ptr<Dock> dock;													 // 对话模块
 
-	// 新增
 	ModelRegistry models;
 	CommandRegistry registry;
 	UserSessionService userSession;
-	// std::unique_ptr<LLMService> llmservice;
+	MessageSenderPort &sender; // 出站端口（生命周期由 main 持有）
 };
 
 #endif // MESSAGE_H

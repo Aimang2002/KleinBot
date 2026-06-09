@@ -50,5 +50,5 @@ CommandResult AdminCommand::execute(const CommandContext &ctx)
         str = this->m_PCStatus.getPublicIP();
     }
     std::string response = std::string(!str.empty() ? str : "操作失败，请查看日志定位问题。");
-    return {response};
+    return {TextMessage{response}};
 }

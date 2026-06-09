@@ -65,9 +65,3 @@ void MyReverseWebSocket::connectReverseWebSocket()
         std::this_thread::sleep_for(std::chrono::seconds(10)); // 休眠10后重连
     }
 }
-
-std::string MyReverseWebSocket::messageEncapsulation(std::string message, std::string messageEndpoint)
-{
-    std::string format = R"({"action":")" + messageEndpoint + R"(","params":)" + message + "}";
-    return format;
-}

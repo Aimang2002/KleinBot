@@ -18,7 +18,7 @@ CommandResult VoiceSwitchCommand::execute(const CommandContext &ctx)
 {
     if (this->global_voice == false)
     {
-        return {"管理员限制的了语音的开启和关闭！"};
+        return {TextMessage{"管理员限制的了语音的开启和关闭！"}};
     }
 
     bool newStatus = false;
@@ -27,5 +27,5 @@ CommandResult VoiceSwitchCommand::execute(const CommandContext &ctx)
     this->userSession.voiceSwitch(ctx.user_id, newStatus);
 
     std::string response_message = (newStatus ? "语音已开启。" : "语音已关闭。");
-    return {response_message};
+    return {TextMessage{response_message}};
 }

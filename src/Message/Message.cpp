@@ -16,10 +16,12 @@
 #include "../Command/AdminCommand.h"
 #include "Message.h"
 #include <iomanip>
+#include <thread>
+#include <chrono>
 
 std::mt19937 mt_rand(1000);
 
-Message::Message() : userSession(models)
+Message::Message(MessageSenderPort &sender) : userSession(models), sender(sender)
 {
 	// 服务器状态类初始化
 #ifdef DEBUG
@@ -102,56 +104,140 @@ Message::Intent Message::classify(const JsonData &data)
 	return Intent::Chat; // 正常聊天
 }
 
-void Message::handleMessage(JsonData &current_data)
+void Message::handleMessage(const JsonData &current_data)
 {
-	// 基础分类
 	Intent intent = classify(current_data);
 
-	// 系统事件（心跳/通知/请求）—— 静默忽略
+	// 系统事件（心跳/通知/请求）：静默忽略
 	if (intent == Intent::SystemEvent)
 	{
 		return;
 	}
-	else if (intent == Intent::Chat) // 文本消息：先尝试命令匹配，匹配失败再走聊天
+
+	// 文本消息先走命令匹配
+	if (intent == Intent::Chat)
 	{
 		CommandContext ctx{current_data.user_id, current_data.group_id, current_data.message_type, current_data};
 		auto rs = this->registry.execute(current_data.raw_message, ctx);
 		if (rs.has_value())
 		{
 			LOG_DEBUG("识别到命令");
-			current_data.raw_message = rs->message;
-			current_data.content_type = (rs->type == MessageType::CQ) ? "CQ" : "text";
+			dispatch(current_data, rs->payload);
 			return;
 		}
 	}
 
-	// 普通对话
+	// 未命中命令 → LLM 对话 / 图像识别
 	try
 	{
-		current_data.content_type = "text";
-
 		std::cout << "[" << current_data.message_type << "]" << current_data.user_id << ":" << current_data.plain_text << std::endl;
 
+		std::string llm_text;
 		if (intent == Intent::Vision)
 		{
-			current_data.raw_message = provideImageRecognition(current_data.user_id, current_data.plain_text, current_data.message_data_url);
+			llm_text = provideImageRecognition(current_data.user_id, current_data.plain_text, current_data.message_data_url);
 		}
 		else
 		{
-			current_data.raw_message = characterMessage(current_data);
+			llm_text = characterMessage(current_data);
 		}
 
-		// 语音转换
+		if (llm_text.empty())
+		{
+			return;
+		}
+
+		// 语音模式：text → TTS → VoiceMessage；否则直接 TextMessage 走分段
 		if (this->global_Voice && this->userSession.isVoiceMode(current_data.user_id))
 		{
-			current_data.content_type = "CQ";
-			current_data.raw_message = this->textToVoice(current_data.raw_message);
+			std::string audioPath = this->textToVoice(llm_text);
+			if (audioPath.empty())
+			{
+				dispatch(current_data, TextMessage{"系统提示：语音模块异常。"});
+			}
+			else
+			{
+				dispatch(current_data, VoiceMessage{audioPath});
+			}
+		}
+		else
+		{
+			dispatchText(current_data, llm_text);
 		}
 	}
 	catch (const std::exception &e)
 	{
 		std::cerr << e.what() << '\n';
 	}
+}
+
+void Message::dispatch(const JsonData &data, const OutboundMessage &msg)
+{
+	if (data.message_type == "group")
+	{
+		sender.send_group(data.group_id, msg);
+	}
+	else
+	{
+		sender.send_private(data.user_id, msg);
+	}
+}
+
+void Message::dispatchText(const JsonData &data, const std::string &text)
+{
+	// 群消息上限 5000 字节，私聊 4096 字符。本函数按 UTF-8 字符切分以避免截断到半个汉字
+	const bool is_group = (data.message_type == "group");
+	const size_t max_chars = is_group ? 5000 : 4096;
+
+	if (text.size() <= max_chars)
+	{
+		dispatch(data, TextMessage{text});
+		return;
+	}
+
+	LOG_WARNING("文本过长，将使用分批次发送");
+
+	std::string remaining = text;
+	auto cut_utf8_front = [](std::string &str, size_t n) -> std::string
+	{
+		size_t end_byte_pos = 0;
+		size_t char_count = 0;
+		for (size_t i = 0; i < str.length() && char_count < n;)
+		{
+			int len = 1;
+			unsigned char c = str[i];
+			if ((c & 0xF8) == 0xF0)
+				len = 4;
+			else if ((c & 0xF0) == 0xE0)
+				len = 3;
+			else if ((c & 0xE0) == 0xC0)
+				len = 2;
+
+			if (i + len > str.length())
+				break;
+			i += len;
+			end_byte_pos = i;
+			char_count++;
+		}
+		std::string head = str.substr(0, end_byte_pos);
+		str.erase(0, end_byte_pos);
+		return head;
+	};
+
+	while (!remaining.empty())
+	{
+		std::string chunk = cut_utf8_front(remaining, max_chars);
+		dispatch(data, TextMessage{chunk});
+		if (!remaining.empty())
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		}
+	}
+}
+
+void Message::sendError(const JsonData &current_data, const std::string &text)
+{
+	dispatch(current_data, TextMessage{text});
 }
 
 bool Message::messageFilter(std::string message_type, std::string message)
@@ -249,85 +335,11 @@ std::string Message::characterMessage(const JsonData &data)
 	return LLM_content;
 }
 
-std::string Message::musicShareMessage(const std::string &message, short platform)
-{
-	// 提取歌手或歌曲
-	auto result = message.find(":");
-	if (result != std::string::npos)
-	{
-		result += 1;
-	}
-	else
-	{
-		result = message.find("：") + 3;
-	}
-	std::string musicName = message.substr(result);
-
-	CloudMusicID cm;
-	uint64_t songID = 0;
-
-	switch (platform)
-	{
-	case 1:
-	{
-		nlohmann::json res = cm.searchSong(musicName);
-		if (res.contains("result") && res["result"].is_object())
-		{
-			auto r = res["result"];
-			if (r.contains("songs") && r["songs"].is_array() && !r["songs"].empty() && r["songs"][0].is_object())
-			{
-				songID = r["songs"][0].value("id", uint64_t(0));
-			}
-		}
-		return utils::CQCode("music", "type", "163", "id", songID);
-	}
-	default:
-		return {};
-	}
-	return {};
-}
-
-std::string Message::atUserMassage(std::string message, uint64_t user_id)
-{
-	message.insert(0, utils::CQCode("at", "qq", user_id));
-	return message;
-}
-
-void Message::atAllMessage(std::string &message)
-{
-	message = utils::CQCode("at", "all");
-}
-
 // 回调函数用于写入数据到文件
 size_t write_data(void *ptr, size_t size, size_t nmemb, std::string *data)
 {
 	data->append(reinterpret_cast<const char *>(ptr), size * nmemb);
 	return size * nmemb;
-}
-
-void Message::call_fixImageSizeTo4K(std::string &message)
-{
-	Realesrgan *rlg = new Realesrgan;
-	std::string imagePath = rlg->fixImageSizeTo4K(message);
-
-	if (imagePath.empty())
-	{
-		LOG_ERROR("返回内容少于20字节");
-		return;
-	}
-	else
-	{
-		// 路径传输
-		message.insert(0, "file://");
-		message = utils::CQCode("image", "file", message);
-	}
-	// else if (res == 2)
-	// {
-	// 	// base64传输
-	// 	message = CQCode("image", "file=base64://" + message);
-	// }
-
-	delete rlg;
 }
 
 // 数据流转为base64编码
@@ -396,7 +408,7 @@ std::string Message::encodeToURL(const std::string &input)
 
 std::string Message::provideImageRecognition(const uint64_t user_id, const std::string &message, const std::string &message_data_url)
 {
-	std::string conversation = message.substr(0, message.find("[CQ:image")); // 提取对话（如果有的话）
+	std::string conversation = message; // plain_text 已去 CQ 码，无需再切割
 
 	// 若不存在prompt，则设置默认prompt
 	if (conversation.size() < 6)
@@ -472,16 +484,6 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 		{
 			answer = response.refusal;
 		}
-
-		// 判断是否需要转语音
-		if (this->userSession.getUserConfig(user_id).isOpenVoiceMode)
-		{
-			answer = this->textToVoice(answer);
-			if (answer.find(".wav") == std::string::npos)
-			{
-				answer = "系统提示：语音模块异常。";
-			}
-		}
 		return answer;
 	}
 
@@ -501,61 +503,13 @@ size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
 }
 std::string Message::textToVoice(const std::string &text)
 {
-	std::string response;
-
 	std::string audioPath = this->voice->toAudio(text);
-	if (audioPath.find(".wav") != std::string::npos)
+	if (audioPath.find(".wav") == std::string::npos)
 	{
-		// 使用路径传输
-		std::string URL = "file://" + audioPath;
-		response = utils::CQCode("record", "file", URL);
-		return response;
+		LOG_ERROR("TTS 失败：" + audioPath);
+		return {};
 	}
-	else
-	{
-		return audioPath; // 这里面是错误信息
-	}
-}
-
-std::string Message::SDImageCreation(const std::string &message)
-{
-	std::string response;
-	// 提取出prompt
-	if (message.size() < 14)
-	{
-		LOG_WARNING("用户未描述图像");
-		return "系统提示：请描述图像...";
-	}
-
-	std::string prompt;
-	if (message.find(":") != message.npos)
-	{
-		prompt = message.substr(message.find(":") + 1);
-	}
-	else
-	{
-		prompt = message.substr(message.find("：") + 3); // 在Linux中，3个位置放一个中文字符
-	}
-
-	// prompt翻译成英文
-
-	// 调用StableDiffusion
-	std::string base64_code;
-
-	std::unique_ptr<StableDiffusion> SD = std::make_unique<StableDiffusion>();
-
-	// StableDiffusion &SD =
-	base64_code = SD->connectStableDiffusion(prompt);
-
-	if (base64_code.size() < 128)
-	{
-		return "系统提示：数据返回有误！";
-	}
-	response = "[CQ:image,file=base64://";
-	response.append(base64_code);
-	response.append("]");
-
-	return response;
+	return audioPath;
 }
 
 std::string Message::pushScheduled(uint64_t user_id, const std::string &prompt)

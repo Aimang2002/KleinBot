@@ -2,6 +2,7 @@
 #define COMMAND_H
 
 #include "../JsonParse/JsonParse.h"
+#include "../Port/OutboundMessage.h"
 #include <string>
 
 struct CommandContext
@@ -12,16 +13,11 @@ struct CommandContext
     const JsonData &data;     // 存储原始消息数据
 };
 
-enum class MessageType
-{
-    Text,
-    CQ
-};
-
+// 命令返回语义化消息，由 QQMessageSender 翻译为协议格式
+// 不再有 MessageType 枚举——variant 的类型本身就承载了这层信息
 struct CommandResult
 {
-    std::string message;                  // 回复的内容
-    MessageType type = MessageType::Text; // 响应类型
+    OutboundMessage payload;
 };
 
 class Command

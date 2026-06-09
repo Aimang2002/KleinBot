@@ -32,42 +32,6 @@ namespace utils
         return false;
     }
 
-    template <typename T>
-    void recursion(std::stringstream &cq, int &count, T arg)
-    {
-        cq << arg << "]";
-    }
-
-    template <typename First, typename... Args>
-    void recursion(std::stringstream &cq, int &count, First first_arg, Args... args)
-    {
-        cq << first_arg;
-        if (count <= 0)
-        {
-            cq << "=";
-            count++;
-        }
-        else
-        {
-            cq << ",";
-            count = 0;
-        }
-        recursion(cq, count, args...); // 递归
-    }
-
-    // CQ码
-    template <typename First, typename... Args>
-    std::string CQCode(First first_args, Args... args)
-    {
-        // 获取传入的参数个数
-        int count = 0;
-        std::stringstream cq;
-        cq << "[CQ:" << first_args << ",";
-        recursion(cq, count, args...);
-
-        return cq.str();
-    }
-
     // 命令prompt提取
     inline std::string commandPromptDraw(const std::string prompt)
     {

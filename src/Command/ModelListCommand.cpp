@@ -4,7 +4,7 @@ CommandResult ModelListCommand::execute(const CommandContext &ctx)
 {
     if (this->chatModels.all().empty())
     {
-        return {"未装载其他模型"};
+        return {TextMessage{"未装载其他模型"}};
     }
 
     std::string content = "当前装载的模型如下：\n";
@@ -15,5 +15,5 @@ CommandResult ModelListCommand::execute(const CommandContext &ctx)
             content.append("\n" + name + "\n");
         }
     }
-    return {content};
+    return {TextMessage{content}};
 }
