@@ -100,6 +100,16 @@ std::string ConfigManager::configVariable(std::string variable)
     return result;
 }
 
+std::string ConfigManager::configVariableOpt(const std::string &variable, const std::string &defaultValue)
+{
+    auto it = this->configuration.find(variable);
+    if (it == this->configuration.end() || it->second.empty())
+    {
+        return defaultValue;
+    }
+    return it->second;
+}
+
 void ConfigManager::validDetection()
 {
     auto check_ip = [this](const std::string &key)

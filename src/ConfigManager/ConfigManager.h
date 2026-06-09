@@ -11,6 +11,8 @@ public:
     static ConfigManager &getInstance();
     bool refreshConfiguation(const std::string configPath = "config.json");
     std::string configVariable(const std::string varriable);
+    // 可选配置查询：未配置或为空时静默返回默认值，不打 LOG_FATAL
+    std::string configVariableOpt(const std::string &variable, const std::string &defaultValue = "");
 
 private:
     ConfigManager(std::string configPath);
