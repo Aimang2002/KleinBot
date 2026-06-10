@@ -21,7 +21,7 @@
 
 std::mt19937 mt_rand(1000);
 
-Message::Message(MessageSenderPort &sender) : userSession(models), sender(sender)
+Message::Message(MessageSenderPort &sender) : userSession(models), dock(std::make_unique<Dock>()), chatService(*dock, this->userSession, this->models), sender(sender)
 {
 	// 服务器状态类初始化
 #ifdef DEBUG
@@ -29,8 +29,8 @@ Message::Message(MessageSenderPort &sender) : userSession(models), sender(sender
 #endif
 	this->PCStatus = std::make_unique<ComputerStatus>();
 	this->voice = std::make_unique<Voice>();
-	this->dock = std::make_unique<Dock>();
 	this->models.reload();
+
 	// 内置成员属性初始化
 	this->accessibility_chat = ConfigManager::getInstance().configVariable("ACCESSIBLITY_CHAT") == "true" ? true : false;
 	this->global_Voice = ConfigManager::getInstance().configVariable("GLOBAL_VOICE") == "true" ? true : false;
@@ -139,7 +139,8 @@ void Message::handleMessage(const JsonData &current_data)
 		}
 		else
 		{
-			llm_text = characterMessage(current_data);
+			const bool useContext = this->accessibility_chat || current_data.user_id == std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
+			llm_text = this->chatService.reply(current_data.user_id, current_data.plain_text, useContext);
 		}
 
 		if (llm_text.empty())
@@ -240,6 +241,11 @@ void Message::sendError(const JsonData &current_data, const std::string &text)
 	dispatch(current_data, TextMessage{text});
 }
 
+std::string Message::pushScheduled(const std::string &prompt)
+{
+	return this->chatService.replyOneShot(prompt);
+}
+
 bool Message::messageFilter(std::string message_type, std::string message)
 {
 	// 过滤策略
@@ -262,77 +268,6 @@ bool Message::messageFilter(std::string message_type, std::string message)
 	}
 	// 检查CQ码，不对转发内容进行
 	return true;
-}
-
-/*此重载供cq函数使用*/
-std::string Message::characterMessage(const JsonData &data)
-{
-	// 上下文模式开关：全局开启 || 访问者是管理员
-	const bool useContext = this->accessibility_chat || data.user_id == std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
-
-	// 1. 上下文模式：先把用户这句追加到历史
-	if (useContext)
-	{
-		auto history = this->userSession.getChatHistory(data.user_id);
-		history.push_back({"user", data.plain_text, time(nullptr)});
-		this->userSession.updateChatHistory(data.user_id, history);
-	}
-
-	// 2. 构造请求包（USS 负责裁切、查模型、拼超参数）
-	auto bundleOpt = this->userSession.buildChatRequest(data.user_id);
-	if (!bundleOpt)
-	{
-		return "系统提示：当前模型未注册，请管理员检查 ModelsName.json。";
-	}
-	auto &bundle = *bundleOpt;
-
-	// 非上下文模式：清空历史，只发当前这条
-	if (!useContext)
-	{
-		LOG_INFO("当前聊天不支持上下文模式...");
-		bundle.request.history.clear();
-		bundle.request.history.push_back({"user", data.plain_text});
-	}
-
-	// 3. 调用 LLM
-	std::cout << "Send to model..." << std::endl;
-	auto response = this->dock->RequestChat(bundle.model, bundle.model_name, bundle.request);
-
-	// 4. 错误处理
-	if (response.code != 200)
-	{
-		LOG_ERROR("LLM response error code: " + std::to_string(response.code));
-		return response.error_message.empty() ? std::string("系统提示：模型无返回内容！") : "系统提示：" + response.error_message;
-	}
-
-	std::string LLM_content = response.content;
-	if (LLM_content.empty())
-	{
-		return "系统提示：模型无返回内容！";
-	}
-
-	// 5. 上下文模式：把回复也写回历史
-	if (useContext)
-	{
-		auto history = this->userSession.getChatHistory(data.user_id);
-		history.push_back({"assistant", LLM_content, time(nullptr)});
-		this->userSession.updateChatHistory(data.user_id, history);
-	}
-
-	// 6. finish_reason 附加提示
-	if (response.finish_reason == "length")
-	{
-		LOG_WARNING("该模型的回答长度超出了管理员设定的最大限制...");
-		LLM_content += "\n模型已超出最大长度限制，回答可能不全。";
-	}
-	else if (response.finish_reason == "content_filter")
-	{
-		LOG_WARNING("该模型的回答内容被AI morality filter拦截...");
-		LLM_content += "\n模型返回内容被AI morality filter拦截...";
-	}
-
-	std::cout << "\033[32m" << "Model response: " << "\033[0m" << LLM_content << std::endl;
-	return LLM_content;
 }
 
 // 回调函数用于写入数据到文件
@@ -510,34 +445,6 @@ std::string Message::textToVoice(const std::string &text)
 		return {};
 	}
 	return audioPath;
-}
-
-std::string Message::pushScheduled(uint64_t user_id, const std::string &prompt)
-{
-	std::string modelName = ConfigManager::getInstance().configVariable("DEFAULT_MODEL");
-
-	const ChatModel *modelPtr = this->models.find(modelName);
-	if (modelPtr == nullptr)
-	{
-		LOG_ERROR("DEFAULT_MODEL 未在 ModelsName.json 注册：" + modelName);
-		return "系统提示：默认模型未配置";
-	}
-
-	ChatRequest request;
-	request.frequency_penalty = std::stod(ConfigManager::getInstance().configVariable("frequency_penalty"));
-	request.presence_penalty = std::stod(ConfigManager::getInstance().configVariable("presence_penalty"));
-	request.temperature = std::stod(ConfigManager::getInstance().configVariable("temperature"));
-	request.system_prompt = "你是人工助手";
-	request.history.push_back({"user", prompt});
-
-	ChatResponse response = this->dock->RequestChat(*modelPtr, modelName, request);
-
-	if (response.code != 200)
-	{
-		LOG_ERROR("早安推送失败：" + std::to_string(response.code));
-		return response.error_message.empty() ? "网络异常" : response.error_message;
-	}
-	return response.content;
 }
 
 Message::~Message()

@@ -13,6 +13,7 @@
 #include "TimingTast/TimingTast.h"
 #include "MessageSender/QQMessageSender.h"
 #include "Port/OutboundMessage.h"
+#include "ChatService/ChatService.h"
 
 #define __KLEIN_VERSION__ "v2.4.0"
 
@@ -44,7 +45,7 @@ void pollingThread(Message &msg, MessageSenderPort &sender)
 
 		if (tag)
 		{
-			std::string response = msg.pushScheduled(user_id, message);
+			std::string response = msg.pushScheduled(message);
 			sender.send_private(static_cast<long long>(user_id), TextMessage{response});
 			tag = false;
 		}
