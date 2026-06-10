@@ -6,6 +6,7 @@
 class ModelRegistry
 {
 public:
+    ModelRegistry() { this->reload(); };
     const ChatModel *find(const std::string &modelName) const;
     const std::vector<ChatModel> &all() const;
     void reload();

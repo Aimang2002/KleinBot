@@ -18,7 +18,7 @@
 #define __KLEIN_VERSION__ "v2.4.0"
 
 // 子线程
-void pollingThread(Message &msg, MessageSenderPort &sender)
+void pollingThread(ChatService &chatService, MessageSenderPort &sender)
 {
 	std::string message;
 	uint64_t user_id;
@@ -45,7 +45,7 @@ void pollingThread(Message &msg, MessageSenderPort &sender)
 
 		if (tag)
 		{
-			std::string response = msg.pushScheduled(message);
+			std::string response = chatService.replyOneShot(message);
 			sender.send_private(static_cast<long long>(user_id), TextMessage{response});
 			tag = false;
 		}
@@ -78,9 +78,9 @@ void workingThread(Message &messageClass, std::string originalJsonData)
 	messageClass.handleMessage(data);
 }
 
-void createTimingTastThread(Message &msg, MessageSenderPort &sender)
+void createTimingTastThread(ChatService &chatService, MessageSenderPort &sender)
 {
-	std::thread t(pollingThread, std::ref(msg), std::ref(sender));
+	std::thread t(pollingThread, std::ref(chatService), std::ref(sender));
 	t.detach();
 }
 
@@ -128,9 +128,13 @@ void init()
 int main()
 {
 	init();
+	ModelRegistry models;
+	UserSessionService userSession(models);
+	Dock dock;
+	ChatService chatService(dock, userSession, models);
 	QQMessageSender qqSender;
-	Message messageClass(qqSender);
-	createTimingTastThread(messageClass, qqSender);
+	Message messageClass(models, dock, userSession, chatService, qqSender);
+	createTimingTastThread(chatService, qqSender);
 
 	// 正向WebSocket连接
 	std::thread t1(MyWebSocket::connectWebSocket, "/");

@@ -21,7 +21,8 @@
 
 std::mt19937 mt_rand(1000);
 
-Message::Message(MessageSenderPort &sender) : userSession(models), dock(std::make_unique<Dock>()), chatService(*dock, this->userSession, this->models), sender(sender)
+Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession, ChatService &chatService, MessageSenderPort &sender)
+	: models(models), dock(dock), userSession(userSession), chatService(chatService), sender(sender)
 {
 	// 服务器状态类初始化
 #ifdef DEBUG
@@ -29,7 +30,6 @@ Message::Message(MessageSenderPort &sender) : userSession(models), dock(std::mak
 #endif
 	this->PCStatus = std::make_unique<ComputerStatus>();
 	this->voice = std::make_unique<Voice>();
-	this->models.reload();
 
 	// 内置成员属性初始化
 	this->accessibility_chat = ConfigManager::getInstance().configVariable("ACCESSIBLITY_CHAT") == "true" ? true : false;
@@ -41,7 +41,7 @@ Message::Message(MessageSenderPort &sender) : userSession(models), dock(std::mak
 	this->registry.registryCommand(std::make_unique<SearchSongsCommand>());
 	this->registry.registryCommand(std::make_unique<QueryModelCommand>([&](uint64_t uid)
 																	   { return this->userSession.getModelName(uid); }));
-	this->registry.registryCommand(std::make_unique<GeneratePictureCommand>(*this->dock));
+	this->registry.registryCommand(std::make_unique<GeneratePictureCommand>(this->dock));
 	this->registry.registryCommand(std::make_unique<ResetChatCommand>(this->userSession));
 	this->registry.registryCommand(std::make_unique<SetSoulCommand>(this->userSession));
 	this->registry.registryCommand(std::make_unique<SwitchModelCommand>(this->userSession, this->models));
@@ -241,11 +241,6 @@ void Message::sendError(const JsonData &current_data, const std::string &text)
 	dispatch(current_data, TextMessage{text});
 }
 
-std::string Message::pushScheduled(const std::string &prompt)
-{
-	return this->chatService.replyOneShot(prompt);
-}
-
 bool Message::messageFilter(std::string message_type, std::string message)
 {
 	// 过滤策略
@@ -401,7 +396,7 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 	model.api_standard = ConfigManager::getInstance().configVariable("VISION_MODEL_APISTANDARD");
 	std::string modelName = ConfigManager::getInstance().configVariable("VISION_MODEL");
 
-	auto response = this->dock->RequestVision(model, modelName, conversation, base64);
+	auto response = this->dock.RequestVision(model, modelName, conversation, base64);
 	std::string answer = response.content;
 	std::cout << "OpenAI response: " << answer << std::endl;
 	if (response.code != 200)

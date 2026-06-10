@@ -21,7 +21,7 @@ class Message
 {
 public:
 	// MessageSenderPort 由 main.cpp 装配并注入，Message 自身不负责生命周期
-	explicit Message(MessageSenderPort &sender);
+	explicit Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession, ChatService &chatService, MessageSenderPort &sender);
 
 	/**
 	 * @brief 消息过滤，对某些消息进行过滤
@@ -37,8 +37,6 @@ public:
 
 	// 错误消息分发：直接构造 TextMessage 发回去（替代 main.cpp 旧的 isErrorTransfer 分支）
 	void sendError(const JsonData &current_data, const std::string &text);
-
-	std::string pushScheduled(const std::string &prompt);
 
 	~Message();
 
@@ -100,13 +98,13 @@ private:
 	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList; // 轻量型人格
 	std::unique_ptr<ComputerStatus> PCStatus;									 // 监控计算机状态
 	std::unique_ptr<Voice> voice;												 // 语音识别模块
-	std::unique_ptr<Dock> dock;													 // 对话模块
 
-	ModelRegistry models;
+	ModelRegistry &models;
+	Dock &dock;
+	UserSessionService &userSession;
+	ChatService &chatService;
+	MessageSenderPort &sender;
 	CommandRegistry registry;
-	UserSessionService userSession;
-	MessageSenderPort &sender; // 出站端口（生命周期由 main 持有）
-	ChatService chatService;
 };
 
 #endif // MESSAGE_H
