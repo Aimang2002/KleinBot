@@ -31,10 +31,9 @@ void MyReverseWebSocket::connectReverseWebSocket()
             for (;;)
             {
                 std::string message;
-                if (!MessageQueue::pending_empty()) // 若消息队列不为空
+                if (auto popped = MessageQueue::pending_try_pop()) // 若消息队列不为空
                 {
-                    message = MessageQueue::pending_front_queue();
-                    MessageQueue::pending_pop();
+                    message = std::move(*popped);
 #ifdef DEBUG
                     LOG_DEBUG("发送数据：" + message);
 #endif

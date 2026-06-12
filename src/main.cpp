@@ -150,11 +150,10 @@ int main()
 	// 轮询originalMessageQueue  这里可以使用线程池管理
 	while (true)
 	{
-		if (!MessageQueue::original_empty())
+		if (auto msg = MessageQueue::original_try_pop())
 		{
-			std::thread t(workingThread, std::ref(messageClass), MessageQueue::original_front_queue());
+			std::thread t(workingThread, std::ref(messageClass), std::move(*msg));
 			t.detach();
-			MessageQueue::original_pop();
 		}
 		else
 		{
