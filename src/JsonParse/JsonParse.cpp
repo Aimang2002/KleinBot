@@ -92,13 +92,13 @@ JsonData JsonParse::jsonReader(std::string &json_str)
 	{
 		const auto &sender = doc["sender"];
 		data.nickname = sender.value("nickname", "");
-		data.card     = sender.value("card", "");
+		data.card = sender.value("card", "");
 	}
 
 	// 消息归属
-	data.group_id     = doc.value("group_id", 0ULL);
+	data.group_id = doc.value("group_id", 0ULL);
 	data.message_type = doc.value("message_type", "");
-	data.post_type    = doc.value("post_type", "");
+	data.post_type = doc.value("post_type", "");
 
 	// 消息内容
 	data.raw_message = doc.value("raw_message", "");
@@ -121,10 +121,14 @@ JsonData JsonParse::jsonReader(std::string &json_str)
 	}
 
 	// 消息元数据
-	data.message_id        = doc.value("message_id", 0LL);
+	data.message_id = doc.value("message_id", 0LL);
 	data.message_timestamp = doc.value("time", 0LL);
 
-	std::cout << data << std::endl;
+#ifdef DEBUG
+	std::ostringstream oss;
+	oss << data;
+	LOG_DEBUG(oss.str());
+#endif
 	return data;
 }
 
