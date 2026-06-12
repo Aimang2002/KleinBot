@@ -7,6 +7,7 @@
 #include <string>
 #include <mutex>
 #include <memory>
+#include <optional>
 #include <iostream>
 
 class MessageQueue
@@ -21,17 +22,9 @@ public:
     // 由 QQMessageSender 调用
     static void pending_push_raw(const std::string &packed);
 
-    // 判断消息队列是否为空
-    static bool original_empty();
-    static bool pending_empty();
-
-    // 获取第一个消息
-    static std::string original_front_queue();
-    static std::string pending_front_queue();
-
-    // 弹出第一个消息
-    static bool original_pop();
-    static bool pending_pop();
+    // 原子出队：单次加锁内完成 空判断+取首+弹出，空队列返回 nullopt
+    static std::optional<std::string> original_try_pop();
+    static std::optional<std::string> pending_try_pop();
 
 private:
     static std::unique_ptr<std::queue<std::string>> origina_queue; // 原始消息队列

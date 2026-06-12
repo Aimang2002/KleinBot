@@ -29,67 +29,27 @@ void MessageQueue::pending_push_raw(const std::string &packed)
     pending_queue->push(packed);
 }
 
-// 判断消息队列是否为空
-bool MessageQueue::original_empty()
-{
-    std::lock_guard<std::mutex> locker(original_mutex);
-    return origina_queue->empty();
-}
-bool MessageQueue::pending_empty()
-{
-    std::lock_guard<std::mutex> locker(pending_mutex);
-    return pending_queue->empty();
-}
-
-// 获取第一个消息
-std::string MessageQueue::original_front_queue()
+// 原子出队：空判断+取首+弹出在同一把锁内完成
+std::optional<std::string> MessageQueue::original_try_pop()
 {
     std::lock_guard<std::mutex> locker(original_mutex);
     if (origina_queue->empty())
     {
-        return "当前task为空!请判断队列是否存在数据再获取...";
+        return std::nullopt;
     }
-    std::string result;
-    result = origina_queue->front();
-    return result;
-}
-
-std::string MessageQueue::pending_front_queue()
-{
-    if (pending_queue->empty())
-    {
-        return "当前task为空!请判断队列是否存在数据再获取...";
-    }
-
-    std::string result;
-    std::lock_guard<std::mutex> locker(pending_mutex);
-    result = pending_queue->front();
-    return result;
-}
-
-// 弹出第一个消息
-bool MessageQueue::original_pop()
-{
-    if (origina_queue->empty())
-    {
-        LOG_WARNING("发送队列为空！或许是程序出了问题，请检查...");
-        return false;
-    }
-
-    std::lock_guard<std::mutex> locker(original_mutex);
+    std::string result = std::move(origina_queue->front());
     origina_queue->pop();
-    return true;
+    return result;
 }
 
-bool MessageQueue::pending_pop()
+std::optional<std::string> MessageQueue::pending_try_pop()
 {
+    std::lock_guard<std::mutex> locker(pending_mutex);
     if (pending_queue->empty())
     {
-        LOG_WARNING("发送队列为空！或许是程序出了问题，请检查...");
-        return false;
+        return std::nullopt;
     }
-
-    std::lock_guard<std::mutex> locker(pending_mutex);
+    std::string result = std::move(pending_queue->front());
     pending_queue->pop();
-    return true;
+    return result;
 }
