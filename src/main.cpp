@@ -16,6 +16,8 @@
 #include "ChatService/ChatService.h"
 #include "Tool/ToolRegistry.h"
 #include "Tool/GetTimeTool.h"
+#include "Tool/RecallConversationTool.h"
+#include "Persistence/ConversationStore.h"
 
 #define __KLEIN_VERSION__ "v2.4.0"
 
@@ -130,10 +132,14 @@ int main()
 {
 	init();
 	ModelRegistry models;
-	UserSessionService userSession(models);
+	std::string dbPath = ConfigManager::getInstance().configVariableOpt(
+		"CONVERSATION_DB_PATH", "source/conversations.db");
+	ConversationStore conversationStore(dbPath);
+	UserSessionService userSession(models, conversationStore);
 	Dock dock;
 	ToolRegistry tools;
 	tools.registerTool(std::make_unique<GetTimeTool>());
+	tools.registerTool(std::make_unique<RecallConversationTool>(conversationStore));
 	ChatService chatService(dock, userSession, models, tools);
 	QQMessageSender qqSender;
 	Message messageClass(models, dock, userSession, chatService, qqSender);
