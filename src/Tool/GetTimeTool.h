@@ -21,7 +21,7 @@ public:
         return R"({"type":"object","properties":{}})";
     }
 
-    std::string execute(const std::string & /*args*/) override
+    std::string execute(const std::string & /*args*/, const ToolContext & /*ctx*/) override
     {
         std::time_t now = std::time(nullptr);
         std::tm *local = std::localtime(&now);

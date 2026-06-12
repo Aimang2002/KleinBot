@@ -1,14 +1,13 @@
 #include "ChatService.h"
 #include "../ConfigManager/ConfigManager.h"
+#include "../Tool/ToolContext.h"
 
 std::string ChatService::reply(uint64_t user_id, const std::string &text, bool use_context)
 {
-    // 1. 上下文模式：先把用户这句追加到历史
+    // 1. 上下文模式：增量追加用户这句（内存 + SQLite 同步落盘）
     if (use_context)
     {
-        auto history = this->userSession.getChatHistory(user_id);
-        history.push_back({"user", text, time(nullptr)});
-        this->userSession.updateChatHistory(user_id, history);
+        this->userSession.appendMessage(user_id, "user", text);
     }
 
     // 2. 构造请求包（USS 负责裁切、查模型、拼超参数）
@@ -67,7 +66,7 @@ std::string ChatService::reply(uint64_t user_id, const std::string &text, bool u
             {
                 try
                 {
-                    result = tool->execute(call.arguments);
+                    result = tool->execute(call.arguments, ToolContext{user_id});
                 }
                 catch (const std::exception &e)
                 {
@@ -99,12 +98,10 @@ std::string ChatService::reply(uint64_t user_id, const std::string &text, bool u
         return "系统提示：模型无返回内容！";
     }
 
-    // 5. 上下文模式：把回复也写回历史
+    // 5. 上下文模式：增量追加助手回复（内存 + SQLite 同步落盘）
     if (use_context)
     {
-        auto history = this->userSession.getChatHistory(user_id);
-        history.push_back({"assistant", LLM_content, time(nullptr)});
-        this->userSession.updateChatHistory(user_id, history);
+        this->userSession.appendMessage(user_id, "assistant", LLM_content);
     }
 
     // 6. finish_reason 附加提示

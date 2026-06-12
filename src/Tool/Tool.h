@@ -2,6 +2,7 @@
 #define TOOL_H
 
 #include <string>
+#include "ToolContext.h"
 
 // 工具抽象：模型可自主调用的能力单元
 // 与 Command（用户关键词触发）并存，互不知道对方
@@ -21,7 +22,7 @@ public:
     virtual std::string parametersSchema() const = 0;
 
     // 执行工具。args 是模型给的 JSON 字符串参数，返回结果文本（回传给模型）
-    virtual std::string execute(const std::string &args) = 0;
+    virtual std::string execute(const std::string &args, const ToolContext &ctx) = 0;
 };
 
 #endif // TOOL_H
