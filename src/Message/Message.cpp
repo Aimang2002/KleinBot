@@ -388,7 +388,6 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 	// 下载完成，将数据转为base64编码
 	std::string base64 = this->dataToBase64(input);
 
-	std::cout << "send to vision model..." << std::endl;
 
 	ChatModel model;
 	model.endpoint = ConfigManager::getInstance().configVariable("VISION_MODEL_ENDPOINT");
