@@ -28,9 +28,47 @@ ChatResponse OpenAIStandard::request_chat(const ChatModel &model, const std::str
     }
     for (const auto &msg : request.history)
     {
-        messages.push_back({{"role", msg.role}, {"content", msg.content}});
+        nlohmann::json m;
+        m["role"] = msg.role;
+
+        if (msg.role == "assistant" && !msg.tool_calls.empty())
+        {
+            // assistant 决定调工具：content 可为 null，附 tool_calls 数组
+            m["content"] = msg.content.empty() ? nlohmann::json(nullptr) : nlohmann::json(msg.content);
+            nlohmann::json calls = nlohmann::json::array();
+            for (const auto &tc : msg.tool_calls)
+            {
+                calls.push_back({{"id", tc.id},
+                                 {"type", "function"},
+                                 {"function", {{"name", tc.name}, {"arguments", tc.arguments}}}});
+            }
+            m["tool_calls"] = calls;
+        }
+        else if (msg.role == "tool")
+        {
+            // 工具结果回传：必须带 tool_call_id 与对应的 assistant.tool_calls 配对
+            m["content"] = msg.content;
+            m["tool_call_id"] = msg.tool_call_id;
+        }
+        else
+        {
+            m["content"] = msg.content;
+        }
+        messages.push_back(m);
     }
     payload_json["messages"] = messages;
+
+    // 携带可用工具（非空时）
+    if (!request.tools.empty())
+    {
+        nlohmann::json tools_arr = nlohmann::json::array();
+        for (const auto &schema : request.tools)
+        {
+            tools_arr.push_back(nlohmann::json::parse(schema));
+        }
+        payload_json["tools"] = tools_arr;
+    }
+
     std::string payload = payload_json.dump();
 
     LOG_DEBUG("发送内容：" + payload);
@@ -201,6 +239,22 @@ ChatResponse OpenAIStandard::chat_json_parse(const std::string &response)
                     while (!s.empty() && s.front() == '\n')
                     {
                         s.erase(0, 1);
+                    }
+
+                    // 解析模型的工具调用请求
+                    if (msg.contains("tool_calls") && msg["tool_calls"].is_array())
+                    {
+                        for (auto &tc : msg["tool_calls"])
+                        {
+                            ResponseToolCall call;
+                            call.id = tc.value("id", "");
+                            if (tc.contains("function") && tc["function"].is_object())
+                            {
+                                call.name = tc["function"].value("name", "");
+                                call.arguments = tc["function"].value("arguments", "");
+                            }
+                            responseFormat.tool_calls.push_back(call);
+                        }
                     }
                 }
                 responseFormat.finish_reason = choice.value("finish_reason", "");

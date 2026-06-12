@@ -4,12 +4,14 @@
 #include "../ModelApiCaller/Dock.hpp"
 #include "../UserSession/UserSessionService.h"
 #include "../ModelRegistry/ModelRegistry.h"
+#include "../Tool/ToolRegistry.h"
 #include <string>
 
 class ChatService
 {
 public:
-    ChatService(Dock &dock, UserSessionService &USS, const ModelRegistry &models) : dock(dock), userSession(USS), models(models) {}
+    ChatService(Dock &dock, UserSessionService &USS, const ModelRegistry &models, const ToolRegistry &tools)
+        : dock(dock), userSession(USS), models(models), tools(tools) {}
     std::string reply(uint64_t user_id, const std::string &text, bool use_context);
     std::string replyOneShot(const std::string &prompt); // 无状态（一次性）对话
 
@@ -17,6 +19,9 @@ private:
     Dock &dock;
     UserSessionService &userSession;
     const ModelRegistry &models;
+    const ToolRegistry &tools;
+
+    static constexpr int max_tool_rounds = 5; // 防工具调用死循环
 };
 
 #endif // CHATSERVICE_H

@@ -27,11 +27,66 @@ std::string ChatService::reply(uint64_t user_id, const std::string &text, bool u
         bundle.request.history.push_back({"user", text});
     }
 
-    // 3. 调用 LLM
-    std::cout << "Send to model..." << std::endl;
-    auto response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
+    // 3. 塞入可用工具
+    bundle.request.tools = this->tools.allSchemas();
 
-    // 4. 错误处理
+    // 4. 调用 LLM + 工具调用循环
+    std::cout << "Send to model..." << std::endl;
+    ChatResponse response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
+
+    int rounds = 0;
+    while (response.code == 200 && response.finish_reason == "tool_calls" && !response.tool_calls.empty())
+    {
+        if (++rounds > max_tool_rounds)
+        {
+            LOG_WARNING("工具调用轮次超过上限，强制结束");
+            return "系统提示：处理超时，请重试。";
+        }
+
+        // 4a. 把 assistant 的工具调用请求追加进临时 history
+        ChatMessage assistantMsg;
+        assistantMsg.role = "assistant";
+        assistantMsg.content = response.content;
+        for (const auto &call : response.tool_calls)
+        {
+            assistantMsg.tool_calls.push_back({call.id, call.name, call.arguments});
+        }
+        bundle.request.history.push_back(assistantMsg);
+
+        // 4b. 逐个执行工具，结果作为 role=="tool" 消息回灌
+        for (const auto &call : response.tool_calls)
+        {
+            std::string result;
+            Tool *tool = this->tools.find(call.name);
+            if (tool == nullptr)
+            {
+                result = "错误：未知工具 " + call.name;
+                LOG_WARNING("模型调用了未注册的工具：" + call.name);
+            }
+            else
+            {
+                try
+                {
+                    result = tool->execute(call.arguments);
+                }
+                catch (const std::exception &e)
+                {
+                    result = "错误：工具执行失败 " + std::string(e.what());
+                    LOG_ERROR("工具 " + call.name + " 执行异常：" + std::string(e.what()));
+                }
+            }
+            ChatMessage toolMsg;
+            toolMsg.role = "tool";
+            toolMsg.tool_call_id = call.id;
+            toolMsg.content = result;
+            bundle.request.history.push_back(toolMsg);
+        }
+
+        // 4c. 带着加长的 history 再次请求
+        response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
+    }
+
+    // 5. 错误处理
     if (response.code != 200)
     {
         LOG_ERROR("LLM response error code: " + std::to_string(response.code));

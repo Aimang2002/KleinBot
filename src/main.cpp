@@ -14,6 +14,8 @@
 #include "MessageSender/QQMessageSender.h"
 #include "Port/OutboundMessage.h"
 #include "ChatService/ChatService.h"
+#include "Tool/ToolRegistry.h"
+#include "Tool/GetTimeTool.h"
 
 #define __KLEIN_VERSION__ "v2.4.0"
 
@@ -130,7 +132,9 @@ int main()
 	ModelRegistry models;
 	UserSessionService userSession(models);
 	Dock dock;
-	ChatService chatService(dock, userSession, models);
+	ToolRegistry tools;
+	tools.registerTool(std::make_unique<GetTimeTool>());
+	ChatService chatService(dock, userSession, models, tools);
 	QQMessageSender qqSender;
 	Message messageClass(models, dock, userSession, chatService, qqSender);
 	createTimingTastThread(chatService, qqSender);
