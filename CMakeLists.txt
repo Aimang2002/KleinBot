@@ -36,7 +36,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Command
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ComputerStatus
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ConfigManager
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/Database
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Persistence
     ${CMAKE_CURRENT_SOURCE_DIR}/src/JsonParse
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Log
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Message
@@ -71,5 +71,5 @@ if(WIN32)
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${CURL_LIBRARY} ${Boost_LIBRARIES} ws2_32 iphlpapi)
 else()
     find_package(CURL REQUIRED)
-    target_link_libraries(${EXECUTABLE_NAME} PRIVATE CURL::libcurl Boost::system)
+    target_link_libraries(${EXECUTABLE_NAME} PRIVATE CURL::libcurl Boost::system sqlite3)
 endif()
