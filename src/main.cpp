@@ -35,11 +35,10 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender)
 			LOG_INFO("每日早安即将发送，亲爱的管理员，早上好。");
 			tag = true;
 		}
-		else if (!TimingTast::getInstance().Event->empty() && TimingTast::getInstance().Event->begin()->first <= TimingTast::getInstance().getPresentTime())
+		else if (auto due = TimingTast::getInstance().popDueEvent(TimingTast::getInstance().getPresentTime()))
 		{
-			message = JsonParse::getInstance().toJson(TimingTast::getInstance().Event->begin()->second.second);
-			user_id = TimingTast::getInstance().Event->begin()->second.first;
-			TimingTast::getInstance().Event->erase(TimingTast::getInstance().Event->begin());
+			message = JsonParse::getInstance().toJson(due->content);
+			user_id = due->user_id;
 			tag = true;
 		}
 
