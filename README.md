@@ -200,10 +200,11 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 |  平台  |          是否支持           |
 | :----: | :-------------------------: |
 | OpenAI | <font color="gree">√</font> |
+| Anthropic | <font color="gree">√</font> |
 | Google | <font color="red">×</font>  |
 | Azure  | <font color="red">×</font>  |
 
-PS:以上只是列举一些大模型平台，有一些本地模型推理软件(LM Studio、RWKV-Running)它的接口规范采用的时OpenAI SDK，所以这些API也是能连接的，这些没有指定平台的模型其中的API参数在配置文件中填到“OtherChatModel”中。
+说明：Anthropic 当前支持文本聊天和视觉调用，暂不支持本项目的 Function Calling 工具调用；Google 和 Azure 暂不实现。其他兼容 OpenAI API 规范的本地或第三方服务，可以在模型配置中使用 `OpenAI` APIStandard 接入。
 
 
 
@@ -252,6 +253,13 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 | frequency_penalty             | 频率惩罚，默认为0                                   |
 | presence_penalty              | 存在惩罚，默认为0                                   |
 | MESSAGE_SURVIVAL_TIME         | 上下文存活时间，单位是秒                            |
+| MESSAGE_WORKER_THREADS        | 消息处理线程池大小，未配置时默认为4                 |
+| CONVERSATION_DB_PATH          | 对话与长期记忆 SQLite 路径，默认 source/conversations.db |
+| MEMORY_ENABLED                | 是否启用长期记忆，未配置时默认 true                 |
+| MEMORY_MODEL                  | 长期记忆提取模型名称，未配置时使用 DEFAULT_MODEL    |
+| MEMORY_BATCH_TURNS            | 累计多少轮对话后触发记忆提取，默认3                 |
+| MEMORY_IDLE_SECONDS           | 会话空闲多少秒后提取未满批次的记忆，默认20          |
+| MEMORY_RECALL_LIMIT           | 单次长期记忆召回上限，默认8                         |
 | IMAGE_DOWNLOAD_PATH           | 图片下载存放路径，图片分析时需要用到                |
 | XXX_MODEL_API_KEY             | 请求模型的API KEY                                   |
 | XXX_MODEL_ENDPOINT            | 请求模型的请求端点                                  |
@@ -267,6 +275,21 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 | REALESGAN_PATH                | REALESGAN项目的路径                                 |
 | REALESGAN_MODEL               | REALESGAN使用的修复模型                             |
 | IMAGE_DOWNLOAD_PATH           | 图片下载后的位置(供REALESGAN使用)                   |
+
+
+# 长期记忆
+
+Klein 会继续完整保存原始对话，并在后台从多轮对话中提取用户资料、偏好、关系、事件、状态、决定、任务和技术事实。长期记忆使用稳定的 `memory_key` 更新同一事实，并生成包含同义表达的 `search_text`，召回时优先搜索长期记忆，未命中再回退原始历史。
+
+长期记忆提取不会阻塞当前聊天回复。`#重置对话` 会同时清除该用户的原始历史和长期记忆，删除最近上下文时也会失效来源位于删除区间内的记忆。详细的数据结构、配置和验证方式见 `docs/long-term-memory.md`。
+
+
+# 运行时架构
+
+- 消息处理使用固定大小线程池，默认 4 个工作线程，可通过 `MESSAGE_WORKER_THREADS` 调整。
+- 正向 WebSocket、反向 WebSocket 和定时任务线程共享统一的运行状态，收到 `SIGINT` 或 `SIGTERM` 后会停止重连、等待任务结束并依次回收资源。
+- 日志后台线程在程序退出前排空日志队列并关闭日志文件。
+- 长期记忆提取使用独立后台线程；程序退出时不会阻塞等待尚未触发的记忆批次。
 
 
 

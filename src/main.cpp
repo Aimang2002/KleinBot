@@ -2,6 +2,8 @@
 #include <sstream>
 #include <random>
 #include <thread>
+#include <atomic>
+#include <csignal>
 #include "JsonParse/JsonParse.h"
 #include "ConfigManager/ConfigManager.h"
 #include "Network/Network.h"
@@ -18,17 +20,61 @@
 #include "Tool/GetTimeTool.h"
 #include "Tool/RecallConversationTool.h"
 #include "Persistence/ConversationStore.h"
+#include "Memory/MemoryService.h"
+#include "utils/ThreadPool.h"
 
 #define __KLEIN_VERSION__ "v2.4.0"
 
+namespace
+{
+volatile std::sig_atomic_t receivedSignal = 0;
+
+void signalHandler(int signal)
+{
+	receivedSignal = signal;
+}
+
+bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::milliseconds duration)
+{
+	const auto deadline = std::chrono::steady_clock::now() + duration;
+	while (running.load() && std::chrono::steady_clock::now() < deadline)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+	return running.load();
+}
+
+std::size_t messageWorkerCount()
+{
+	std::string configured = ConfigManager::getInstance().configVariableOpt("MESSAGE_WORKER_THREADS");
+	if (!configured.empty())
+	{
+		try
+		{
+			const int value = std::stoi(configured);
+			if (value > 0)
+			{
+				return static_cast<std::size_t>(value);
+			}
+		}
+		catch (const std::exception &)
+		{
+			LOG_WARNING("MESSAGE_WORKER_THREADS 配置无效，将使用默认值");
+		}
+	}
+
+	return 4;
+}
+}
+
 // 子线程
-void pollingThread(ChatService &chatService, MessageSenderPort &sender)
+void pollingThread(ChatService &chatService, MessageSenderPort &sender, const std::atomic<bool> &running)
 {
 	std::string message;
 	uint64_t user_id;
 	bool tag = false;
 
-	while (true)
+	while (running.load())
 	{
 		std::time_t now = std::time(nullptr);
 		std::tm *local_time = std::localtime(&now);
@@ -52,8 +98,9 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender)
 			sender.send_private(static_cast<long long>(user_id), TextMessage{response});
 			tag = false;
 		}
-		std::this_thread::sleep_for(std::chrono::seconds(3));
+		sleepWhileRunning(running, std::chrono::seconds(3));
 	}
+	LOG_INFO("定时任务线程已退出");
 }
 
 // 子线程
@@ -81,15 +128,35 @@ void workingThread(Message &messageClass, std::string originalJsonData)
 	messageClass.handleMessage(data);
 }
 
-void createTimingTastThread(ChatService &chatService, MessageSenderPort &sender)
+void resourceCleanup(std::atomic<bool> &running, ThreadPool &messageWorkers,
+					 MemoryService &memoryService,
+					 std::thread &timingThread, std::thread &forwardWebSocketThread,
+					 std::thread &reverseWebSocketThread)
 {
-	std::thread t(pollingThread, std::ref(chatService), std::ref(sender));
-	t.detach();
-}
+	running.store(false);
+	LOG_INFO("正在等待消息线程池排空...");
+	messageWorkers.shutdown();
+	LOG_INFO("消息线程池已退出");
+	LOG_INFO("正在等待长期记忆服务退出...");
+	memoryService.shutdown();
+	LOG_INFO("长期记忆服务已退出");
 
-// 资源释放
-void resourceCleanup()
-{
+	if (timingThread.joinable())
+	{
+		LOG_INFO("正在等待定时任务线程退出...");
+		timingThread.join();
+	}
+	if (forwardWebSocketThread.joinable())
+	{
+		LOG_INFO("正在等待正向WebSocket线程退出...");
+		forwardWebSocketThread.join();
+	}
+	if (reverseWebSocketThread.joinable())
+	{
+		LOG_INFO("正在等待反向WebSocket线程退出...");
+		reverseWebSocketThread.join();
+	}
+	LOG_INFO("资源回收完成，Klein 已安全退出");
 }
 
 void init()
@@ -130,6 +197,10 @@ void init()
 
 int main()
 {
+	std::signal(SIGINT, signalHandler);
+	std::signal(SIGTERM, signalHandler);
+	std::atomic<bool> running{true};
+
 	init();
 	ModelRegistry models;
 	std::string dbPath = ConfigManager::getInstance().configVariableOpt(
@@ -137,45 +208,58 @@ int main()
 	ConversationStore conversationStore(dbPath);
 	UserSessionService userSession(models, conversationStore);
 	Dock dock;
+	MemoryService memoryService(dbPath, conversationStore, dock, models);
+	userSession.setMemoryService(&memoryService);
 	ToolRegistry tools;
 	tools.registerTool(std::make_unique<GetTimeTool>());
-	tools.registerTool(std::make_unique<RecallConversationTool>(conversationStore));
-	ChatService chatService(dock, userSession, models, tools);
+	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
+	ChatService chatService(dock, userSession, models, tools, memoryService);
 	QQMessageSender qqSender;
 	Message messageClass(models, dock, userSession, chatService, qqSender);
-	createTimingTastThread(chatService, qqSender);
+	ThreadPool messageWorkers(messageWorkerCount());
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(qqSender), std::cref(running));
 
 	// 正向WebSocket连接
-	std::thread t1(MyWebSocket::connectWebSocket, "/");
-	t1.detach();
+	std::thread forwardWebSocketThread(MyWebSocket::connectWebSocket, "/", std::cref(running));
 
-	std::this_thread::sleep_for(std::chrono::seconds(1));
+	sleepWhileRunning(running, std::chrono::seconds(1));
 	LOG_INFO("3秒后连接反向WebSocket...");
-	std::this_thread::sleep_for(std::chrono::seconds(3));
+	sleepWhileRunning(running, std::chrono::seconds(3));
 
 	// 反向WebSocket连接
-	std::thread t2(MyReverseWebSocket::connectReverseWebSocket);
-	t2.detach();
+	std::thread reverseWebSocketThread(MyReverseWebSocket::connectReverseWebSocket, std::cref(running));
 
-	// 轮询originalMessageQueue  这里可以使用线程池管理
-	while (true)
+	while (running.load())
 	{
+		if (receivedSignal != 0)
+		{
+			LOG_INFO("收到退出信号：" + std::to_string(receivedSignal));
+			running.store(false);
+			break;
+		}
+
 		if (auto msg = MessageQueue::original_try_pop())
 		{
-			std::thread t(workingThread, std::ref(messageClass), std::move(*msg));
-			t.detach();
+			messageWorkers.submit([&messageClass, message = std::move(*msg)]() mutable {
+				try
+				{
+					workingThread(messageClass, std::move(message));
+				}
+				catch (const std::exception &e)
+				{
+					LOG_ERROR("消息处理任务异常：" + std::string(e.what()));
+				}
+			});
 		}
 		else
 		{
-			// 休眠算法...
-			std::this_thread::sleep_for(std::chrono::seconds(1));
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
 	}
 
-	// 判断是否退出 ...
-
-	// 资源回收
-	resourceCleanup();
+	resourceCleanup(running, messageWorkers, memoryService, timingThread,
+					forwardWebSocketThread, reverseWebSocketThread);
+	Log::getInstance().shutdown();
 
 	return 0;
 }

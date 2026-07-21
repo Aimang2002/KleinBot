@@ -1,4 +1,0 @@
-#ifndef GOOGLESTANDAR_H
-#define GOOGLESTANDAR_H
-
-#endif // GOOGLESTANDAR_H

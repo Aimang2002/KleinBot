@@ -1,13 +1,15 @@
 #include "ChatService.h"
 #include "../ConfigManager/ConfigManager.h"
+#include "../Memory/MemoryService.h"
 #include "../Tool/ToolContext.h"
 
 std::string ChatService::reply(uint64_t user_id, const std::string &text, bool use_context)
 {
+    int64_t userMessageId = 0;
     // 1. 上下文模式：增量追加用户这句（内存 + SQLite 同步落盘）
     if (use_context)
     {
-        this->userSession.appendMessage(user_id, "user", text);
+        userMessageId = this->userSession.appendMessage(user_id, "user", text);
     }
 
     // 2. 构造请求包（USS 负责裁切、查模型、拼超参数）
@@ -101,7 +103,10 @@ std::string ChatService::reply(uint64_t user_id, const std::string &text, bool u
     // 5. 上下文模式：增量追加助手回复（内存 + SQLite 同步落盘）
     if (use_context)
     {
-        this->userSession.appendMessage(user_id, "assistant", LLM_content);
+        const int64_t assistantMessageId = this->userSession.appendMessage(
+            user_id, "assistant", LLM_content);
+        this->memoryService.enqueueTurn(
+            user_id, text, LLM_content, userMessageId, assistantMessageId);
     }
 
     // 6. finish_reason 附加提示

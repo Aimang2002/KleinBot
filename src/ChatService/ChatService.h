@@ -7,11 +7,14 @@
 #include "../Tool/ToolRegistry.h"
 #include <string>
 
+class MemoryService;
+
 class ChatService
 {
 public:
-    ChatService(Dock &dock, UserSessionService &USS, const ModelRegistry &models, const ToolRegistry &tools)
-        : dock(dock), userSession(USS), models(models), tools(tools) {}
+    ChatService(Dock &dock, UserSessionService &USS, const ModelRegistry &models,
+                const ToolRegistry &tools, MemoryService &memoryService)
+        : dock(dock), userSession(USS), models(models), tools(tools), memoryService(memoryService) {}
     std::string reply(uint64_t user_id, const std::string &text, bool use_context);
     std::string replyOneShot(const std::string &prompt); // 无状态（一次性）对话
 
@@ -20,6 +23,7 @@ private:
     UserSessionService &userSession;
     const ModelRegistry &models;
     const ToolRegistry &tools;
+    MemoryService &memoryService;
 
     static constexpr int max_tool_rounds = 5; // 防工具调用死循环
 };

@@ -12,21 +12,24 @@ Log::Log()
 Log &Log::getInstance()
 {
     static Log instance;
-    if (!instance.initThread())
+    Log *instancePtr = &instance;
+    std::call_once(instance.initFlag, [instancePtr]() {
+        instancePtr->initialized = instancePtr->initThread();
+    });
+    if (!instance.initialized)
     {
-        std::cout << "Log thread init failed" << std::endl;
-        exit(-1);
+        throw std::runtime_error("Log thread init failed");
     }
     return instance;
 }
+
+Log::~Log()
+{
+    shutdown();
+}
+
 bool Log::initThread()
 {
-    if (isRunning) // 表示线程已启动
-    {
-        return true;
-    }
-    isRunning = true;
-
     // 创建日志文件
     try
     {
@@ -50,6 +53,11 @@ bool Log::initThread()
     {
         std::cout << "创建日志文件失败！" << std::endl;
         return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> locker(mutex_);
+        isRunning = true;
     }
     logThread = std::thread([&]() { //
         while (true)
@@ -109,16 +117,25 @@ void Log::fatal(std::string message)
     std::cerr << "\033[31m" << result << "\033[0m\n";
 }
 
-bool Log::shutdownThread()
+void Log::shutdown()
 {
-    isRunning = false;
-    cv.notify_one();
+    {
+        std::lock_guard<std::mutex> locker(mutex_);
+        if (!isRunning)
+        {
+            return;
+        }
+        isRunning = false;
+    }
+    cv.notify_all();
     if (logThread.joinable())
     {
         logThread.join();
-        return true;
     }
-    return false;
+    if (logFile.is_open())
+    {
+        logFile.close();
+    }
 }
 
 std::string Log::messageLengthCheck(std::string message)

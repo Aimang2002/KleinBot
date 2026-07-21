@@ -1,13 +1,26 @@
 #include "MyWebSocket.h"
 #include "../utils/Utils.hpp"
 
-void MyWebSocket::connectWebSocket(const std::string _url = "/")
+namespace
+{
+bool waitForReconnect(const std::atomic<bool> &running, std::chrono::seconds duration)
+{
+    const auto deadline = std::chrono::steady_clock::now() + duration;
+    while (running.load() && std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return running.load();
+}
+}
+
+void MyWebSocket::connectWebSocket(const std::string &url, const std::atomic<bool> &running)
 {
     // 设置服务器的IP地址和端口
     std::string host = ConfigManager::getInstance().configVariable("WEBSOCKET_MESSAGE_IP");
     std::string port = ConfigManager::getInstance().configVariable("WEBSOCKET_MESSAGE_PORT");
 
-    while (true)
+    while (running.load())
     {
         try
         {
@@ -25,20 +38,41 @@ void MyWebSocket::connectWebSocket(const std::string _url = "/")
             connect(ws.next_layer(), results.begin(), results.end());
 
             // 握手以升级到WebSocket连接
-            ws.handshake(host, _url.c_str());
+            ws.handshake(host, url);
 
             LOG_INFO("正向WebSocket连接成功！");
 
-            // 持续监听消息
-            while (true)
+            while (running.load())
             {
-                // 准备接收消息的缓冲区
                 multi_buffer buffer;
+                beast::error_code readError;
+                bool readCompleted = false;
 
-                // 读取消息到缓冲区
-                ws.read(buffer);
+                ws.async_read(buffer, [&](beast::error_code error, std::size_t) {
+                    readError = error;
+                    readCompleted = true;
+                });
 
-                // 将数据放到string中
+                while (running.load() && !readCompleted)
+                {
+                    ioc.run_for(std::chrono::milliseconds(100));
+                    ioc.restart();
+                }
+
+                if (!running.load())
+                {
+                    beast::error_code ignoredError;
+                    ws.next_layer().cancel(ignoredError);
+                    ioc.run();
+                    ws.next_layer().close(ignoredError);
+                    break;
+                }
+
+                if (readError)
+                {
+                    throw beast::system_error(readError);
+                }
+
                 std::string message = boost::beast::buffers_to_string(buffer.data());
 #ifdef DEBUG
                 LOG_DEBUG("原始数据：" + message);
@@ -60,10 +94,18 @@ void MyWebSocket::connectWebSocket(const std::string _url = "/")
         }
         catch (std::exception const &e)
         {
-            LOG_ERROR(e.what());
+            if (running.load())
+            {
+                LOG_ERROR(e.what());
+            }
         }
 
-        LOG_FATAL("正向ws已失联，5秒后将重新连接...");
-        std::this_thread::sleep_for(std::chrono::seconds(5)); // 休眠5秒后重连
+        if (running.load())
+        {
+            LOG_FATAL("正向ws已失联，5秒后将重新连接...");
+            waitForReconnect(running, std::chrono::seconds(5));
+        }
     }
+
+    LOG_INFO("正向WebSocket线程已退出");
 }
