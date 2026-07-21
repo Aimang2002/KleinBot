@@ -5,9 +5,18 @@
 #include "../UserSession/UserSessionService.h"
 #include "../ModelRegistry/ModelRegistry.h"
 #include "../Tool/ToolRegistry.h"
+#include "../Port/OutboundMessage.h"
 #include <string>
+#include <vector>
 
 class MemoryService;
+
+struct ChatReply
+{
+    std::string text;
+    std::vector<OutboundMessage> outbound_messages;
+    int64_t user_message_id = 0;
+};
 
 class ChatService
 {
@@ -15,7 +24,7 @@ public:
     ChatService(Dock &dock, UserSessionService &USS, const ModelRegistry &models,
                 const ToolRegistry &tools, MemoryService &memoryService)
         : dock(dock), userSession(USS), models(models), tools(tools), memoryService(memoryService) {}
-    std::string reply(uint64_t user_id, const std::string &text, bool use_context);
+    ChatReply reply(uint64_t user_id, const std::string &text, bool use_context);
     std::string replyOneShot(const std::string &prompt); // 无状态（一次性）对话
 
 private:

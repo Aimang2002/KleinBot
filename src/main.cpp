@@ -19,7 +19,11 @@
 #include "Tool/ToolRegistry.h"
 #include "Tool/GetTimeTool.h"
 #include "Tool/RecallConversationTool.h"
+#include "Tool/GenerateImageTool.h"
+#include "Tool/InspectImageTool.h"
+#include "Tool/SendImageTool.h"
 #include "Persistence/ConversationStore.h"
+#include "Asset/ImageAssetStore.h"
 #include "Memory/MemoryService.h"
 #include "utils/ThreadPool.h"
 
@@ -206,16 +210,23 @@ int main()
 	std::string dbPath = ConfigManager::getInstance().configVariableOpt(
 		"CONVERSATION_DB_PATH", "source/conversations.db");
 	ConversationStore conversationStore(dbPath);
+	std::string imageAssetPath = ConfigManager::getInstance().configVariableOpt(
+		"IMAGE_ASSET_PATH", "source/image_assets");
+	ImageAssetStore imageAssetStore(dbPath, imageAssetPath);
 	UserSessionService userSession(models, conversationStore);
 	Dock dock;
 	MemoryService memoryService(dbPath, conversationStore, dock, models);
 	userSession.setMemoryService(&memoryService);
+	userSession.setImageAssetStore(&imageAssetStore);
 	ToolRegistry tools;
 	tools.registerTool(std::make_unique<GetTimeTool>());
 	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
+	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore));
+	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore));
+	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore));
 	ChatService chatService(dock, userSession, models, tools, memoryService);
 	QQMessageSender qqSender;
-	Message messageClass(models, dock, userSession, chatService, qqSender);
+	Message messageClass(models, dock, userSession, chatService, qqSender, imageAssetStore);
 	ThreadPool messageWorkers(messageWorkerCount());
 	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(qqSender), std::cref(running));
 

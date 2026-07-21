@@ -13,6 +13,7 @@
 
 class ConversationStore;
 class MemoryService;
+class ImageAssetStore;
 
 struct ChatCallBundle
 {
@@ -26,6 +27,7 @@ class UserSessionService
 public:
     UserSessionService(const ModelRegistry &mr, ConversationStore &store);
     void setMemoryService(MemoryService *service);
+    void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
     void resetChat(const uint64_t user_id);
     std::string getModelName(uint64_t user_id);
@@ -52,6 +54,7 @@ private:
     const ModelRegistry &registry;
     ConversationStore &store;
     MemoryService *memoryService = nullptr;
+    ImageAssetStore *imageAssetStore = nullptr;
 };
 
 #endif // USERSESSIONSERVICE_H

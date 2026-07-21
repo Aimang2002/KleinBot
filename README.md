@@ -255,6 +255,7 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 | MESSAGE_SURVIVAL_TIME         | 上下文存活时间，单位是秒                            |
 | MESSAGE_WORKER_THREADS        | 消息处理线程池大小，未配置时默认为4                 |
 | CONVERSATION_DB_PATH          | 对话与长期记忆 SQLite 路径，默认 source/conversations.db |
+| IMAGE_ASSET_PATH              | 图片资源目录，默认 source/image_assets                  |
 | MEMORY_ENABLED                | 是否启用长期记忆，未配置时默认 true                 |
 | MEMORY_MODEL                  | 长期记忆提取模型名称，未配置时使用 DEFAULT_MODEL    |
 | MEMORY_BATCH_TURNS            | 累计多少轮对话后触发记忆提取，默认3                 |
@@ -282,6 +283,8 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 Klein 会继续完整保存原始对话，并在后台从多轮对话中提取用户资料、偏好、关系、事件、状态、决定、任务和技术事实。长期记忆使用稳定的 `memory_key` 更新同一事实，并生成包含同义表达的 `search_text`，召回时优先搜索长期记忆，未命中再回退原始历史。
 
 长期记忆提取不会阻塞当前聊天回复。`#重置对话` 会同时清除该用户的原始历史和长期记忆，删除最近上下文时也会失效来源位于删除区间内的记忆。详细的数据结构、配置和验证方式见 `docs/long-term-memory.md`。
+
+聊天中的图片会保存为用户隔离的资源，并在上下文中使用 `asset_id` 占位符。模型可通过工具查看历史图片、生成图片或重新发送图片。`#重置对话` 和删除最近上下文会同步清理关联的图片文件；未关联到上下文的临时资源会保留到用户重置。
 
 
 # 运行时架构

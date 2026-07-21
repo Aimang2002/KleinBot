@@ -14,6 +14,7 @@
 #include "../Command/VoiceSwitchCommand.h"
 #include "../Command/RemoveContextCommand.h"
 #include "../Command/AdminCommand.h"
+#include "../Asset/ImageAssetStore.h"
 #include "Message.h"
 #include <iomanip>
 #include <thread>
@@ -21,8 +22,11 @@
 
 std::mt19937 mt_rand(1000);
 
-Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession, ChatService &chatService, MessageSenderPort &sender)
-	: models(models), dock(dock), userSession(userSession), chatService(chatService), sender(sender)
+Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
+				 ChatService &chatService, MessageSenderPort &sender,
+				 ImageAssetStore &imageAssetStore)
+	: models(models), dock(dock), userSession(userSession), chatService(chatService),
+	  sender(sender), imageAssetStore(imageAssetStore)
 {
 	// 服务器状态类初始化
 #ifdef DEBUG
@@ -97,10 +101,6 @@ Message::Intent Message::classify(const JsonData &data)
 	{
 		return Intent::SystemEvent;
 	}
-	else if (!data.message_data_url.empty()) // 如果该上报有数据，就表示用户上传了图片，使用视觉识别
-	{
-		return Intent::Vision;
-	}
 	return Intent::Chat; // 正常聊天
 }
 
@@ -132,16 +132,29 @@ void Message::handleMessage(const JsonData &current_data)
 	{
 		std::cout << "[" << current_data.message_type << "]" << current_data.user_id << ":" << current_data.plain_text << std::endl;
 
-		std::string llm_text;
-		if (intent == Intent::Vision)
+		std::string conversationText = current_data.plain_text;
+		std::string inboundAssetId;
+		if (!current_data.message_data_url.empty())
 		{
-			llm_text = provideImageRecognition(current_data.user_id, current_data.plain_text, current_data.message_data_url);
+			auto asset = this->imageAssetStore.importFromUrl(current_data.user_id,
+				current_data.message_data_url, 0);
+			if (asset)
+			{
+				inboundAssetId = asset->asset_id;
+				if (!conversationText.empty())
+					conversationText += "\n";
+				conversationText += "[image asset_id=" + asset->asset_id + " source=inbound]";
+			}
 		}
-		else
-		{
-			const bool useContext = this->accessibility_chat || current_data.user_id == std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
-			llm_text = this->chatService.reply(current_data.user_id, current_data.plain_text, useContext);
-		}
+
+		const bool useContext = this->accessibility_chat || current_data.user_id == std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
+		ChatReply chatReply = this->chatService.reply(current_data.user_id, conversationText, useContext);
+		if (!inboundAssetId.empty())
+			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
+				chatReply.user_message_id);
+		for (const auto &outbound : chatReply.outbound_messages)
+			dispatch(current_data, outbound);
+		std::string llm_text = chatReply.text;
 
 		if (llm_text.empty())
 		{

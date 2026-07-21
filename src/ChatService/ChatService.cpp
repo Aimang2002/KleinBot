@@ -3,20 +3,23 @@
 #include "../Memory/MemoryService.h"
 #include "../Tool/ToolContext.h"
 
-std::string ChatService::reply(uint64_t user_id, const std::string &text, bool use_context)
+ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use_context)
 {
+    ChatReply resultReply;
     int64_t userMessageId = 0;
     // 1. 上下文模式：增量追加用户这句（内存 + SQLite 同步落盘）
     if (use_context)
     {
         userMessageId = this->userSession.appendMessage(user_id, "user", text);
+        resultReply.user_message_id = userMessageId;
     }
 
     // 2. 构造请求包（USS 负责裁切、查模型、拼超参数）
     auto bundleOpt = this->userSession.buildChatRequest(user_id);
     if (!bundleOpt)
     {
-        return "系统提示：当前模型未注册，请管理员检查 ModelsName.json。";
+        resultReply.text = "系统提示：当前模型未注册，请管理员检查 ModelsName.json。";
+        return resultReply;
     }
     auto &bundle = *bundleOpt;
 
@@ -30,18 +33,25 @@ std::string ChatService::reply(uint64_t user_id, const std::string &text, bool u
 
     // 3. 塞入可用工具
     bundle.request.tools = this->tools.allSchemas();
+    bundle.request.system_prompt +=
+        "\n\n图片上下文规则：历史中的 [image asset_id=...] 只是资源引用，你当前并未直接看到图片。"
+        "当用户询问图片内容、位置、文字、颜色或细节时，必须调用 inspect_image；"
+        "当用户要求重新发送历史图片时调用 send_image；当用户要求生成图片时调用 generate_image。"
+        "不得在未调用 inspect_image 时猜测图片细节。";
 
     // 4. 调用 LLM + 工具调用循环
     std::cout << "Send to model..." << std::endl;
     ChatResponse response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
 
     int rounds = 0;
+    std::vector<std::string> contextAnnotations;
     while (response.code == 200 && response.finish_reason == "tool_calls" && !response.tool_calls.empty())
     {
         if (++rounds > max_tool_rounds)
         {
             LOG_WARNING("工具调用轮次超过上限，强制结束");
-            return "系统提示：处理超时，请重试。";
+            resultReply.text = "系统提示：处理超时，请重试。";
+            return resultReply;
         }
 
         // 4a. 把 assistant 的工具调用请求追加进临时 history
@@ -57,30 +67,35 @@ std::string ChatService::reply(uint64_t user_id, const std::string &text, bool u
         // 4b. 逐个执行工具，结果作为 role=="tool" 消息回灌
         for (const auto &call : response.tool_calls)
         {
-            std::string result;
+            ToolResult toolResult;
             Tool *tool = this->tools.find(call.name);
             if (tool == nullptr)
             {
-                result = "错误：未知工具 " + call.name;
+                toolResult.model_content = "错误：未知工具 " + call.name;
                 LOG_WARNING("模型调用了未注册的工具：" + call.name);
             }
             else
             {
                 try
                 {
-                    result = tool->execute(call.arguments, ToolContext{user_id});
+                    toolResult = tool->execute(call.arguments, ToolContext{user_id, userMessageId});
                 }
                 catch (const std::exception &e)
                 {
-                    result = "错误：工具执行失败 " + std::string(e.what());
+                    toolResult.model_content = "错误：工具执行失败 " + std::string(e.what());
                     LOG_ERROR("工具 " + call.name + " 执行异常：" + std::string(e.what()));
                 }
             }
             ChatMessage toolMsg;
             toolMsg.role = "tool";
             toolMsg.tool_call_id = call.id;
-            toolMsg.content = result;
+            toolMsg.content = toolResult.model_content;
             bundle.request.history.push_back(toolMsg);
+            resultReply.outbound_messages.insert(resultReply.outbound_messages.end(),
+                                                  toolResult.outbound_messages.begin(),
+                                                  toolResult.outbound_messages.end());
+            if (!toolResult.context_content.empty())
+                contextAnnotations.push_back(toolResult.context_content);
         }
 
         // 4c. 带着加长的 history 再次请求
@@ -91,20 +106,25 @@ std::string ChatService::reply(uint64_t user_id, const std::string &text, bool u
     if (response.code != 200)
     {
         LOG_ERROR("LLM response error code: " + std::to_string(response.code));
-        return response.error_message.empty() ? std::string("系统提示：模型无返回内容！") : "系统提示：" + response.error_message;
+        resultReply.text = response.error_message.empty() ? std::string("系统提示：模型无返回内容！") : "系统提示：" + response.error_message;
+        return resultReply;
     }
 
     std::string LLM_content = response.content;
     if (LLM_content.empty())
     {
-        return "系统提示：模型无返回内容！";
+        resultReply.text = "系统提示：模型无返回内容！";
+        return resultReply;
     }
 
     // 5. 上下文模式：增量追加助手回复（内存 + SQLite 同步落盘）
     if (use_context)
     {
+        std::string persistedAssistantContent = LLM_content;
+        for (const auto &annotation : contextAnnotations)
+            persistedAssistantContent += "\n" + annotation;
         const int64_t assistantMessageId = this->userSession.appendMessage(
-            user_id, "assistant", LLM_content);
+            user_id, "assistant", persistedAssistantContent);
         this->memoryService.enqueueTurn(
             user_id, text, LLM_content, userMessageId, assistantMessageId);
     }
@@ -122,7 +142,8 @@ std::string ChatService::reply(uint64_t user_id, const std::string &text, bool u
     }
 
     std::cout << "\033[32m" << "Model response: " << "\033[0m" << LLM_content << std::endl;
-    return LLM_content;
+    resultReply.text = LLM_content;
+    return resultReply;
 }
 
 std::string ChatService::replyOneShot(const std::string &prompt)

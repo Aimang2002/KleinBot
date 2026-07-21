@@ -27,7 +27,7 @@ public:
         return R"({"type":"object","properties":{"queries":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":5,"description":"同义或相关的检索短语，例如失眠、睡不着、睡眠问题"},"limit":{"type":"integer","minimum":1,"maximum":20,"description":"最多返回的记忆条数"}},"required":["queries"]})";
     }
 
-    std::string execute(const std::string &args, const ToolContext &ctx) override
+    ToolResult execute(const std::string &args, const ToolContext &ctx) override
     {
         std::vector<std::string> queries;
         std::size_t limit = 8;
@@ -50,11 +50,11 @@ public:
         }
         catch (const std::exception &)
         {
-            return "错误：参数解析失败，请提供 queries 数组。";
+            return {"错误：参数解析失败，请提供 queries 数组。", {}, {}};
         }
         if (queries.empty())
-            return "错误：queries 不能为空。";
-        return memoryService.recall(ctx.user_id, queries, limit);
+            return {"错误：queries 不能为空。", {}, {}};
+        return {memoryService.recall(ctx.user_id, queries, limit), {}, {}};
     }
 
 private:

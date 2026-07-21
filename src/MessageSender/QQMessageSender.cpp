@@ -52,7 +52,7 @@ nlohmann::json QQMessageSender::toSegments(const OutboundMessage &msg)
                 prefix = "";
                 break;
             case ImageMessage::Source::LocalPath:
-                prefix = "file:///";
+                prefix = concrete.data.empty() || concrete.data.front() != '/' ? "file:///" : "file://";
                 break;
             }
             segment["data"]["file"] = prefix + concrete.data;

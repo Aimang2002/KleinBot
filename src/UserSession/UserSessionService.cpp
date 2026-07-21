@@ -4,6 +4,7 @@
 #include "../Log/Log.h"
 #include "../Persistence/ConversationStore.h"
 #include "../Memory/MemoryService.h"
+#include "../Asset/ImageAssetStore.h"
 
 UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store)
     : registry(mr),
@@ -17,6 +18,12 @@ void UserSessionService::setMemoryService(MemoryService *service)
 {
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->memoryService = service;
+}
+
+void UserSessionService::setImageAssetStore(ImageAssetStore *store)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_message);
+    this->imageAssetStore = store;
 }
 
 Person UserSessionService::createDefaultPerson(const uint64_t user_id)
@@ -59,7 +66,8 @@ void UserSessionService::resetChat(const uint64_t user_id)
     this->store.clearUser(user_id); // 同步清库
     if (this->memoryService != nullptr)
         this->memoryService->clearUser(user_id);
-    // 注：功能2 引入图片存储后，此处须连图片元数据 + 磁盘文件一起清
+    if (this->imageAssetStore != nullptr)
+        this->imageAssetStore->clearUser(user_id);
 }
 
 std::string UserSessionService::getModelName(uint64_t user_id)
@@ -124,6 +132,8 @@ std::string UserSessionService::removePreviousContext(const uint64_t user_id)
             const int64_t firstRemovedId = this->store.removeLast(user_id, removed);
             if (this->memoryService != nullptr && firstRemovedId > 0)
                 this->memoryService->removeBySourceFrom(user_id, firstRemovedId);
+            if (this->imageAssetStore != nullptr && firstRemovedId > 0)
+                this->imageAssetStore->removeByConversationFrom(user_id, firstRemovedId);
             return "上条对话已被删除！";
         }
     }

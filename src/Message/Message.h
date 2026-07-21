@@ -11,6 +11,7 @@
 #include "../Port/MessageSenderPort.h"
 #include "../Port/OutboundMessage.h"
 #include "../ChatService/ChatService.h"
+#include "../Asset/ImageAssetStore.h"
 #include <iostream>
 #include <random>
 #include <memory>
@@ -21,7 +22,9 @@ class Message
 {
 public:
 	// MessageSenderPort 由 main.cpp 装配并注入，Message 自身不负责生命周期
-	explicit Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession, ChatService &chatService, MessageSenderPort &sender);
+	explicit Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
+				 ChatService &chatService, MessageSenderPort &sender,
+				 ImageAssetStore &imageAssetStore);
 
 	/**
 	 * @brief 消息过滤，对某些消息进行过滤
@@ -104,6 +107,7 @@ private:
 	UserSessionService &userSession;
 	ChatService &chatService;
 	MessageSenderPort &sender;
+	ImageAssetStore &imageAssetStore;
 	CommandRegistry registry;
 };
 

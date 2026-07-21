@@ -8,7 +8,7 @@
 struct ToolContext
 {
     uint64_t user_id = 0;
-    // 功能2 再加 group_id、message_id 等
+    int64_t user_message_id = 0;
 };
 
 #endif // TOOL_CONTEXT_H
