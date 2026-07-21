@@ -24,9 +24,11 @@ std::mt19937 mt_rand(1000);
 
 Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
 				 ChatService &chatService, MessageSenderPort &sender,
-				 ImageAssetStore &imageAssetStore)
+				 ImageAssetStore &imageAssetStore, bool &globalVoice,
+				 bool &accessibilityChat)
 	: models(models), dock(dock), userSession(userSession), chatService(chatService),
-	  sender(sender), imageAssetStore(imageAssetStore)
+	  sender(sender), imageAssetStore(imageAssetStore), global_Voice(globalVoice),
+	  accessibility_chat(accessibilityChat)
 {
 	// 服务器状态类初始化
 #ifdef DEBUG
@@ -36,8 +38,6 @@ Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSess
 	this->voice = std::make_unique<Voice>();
 
 	// 内置成员属性初始化
-	this->accessibility_chat = ConfigManager::getInstance().configVariable("ACCESSIBLITY_CHAT") == "true" ? true : false;
-	this->global_Voice = ConfigManager::getInstance().configVariable("GLOBAL_VOICE") == "true" ? true : false;
 
 	// 注册所有命令事件
 	this->registry.registryCommand(std::make_unique<HelpCommand>());

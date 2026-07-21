@@ -11,6 +11,7 @@ struct ToolResult
     std::string model_content;
     std::vector<OutboundMessage> outbound_messages;
     std::string context_content;
+    bool terminal = false;
 };
 
 // 工具抽象：模型可自主调用的能力单元
@@ -29,6 +30,8 @@ public:
     // 参数的 JSON Schema 字符串（OpenAI parameters 对象）
     // 无参数的工具返回空对象 schema
     virtual std::string parametersSchema() const = 0;
+
+    virtual bool requiresAdmin() const { return false; }
 
     // 执行工具。文本回灌模型，出站消息交给消息适配器发送。
     virtual ToolResult execute(const std::string &args, const ToolContext &ctx) = 0;

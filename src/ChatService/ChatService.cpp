@@ -37,7 +37,10 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
         "\n\n图片上下文规则：历史中的 [image asset_id=...] 只是资源引用，你当前并未直接看到图片。"
         "当用户询问图片内容、位置、文字、颜色或细节时，必须调用 inspect_image；"
         "当用户要求重新发送历史图片时调用 send_image；当用户要求生成图片时调用 generate_image。"
-        "不得在未调用 inspect_image 时猜测图片细节。";
+        "不得在未调用 inspect_image 时猜测图片细节。"
+        "当用户询问当前模型时调用 get_current_model；当用户要求开启或关闭语音时调用 set_voice_mode。"
+        "管理员控制操作只能调用 admin_control，系统会在工具执行前校验管理员身份。"
+        "不要把重置对话、设置人格或还原人格转换为工具调用。";
 
     // 4. 调用 LLM + 工具调用循环
     std::cout << "Send to model..." << std::endl;
@@ -45,6 +48,8 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
 
     int rounds = 0;
     std::vector<std::string> contextAnnotations;
+    bool terminalToolResult = false;
+    std::string terminalToolContent;
     while (response.code == 200 && response.finish_reason == "tool_calls" && !response.tool_calls.empty())
     {
         if (++rounds > max_tool_rounds)
@@ -76,7 +81,13 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
             }
             else
             {
-                try
+                const uint64_t managerId = static_cast<uint64_t>(std::stoull(
+                    ConfigManager::getInstance().configVariable("MANAGER_QQ")));
+                if (tool->requiresAdmin() && user_id != managerId)
+                {
+                    toolResult = {"权限不足：该操作仅限管理员。", {}, {}, true};
+                }
+                else try
                 {
                     toolResult = tool->execute(call.arguments, ToolContext{user_id, userMessageId});
                 }
@@ -96,21 +107,29 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
                                                   toolResult.outbound_messages.end());
             if (!toolResult.context_content.empty())
                 contextAnnotations.push_back(toolResult.context_content);
+            if (toolResult.terminal)
+            {
+                terminalToolResult = true;
+                terminalToolContent = toolResult.model_content;
+            }
         }
+
+        if (terminalToolResult)
+            break;
 
         // 4c. 带着加长的 history 再次请求
         response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
     }
 
     // 5. 错误处理
-    if (response.code != 200)
+    if (response.code != 200 && !terminalToolResult)
     {
         LOG_ERROR("LLM response error code: " + std::to_string(response.code));
         resultReply.text = response.error_message.empty() ? std::string("系统提示：模型无返回内容！") : "系统提示：" + response.error_message;
         return resultReply;
     }
 
-    std::string LLM_content = response.content;
+    std::string LLM_content = terminalToolResult ? terminalToolContent : response.content;
     if (LLM_content.empty())
     {
         resultReply.text = "系统提示：模型无返回内容！";

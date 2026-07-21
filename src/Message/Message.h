@@ -24,7 +24,8 @@ public:
 	// MessageSenderPort 由 main.cpp 装配并注入，Message 自身不负责生命周期
 	explicit Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
 				 ChatService &chatService, MessageSenderPort &sender,
-				 ImageAssetStore &imageAssetStore);
+				 ImageAssetStore &imageAssetStore, bool &globalVoice,
+				 bool &accessibilityChat);
 
 	/**
 	 * @brief 消息过滤，对某些消息进行过滤
@@ -96,8 +97,8 @@ private:
 private:
 	std::string help_message;
 
-	bool accessibility_chat;													 // true为开启
-	bool global_Voice;															 // true为开启
+	bool &accessibility_chat;													 // true为开启
+	bool &global_Voice;															 // true为开启
 	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList; // 轻量型人格
 	std::unique_ptr<ComputerStatus> PCStatus;									 // 监控计算机状态
 	std::unique_ptr<Voice> voice;												 // 语音识别模块
