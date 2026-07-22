@@ -23,10 +23,11 @@ if(WIN32)
     endif()
 endif()
 
-file(GLOB_RECURSE SRC 
+file(GLOB_RECURSE CORE_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/submodules/CloudMusicID/*.cpp
 )
+list(REMOVE_ITEM CORE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
 
 # 添加头文件搜索路径
 include_directories(
@@ -65,11 +66,23 @@ endif()
 
 find_package(Boost REQUIRED COMPONENTS system) 
 
-add_executable(${EXECUTABLE_NAME} ${SRC})
+add_library(kleinbot_core STATIC ${CORE_SRC})
+add_executable(${EXECUTABLE_NAME} src/main.cpp)
+target_link_libraries(${EXECUTABLE_NAME} PRIVATE kleinbot_core)
 if(WIN32)
-    target_include_directories(${EXECUTABLE_NAME} PRIVATE ${CURL_INCLUDE_DIR})
-    target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${CURL_LIBRARY} ${Boost_LIBRARIES} ws2_32 iphlpapi)
+    target_include_directories(kleinbot_core PRIVATE ${CURL_INCLUDE_DIR})
+    target_link_libraries(kleinbot_core PUBLIC ${CURL_LIBRARY} ${Boost_LIBRARIES} ws2_32 iphlpapi)
 else()
     find_package(CURL REQUIRED)
-    target_link_libraries(${EXECUTABLE_NAME} PRIVATE CURL::libcurl Boost::system sqlite3)
+    target_link_libraries(kleinbot_core PUBLIC CURL::libcurl Boost::system sqlite3)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    find_package(GTest QUIET)
+    if(GTest_FOUND)
+        add_subdirectory(tests)
+    else()
+        message(WARNING "GoogleTest not found; tests will not be built")
+    endif()
 endif()
