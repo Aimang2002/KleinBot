@@ -18,9 +18,10 @@
 #include "ChatService/ChatService.h"
 #include "Tool/ToolRegistry.h"
 #include "Tool/GetTimeTool.h"
-#include "Tool/GetCurrentModelTool.h"
-#include "Tool/VoiceModeTool.h"
-#include "Tool/AdminControlTool.h"
+#include "Tool/ActionTool.h"
+#include "Action/GetCurrentModelAction.h"
+#include "Action/VoiceModeAction.h"
+#include "Action/AdminControlAction.h"
 #include "Tool/RecallConversationTool.h"
 #include "Tool/GenerateImageTool.h"
 #include "Tool/InspectImageTool.h"
@@ -225,24 +226,28 @@ int main()
 	bool globalVoice = ConfigManager::getInstance().configVariable("GLOBAL_VOICE") == "true";
 	bool accessibilityChat = ConfigManager::getInstance().configVariable("ACCESSIBLITY_CHAT") == "true";
 	ComputerStatus adminComputerStatus;
-	tools.registerTool(std::make_unique<GetTimeTool>());
-	tools.registerTool(std::make_unique<GetCurrentModelTool>([&](uint64_t userId)
-		{ return userSession.getModelName(userId); }));
-	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
-	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore));
-	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore));
-	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore));
-	tools.registerTool(std::make_unique<VoiceModeTool>(userSession, globalVoice));
-	tools.registerTool(std::make_unique<AdminControlTool>(adminComputerStatus, accessibilityChat,
+	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
+		{ return userSession.getModelName(userId); });
+	VoiceModeAction voiceModeAction(userSession, globalVoice);
+	AdminControlAction adminControlAction(adminComputerStatus, accessibilityChat,
 		globalVoice, [&models]()
 		{
 			ConfigManager::getInstance().refreshConfiguation();
 			models.reload();
-		}));
+		});
+	tools.registerTool(std::make_unique<GetTimeTool>());
+	tools.registerTool(std::make_unique<ActionTool>(getCurrentModelAction));
+	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
+	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore));
+	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore));
+	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore));
+	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
+	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
 	ChatService chatService(dock, userSession, models, tools, memoryService);
 	QQMessageSender qqSender;
 	Message messageClass(models, dock, userSession, chatService, qqSender, imageAssetStore,
-		globalVoice, accessibilityChat);
+		globalVoice, accessibilityChat, getCurrentModelAction, voiceModeAction,
+		adminControlAction);
 	ThreadPool messageWorkers(messageWorkerCount());
 	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(qqSender), std::cref(running));
 

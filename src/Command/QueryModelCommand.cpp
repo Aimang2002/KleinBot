@@ -2,6 +2,6 @@
 
 CommandResult QueryModelCommand::execute(const CommandContext &ctx)
 {
-    std::string message = "当前模型：" + this->getCurrentModelName(ctx.user_id);
-    return {TextMessage{message}};
+    const auto result = action.execute(nlohmann::json::object(), {ctx.user_id, 0});
+    return {TextMessage{result.content}};
 }

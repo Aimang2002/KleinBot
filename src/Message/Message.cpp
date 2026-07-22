@@ -25,7 +25,8 @@ std::mt19937 mt_rand(1000);
 Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
 				 ChatService &chatService, MessageSenderPort &sender,
 				 ImageAssetStore &imageAssetStore, bool &globalVoice,
-				 bool &accessibilityChat)
+				 bool &accessibilityChat, Action &queryModelAction,
+				 Action &voiceModeAction, Action &adminControlAction)
 	: models(models), dock(dock), userSession(userSession), chatService(chatService),
 	  sender(sender), imageAssetStore(imageAssetStore), global_Voice(globalVoice),
 	  accessibility_chat(accessibilityChat)
@@ -34,7 +35,6 @@ Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSess
 #ifdef DEBUG
 	LOG_DEBUG("服务器状态初始化...");
 #endif
-	this->PCStatus = std::make_unique<ComputerStatus>();
 	this->voice = std::make_unique<Voice>();
 
 	// 内置成员属性初始化
@@ -43,17 +43,14 @@ Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSess
 	this->registry.registryCommand(std::make_unique<HelpCommand>());
 	this->registry.registryCommand(std::make_unique<ModelListCommand>(this->models));
 	this->registry.registryCommand(std::make_unique<SearchSongsCommand>());
-	this->registry.registryCommand(std::make_unique<QueryModelCommand>([&](uint64_t uid)
-																	   { return this->userSession.getModelName(uid); }));
+	this->registry.registryCommand(std::make_unique<QueryModelCommand>(queryModelAction));
 	this->registry.registryCommand(std::make_unique<GeneratePictureCommand>(this->dock));
 	this->registry.registryCommand(std::make_unique<ResetChatCommand>(this->userSession));
 	this->registry.registryCommand(std::make_unique<SetSoulCommand>(this->userSession));
 	this->registry.registryCommand(std::make_unique<SwitchModelCommand>(this->userSession, this->models));
-	this->registry.registryCommand(std::make_unique<VoiceSwitchCommand>(this->userSession, this->global_Voice));
+	this->registry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));
 	this->registry.registryCommand(std::make_unique<RemoveContextCommand>(this->userSession));
-	this->registry.registryCommand(std::make_unique<AdminCommand>(*this->PCStatus, this->accessibility_chat, this->global_Voice, [this]()
-																  {		ConfigManager::getInstance().refreshConfiguation();
-																		this->models.reload(); }));
+	this->registry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
 
 	srand((unsigned int)time(NULL));
 

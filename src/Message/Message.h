@@ -12,6 +12,7 @@
 #include "../Port/OutboundMessage.h"
 #include "../ChatService/ChatService.h"
 #include "../Asset/ImageAssetStore.h"
+#include "../Action/Action.h"
 #include <iostream>
 #include <random>
 #include <memory>
@@ -25,7 +26,8 @@ public:
 	explicit Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
 				 ChatService &chatService, MessageSenderPort &sender,
 				 ImageAssetStore &imageAssetStore, bool &globalVoice,
-				 bool &accessibilityChat);
+				 bool &accessibilityChat, Action &queryModelAction,
+				 Action &voiceModeAction, Action &adminControlAction);
 
 	/**
 	 * @brief 消息过滤，对某些消息进行过滤
@@ -100,7 +102,6 @@ private:
 	bool &accessibility_chat;													 // true为开启
 	bool &global_Voice;															 // true为开启
 	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList; // 轻量型人格
-	std::unique_ptr<ComputerStatus> PCStatus;									 // 监控计算机状态
 	std::unique_ptr<Voice> voice;												 // 语音识别模块
 
 	ModelRegistry &models;

@@ -10,45 +10,24 @@ bool AdminCommand::canHandle(const std::string &message)
 
 CommandResult AdminCommand::execute(const CommandContext &ctx)
 {
-    std::string str;
     std::string cmd = utils::trim(ctx.data.plain_text);
+    nlohmann::json arguments;
     if (cmd == "#开启无障碍聊天")
-    {
-        this->m_accessibility_chat = true;
-        str = "无障碍聊天已开启！";
-    }
+        arguments["action"] = "enable_accessibility_chat";
     else if (cmd == "#关闭无障碍聊天")
-    {
-        this->m_accessibility_chat = false;
-        str = "无障碍聊天已关闭！";
-    }
+        arguments["action"] = "disable_accessibility_chat";
     else if (cmd == "#刷新配置文件")
-    {
-        m_refresh();
-        str = "配置文件已刷新";
-    }
+        arguments["action"] = "refresh_config";
     else if (cmd == "#激活语音")
-    {
-        this->m_global_Voice = true;
-        str = "已激活！";
-    }
+        arguments["action"] = "activate_global_voice";
     else if (cmd == "#冻结语音")
-    {
-        this->m_global_Voice = false;
-        str = "已冻结！";
-    }
+        arguments["action"] = "freeze_global_voice";
     else if (cmd == "#获取服务器inet4")
-    {
-        str = this->m_PCStatus.getInet4();
-    }
+        arguments["action"] = "get_inet4";
     else if (cmd == "#获取服务器inet6")
-    {
-        str = this->m_PCStatus.getInet6();
-    }
+        arguments["action"] = "get_inet6";
     else if (cmd == "#获取服务器公网IP")
-    {
-        str = this->m_PCStatus.getPublicIP();
-    }
-    std::string response = std::string(!str.empty() ? str : "操作失败，请查看日志定位问题。");
-    return {TextMessage{response}};
+        arguments["action"] = "get_public_ip";
+    const auto result = action.execute(arguments, {ctx.user_id, 0});
+    return {TextMessage{result.content.empty() ? "操作失败，请查看日志定位问题。" : result.content}};
 }
