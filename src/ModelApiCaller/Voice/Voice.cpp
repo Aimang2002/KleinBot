@@ -82,7 +82,7 @@ std::string Voice::toAudio(const std::string &text)
             audioFile.close();
             curl_easy_cleanup(curl);
             curl_slist_free_all(headers);
-            return filePath;
+            return filePath.string();
         }
     }
     return {};

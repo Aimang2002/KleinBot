@@ -44,9 +44,13 @@
 
 [Boost](https://github.com/boostorg/boost)
 
+[SQLite](https://www.sqlite.org/)
+
 [nlohmann/json](https://github.com/nlohmann/json)
 
-> nlohmann/json源码已经嵌入到项目中
+[GoogleTest](https://github.com/google/googletest)（仅测试构建）
+
+> nlohmann/json 与最小 Boost.Asio/Beast 头文件随仓库提供；Windows 构建会自动获取固定版本的 curl 和 SQLite。
 
 
 
@@ -62,17 +66,24 @@
 
 ## 1.Windows平台
 
+Windows 当前正式支持带 POSIX 线程模型的 MinGW-w64。安装 Git、CMake 和 MinGW-w64，并确保 `gcc`、`g++`、`mingw32-make` 在 `PATH` 中。
+
 ~~~bash
 git clone https://github.com/Aimang2002/KleinBot.git
-cd KLineBot
-mkdir build && cd build
-cmake .. -G "MinGW Makefiles"
-make
+cd KleinBot
+cmake --preset windows-mingw-release
+cmake --build --preset windows-mingw-release
 ~~~
 
-> 在Windows平台下，我们建议使用minGW进行编译，CMakeLists文件中链接的boost库和curl库改成自己的位置。
->
-> Windows平台下需要准备证书，点击[此处](https://curl.se/docs/caextract.html)下载证书，并存放到可执行文件的目录下。
+生成文件位于：
+
+~~~text
+build/windows-mingw-release/KleinQBot2.4.0.exe
+~~~
+
+CMake 会使用仓库内的最小 Boost.Asio/Beast 头文件，并自动下载固定版本的 SQLite 和 curl。Windows 下 curl 使用系统 Schannel，因此不需要额外准备 OpenSSL 或 CA 证书文件。
+
+如果 CMake 提示 `POSIX thread support`，说明当前 MinGW 使用 `win32` 线程模型，请改用 MSYS2 UCRT64/MINGW64 或其他带 POSIX 线程支持的 MinGW-w64 工具链。Release 默认静态链接 MinGW 的 GCC、C++ 和 pthread 运行时，生成的 EXE 只依赖 Windows 系统 DLL。
 
 
 
@@ -80,10 +91,9 @@ make
 
 ~~~bash
 git clone https://github.com/Aimang2002/KleinBot.git
-cd KLineBot
-mkdir build && cd build
-cmake ..
-make
+cd KleinBot
+cmake --preset linux-release
+cmake --build --preset linux-release
 ~~~
 
 
