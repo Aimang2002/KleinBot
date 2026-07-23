@@ -1,4 +1,5 @@
 #include "MyWebSocket.h"
+#include "WebSocketAuth.h"
 #include "../utils/Utils.hpp"
 
 namespace
@@ -19,6 +20,7 @@ void MyWebSocket::connectWebSocket(const std::string &url, const std::atomic<boo
     // 设置服务器的IP地址和端口
     std::string host = ConfigManager::getInstance().configVariable("WEBSOCKET_MESSAGE_IP");
     std::string port = ConfigManager::getInstance().configVariable("WEBSOCKET_MESSAGE_PORT");
+    std::string authToken = ConfigManager::getInstance().configVariableOpt("WEBSOCKET_AUTH_TOKEN");
 
     while (running.load())
     {
@@ -29,6 +31,14 @@ void MyWebSocket::connectWebSocket(const std::string &url, const std::atomic<boo
 
             // 从IO上下文创建WebSocket流
             websocket::stream<tcp::socket> ws(ioc);
+            if (!authToken.empty())
+            {
+                const std::string authorizationValue = WebSocketAuth::buildAuthorizationValue(authToken);
+                ws.set_option(websocket::stream_base::decorator(
+                    [authorizationValue](websocket::request_type &request) {
+                        request.set(beast::http::field::authorization, authorizationValue);
+                    }));
+            }
 
             // 解析服务器地址和端口
             tcp::resolver resolver(ioc);

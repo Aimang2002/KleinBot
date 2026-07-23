@@ -1,4 +1,5 @@
 #include "MyReverseWebSocket.h"
+#include "WebSocketAuth.h"
 
 namespace
 {
@@ -23,6 +24,7 @@ void MyReverseWebSocket::connectReverseWebSocket(const std::atomic<bool> &runnin
         {
             std::string const address = ConfigManager::getInstance().configVariable("REVERSEWEBSOCKET_MESSAGE_IP");
             unsigned short const port = stoi(ConfigManager::getInstance().configVariable("REVERSEWEBSOCKET_MESSAGE_PORT"));
+            std::string const authToken = ConfigManager::getInstance().configVariableOpt("WEBSOCKET_AUTH_TOKEN");
 
             net::io_context ioc{1};
             tcp::acceptor acceptor{ioc};
@@ -59,8 +61,56 @@ void MyReverseWebSocket::connectReverseWebSocket(const std::atomic<bool> &runnin
                 throw beast::system_error(acceptError);
             }
 
+            beast::flat_buffer requestBuffer;
+            beast::http::request<beast::http::string_body> request;
+            beast::error_code requestError;
+            bool requestCompleted = false;
+            beast::http::async_read(socket, requestBuffer, request,
+                [&](beast::error_code error, std::size_t) {
+                    requestError = error;
+                    requestCompleted = true;
+                });
+
+            while (running.load() && !requestCompleted)
+            {
+                ioc.run_for(std::chrono::milliseconds(100));
+                ioc.restart();
+            }
+
+            if (!running.load())
+            {
+                beast::error_code ignoredError;
+                socket.cancel(ignoredError);
+                ioc.run();
+                socket.close(ignoredError);
+                break;
+            }
+
+            if (requestError)
+            {
+                throw beast::system_error(requestError);
+            }
+
+            const auto authorization = request[beast::http::field::authorization];
+            if (!WebSocketAuth::isAuthorized(
+                    std::string_view(authorization.data(), authorization.size()), authToken))
+            {
+                beast::http::response<beast::http::empty_body> response{
+                    beast::http::status::unauthorized, request.version()};
+                response.set(beast::http::field::server, "KleinBot");
+                response.set(beast::http::field::www_authenticate, "Bearer");
+                response.keep_alive(false);
+                beast::http::write(socket, response);
+
+                beast::error_code ignoredError;
+                socket.shutdown(tcp::socket::shutdown_both, ignoredError);
+                socket.close(ignoredError);
+                LOG_WARNING("反向WebSocket认证失败，已拒绝连接");
+                continue;
+            }
+
             websocket::stream<tcp::socket> ws{std::move(socket)};
-            ws.accept();
+            ws.accept(request);
 
             LOG_INFO("反向WebSocket连接成功!");
 

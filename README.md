@@ -253,6 +253,7 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 | WEBSOCKET_MESSAGE_PORT        | 正向WS 端口                                         |
 | REVERSEWEBSOCKET_MESSAGE_IP   | 反向WS IP地址                                       |
 | REVERSEWEBSOCKET_MESSAGE_PORT | 反向WS 端口                                         |
+| WEBSOCKET_AUTH_TOKEN          | 可选WS Bearer Token；为空或未配置时关闭鉴权         |
 | WYY_SONGID_PATH               | 网易云音乐ID文件路径                                |
 | HELP_PATH                     | #帮助 文本文件路径                                  |
 | HELP_PERSONALITY_PATH         | #人格帮助 文本文件路径                              |
@@ -286,6 +287,8 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 | REALESGAN_PATH                | REALESGAN项目的路径                                 |
 | REALESGAN_MODEL               | REALESGAN使用的修复模型                             |
 | IMAGE_DOWNLOAD_PATH           | 图片下载后的位置(供REALESGAN使用)                   |
+
+`WEBSOCKET_AUTH_TOKEN` 同时用于正向和反向 WebSocket：正向连接会在升级请求中携带 `Authorization: Bearer <token>`，反向连接会拒绝未携带正确 Token 的客户端。Token 修改后需要重启 KleinBot 才能应用到当前网络线程。
 
 
 # 长期记忆
