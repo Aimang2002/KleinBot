@@ -1,5 +1,6 @@
 #include "MyReverseWebSocket.h"
-#include "WebSocketAuth.h"
+#include "OneBotWebSocketSession.h"
+#include "BearerAuth.h"
 
 namespace
 {
@@ -14,23 +15,23 @@ bool waitForReconnect(const std::atomic<bool> &running, std::chrono::seconds dur
 }
 }
 
-void MyReverseWebSocket::connectReverseWebSocket(const std::atomic<bool> &running)
+void MyReverseWebSocket::connectReverseWebSocket(
+    const ReverseWebSocketConfig &config,
+    InboundMessageQueue &inboundQueue,
+    OutboundMessageQueue &outboundQueue,
+    const OneBotEventDecoder &eventDecoder,
+    const OneBotMessageEncoder &messageEncoder,
+    const std::atomic<bool> &running)
 {
-    unsigned short palpitate = 0; // 心跳机制
-
     while (running.load())
     {
         try
         {
-            std::string const address = ConfigManager::getInstance().configVariable("REVERSEWEBSOCKET_MESSAGE_IP");
-            unsigned short const port = stoi(ConfigManager::getInstance().configVariable("REVERSEWEBSOCKET_MESSAGE_PORT"));
-            std::string const authToken = ConfigManager::getInstance().configVariableOpt("WEBSOCKET_AUTH_TOKEN");
-
             net::io_context ioc{1};
             tcp::acceptor acceptor{ioc};
             acceptor.open(tcp::v4());
             acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
-            acceptor.bind({net::ip::make_address(address), port});
+            acceptor.bind({net::ip::make_address(config.bindHost), config.bindPort});
             acceptor.listen();
 
             tcp::socket socket{ioc};
@@ -92,8 +93,8 @@ void MyReverseWebSocket::connectReverseWebSocket(const std::atomic<bool> &runnin
             }
 
             const auto authorization = request[beast::http::field::authorization];
-            if (!WebSocketAuth::isAuthorized(
-                    std::string_view(authorization.data(), authorization.size()), authToken))
+            if (!BearerAuth::isAuthorized(
+                    std::string_view(authorization.data(), authorization.size()), config.authToken))
             {
                 beast::http::response<beast::http::empty_body> response{
                     beast::http::status::unauthorized, request.version()};
@@ -109,41 +110,25 @@ void MyReverseWebSocket::connectReverseWebSocket(const std::atomic<bool> &runnin
                 continue;
             }
 
+            if (request.target() != config.path)
+            {
+                beast::http::response<beast::http::empty_body> response{
+                    beast::http::status::not_found, request.version()};
+                response.set(beast::http::field::server, "KleinBot");
+                response.keep_alive(false);
+                beast::http::write(socket, response);
+                beast::error_code ignoredError;
+                socket.close(ignoredError);
+                continue;
+            }
+
             websocket::stream<tcp::socket> ws{std::move(socket)};
             ws.accept(request);
 
             LOG_INFO("反向WebSocket连接成功!");
 
-            while (running.load())
-            {
-                std::string message;
-                if (auto popped = MessageQueue::pending_try_pop()) // 若消息队列不为空
-                {
-                    message = std::move(*popped);
-#ifdef DEBUG
-                    LOG_DEBUG("发送数据：" + message);
-#endif
-                    ws.text(ws.got_text());
-                    ws.write(net::buffer(message));
-                    std::cout << "send over!" << std::endl;
-                }
-                else
-                {
-                    // std::this_thread::sleep_for(std::chrono::seconds(1));        // 休眠一秒
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 休眠100ms
-                    palpitate++;
-                    if (palpitate > 100) // 当休眠达到十次，将进行一个心跳
-                    {
-                        ws.text(ws.got_text());
-                        ws.write(net::buffer("ping")); // 发送心跳
-                        palpitate = 0;
-                    }
-                }
-            }
-
-            beast::error_code ignoredError;
-            ws.next_layer().cancel(ignoredError);
-            ws.next_layer().close(ignoredError);
+            runOneBotWebSocketSession(
+                ws, ioc, inboundQueue, outboundQueue, eventDecoder, messageEncoder, running);
         }
         catch (beast::system_error const &se)
         {

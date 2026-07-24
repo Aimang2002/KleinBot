@@ -131,8 +131,10 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 | :-----------: | :-----------------------------: |
 | 正向WebSocket | <font color="gree">可用</font>  |
 | 反向WebSocket | <font color="gree">可用</font>  |
-|   HTTP API    | <font color="red">不可用</font> |
-| 反向HTTP POST | <font color="red">不可用</font> |
+|   HTTP API    | <font color="gree">可用</font>  |
+|  HTTP事件上报 | <font color="gree">可用</font>  |
+
+一次运行只启用一种完整通信模式：`forward_websocket`、`reverse_websocket` 或 `http`。两种 WebSocket 模式都使用单条 Universal 连接同时接收事件和发送动作；`http` 模式组合 OneBot HTTP API 与 HTTP 事件上报。
 
 
 
@@ -249,11 +251,27 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 | OPEN_GROUPCHAT_MESSAGE        | 是否开启群聊（true/false）                          |
 | MANAGER_QQ                    | 管理员QQ                                            |
 | BOT_QQ                        | 机器人QQ                                            |
+| TRANSPORT_MODE                | `forward_websocket`、`reverse_websocket` 或 `http`  |
 | WEBSOCKET_MESSAGE_IP          | 正向WS IP地址                                       |
 | WEBSOCKET_MESSAGE_PORT        | 正向WS 端口                                         |
 | REVERSEWEBSOCKET_MESSAGE_IP   | 反向WS IP地址                                       |
 | REVERSEWEBSOCKET_MESSAGE_PORT | 反向WS 端口                                         |
 | WEBSOCKET_AUTH_TOKEN          | 可选WS Bearer Token；为空或未配置时关闭鉴权         |
+| WS_EVENT_HOST                 | 新正向WS主机名；未配置时兼容 WEBSOCKET_MESSAGE_IP   |
+| WS_EVENT_PORT                 | 新正向WS端口；未配置时兼容 WEBSOCKET_MESSAGE_PORT   |
+| WS_EVENT_PATH                 | 正向Universal WS路径，默认 `/`                      |
+| WS_API_BIND_HOST              | 新反向WS监听地址；兼容 REVERSEWEBSOCKET_MESSAGE_IP  |
+| WS_API_BIND_PORT              | 新反向WS监听端口；兼容 REVERSEWEBSOCKET_MESSAGE_PORT |
+| WS_API_PATH                   | 反向Universal WS路径，默认 `/`                      |
+| HTTP_API_BASE_URL             | OneBot HTTP/HTTPS API基础地址                       |
+| HTTP_API_AUTH_TOKEN           | HTTP API Bearer Token，可为空                       |
+| HTTP_EVENT_BIND_HOST          | HTTP事件监听地址，默认 `127.0.0.1`                  |
+| HTTP_EVENT_BIND_PORT          | HTTP事件监听端口                                    |
+| HTTP_EVENT_PATH               | HTTP事件上报路径，默认 `/onebot/events`             |
+| HTTP_EVENT_AUTH_TOKEN         | HTTP事件上报 Bearer Token，可为空                   |
+| NETWORK_CONNECT_TIMEOUT_MS    | HTTP建连超时，默认5000ms                            |
+| NETWORK_REQUEST_TIMEOUT_MS    | HTTP请求/读取超时，默认15000ms                      |
+| NETWORK_MAX_BODY_BYTES        | HTTP事件最大请求体，默认1048576字节                 |
 | WYY_SONGID_PATH               | 网易云音乐ID文件路径                                |
 | HELP_PATH                     | #帮助 文本文件路径                                  |
 | HELP_PERSONALITY_PATH         | #人格帮助 文本文件路径                              |
@@ -288,7 +306,19 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 | REALESGAN_MODEL               | REALESGAN使用的修复模型                             |
 | IMAGE_DOWNLOAD_PATH           | 图片下载后的位置(供REALESGAN使用)                   |
 
-`WEBSOCKET_AUTH_TOKEN` 同时用于正向和反向 WebSocket：正向连接会在升级请求中携带 `Authorization: Bearer <token>`，反向连接会拒绝未携带正确 Token 的客户端。Token 修改后需要重启 KleinBot 才能应用到当前网络线程。
+`WEBSOCKET_AUTH_TOKEN` 同时用于正向和反向 WebSocket：正向连接会在升级请求中携带 `Authorization: Bearer <token>`，反向连接会拒绝未携带正确 Token 的客户端。HTTP API 与事件上报分别使用独立 Token。通信配置在启动时生成不可变快照，修改后需要重启 KleinBot。
+
+现有配置可以继续把这些字段放在 `"QQ通信端口"` 二级对象中。例如：
+
+```json
+"QQ通信端口": {
+    "TRANSPORT_MODE": "reverse_websocket",
+    "REVERSEWEBSOCKET_MESSAGE_IP": "127.0.0.1",
+    "REVERSEWEBSOCKET_MESSAGE_PORT": 8600,
+    "WS_API_PATH": "/onebot",
+    "WEBSOCKET_AUTH_TOKEN": ""
+}
+```
 
 
 # 长期记忆

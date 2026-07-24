@@ -5,34 +5,10 @@
 #include <iostream>
 #include <mutex>
 
-struct JsonData
-{
-	// 发送者身份
-	uint64_t user_id = 0;
-	std::string nickname; // QQ 昵称
-	std::string card;	  // 群名片
-
-	// 消息归属
-	uint64_t group_id = 0;
-	std::string message_type; // "group" / "private"
-	std::string post_type;	  // "message" / "notice" / "request"
-
-	// 消息内容
-	std::string raw_message;	  // 原始消息（含 CQ 码，日志/调试用）
-	std::string plain_text;		  // 纯文本（从 message[] 提取，业务用）
-	std::string message_data_url; // 图片 URL（从 message[] 中 type=="image" 提取）
-
-	// 消息元数据
-	int64_t message_id = 0;
-	int64_t message_timestamp = 0;
-};
-
 class JsonParse
 {
 public:
 	static JsonParse &getInstance();
-
-	JsonData jsonReader(std::string &json_str); // json数据解析
 
 	std::string getAttributeFromChoices(std::string &json_str, std::string Attribute_type);
 

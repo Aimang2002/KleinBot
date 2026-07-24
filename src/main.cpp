@@ -6,15 +6,19 @@
 #include <csignal>
 #include "JsonParse/JsonParse.h"
 #include "ConfigManager/ConfigManager.h"
-#include "Network/Network.h"
 #include "Message/Message.h"
 #include "Log/Log.h"
-#include "MessageQueue.h"
+#include "MessageQueue/InboundMessageQueue.h"
 #include "src/Network/MyReverseWebSocket.h"
 #include "src/Network/MyWebSocket.h"
+#include "Network/OneBotHttpTransport.h"
+#include "Network/TransportConfig.h"
 #include "TimingTast/TimingTast.h"
-#include "MessageSender/QQMessageSender.h"
+#include "MessageSender/QueuedMessageSender.h"
+#include "MessageQueue/OutboundMessageQueue.h"
 #include "Port/OutboundMessage.h"
+#include "Protocol/OneBot/OneBotMessageEncoder.h"
+#include "Protocol/OneBot/OneBotEventDecoder.h"
 #include "ChatService/ChatService.h"
 #include "Tool/ToolRegistry.h"
 #include "Tool/GetTimeTool.h"
@@ -112,12 +116,11 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender, const st
 }
 
 // 子线程
-void workingThread(Message &messageClass, std::string originalJsonData)
+void workingThread(Message &messageClass, InboundMessage data)
 {
-	JsonData data = JsonParse::getInstance().jsonReader(originalJsonData);
-
 	// UTF-8 下 1 汉字 ≈ 3 字节；OpenAI 分词器以汉字数计 token，这里按 3 倍粗略放宽上限
-	if (originalJsonData.size() > (stoi(ConfigManager::getInstance().configVariable("MODEL_SIGLE_TOKEN_MAX")) * 3))
+	if (data.payload_size_bytes >
+		(static_cast<std::size_t>(stoi(ConfigManager::getInstance().configVariable("MODEL_SIGLE_TOKEN_MAX"))) * 3))
 	{
 		if (data.message_type == "group" && !messageClass.messageFilter(data.message_type, data.raw_message))
 		{
@@ -138,8 +141,7 @@ void workingThread(Message &messageClass, std::string originalJsonData)
 
 void resourceCleanup(std::atomic<bool> &running, ThreadPool &messageWorkers,
 					 MemoryService &memoryService,
-					 std::thread &timingThread, std::thread &forwardWebSocketThread,
-					 std::thread &reverseWebSocketThread)
+					 std::thread &timingThread, std::thread &transportThread)
 {
 	running.store(false);
 	LOG_INFO("正在等待消息线程池排空...");
@@ -154,15 +156,10 @@ void resourceCleanup(std::atomic<bool> &running, ThreadPool &messageWorkers,
 		LOG_INFO("正在等待定时任务线程退出...");
 		timingThread.join();
 	}
-	if (forwardWebSocketThread.joinable())
+	if (transportThread.joinable())
 	{
-		LOG_INFO("正在等待正向WebSocket线程退出...");
-		forwardWebSocketThread.join();
-	}
-	if (reverseWebSocketThread.joinable())
-	{
-		LOG_INFO("正在等待反向WebSocket线程退出...");
-		reverseWebSocketThread.join();
+		LOG_INFO("正在等待通信线程退出...");
+		transportThread.join();
 	}
 	LOG_INFO("资源回收完成，Klein 已安全退出");
 }
@@ -210,6 +207,18 @@ int main()
 	std::atomic<bool> running{true};
 
 	init();
+	TransportConfig transportConfig;
+	try
+	{
+		transportConfig = TransportConfig::fromConfigManager();
+	}
+	catch (const std::exception &error)
+	{
+		LOG_FATAL("通信配置无效：" + std::string(error.what()));
+		Log::getInstance().shutdown();
+		return -1;
+	}
+	LOG_INFO("当前通信模式：" + transportModeName(transportConfig.mode));
 	ModelRegistry models;
 	std::string dbPath = ConfigManager::getInstance().configVariableOpt(
 		"CONVERSATION_DB_PATH", "source/conversations.db");
@@ -244,22 +253,47 @@ int main()
 	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
 	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
 	ChatService chatService(dock, userSession, models, tools, memoryService);
-	QQMessageSender qqSender;
-	Message messageClass(models, dock, userSession, chatService, qqSender, imageAssetStore,
+	InboundMessageQueue inboundQueue;
+	OutboundMessageQueue outboundQueue;
+	QueuedMessageSender messageSender(outboundQueue);
+	OneBotEventDecoder oneBotEventDecoder;
+	OneBotMessageEncoder oneBotMessageEncoder(
+		ConfigManager::getInstance().configVariable("PRIVATE_API"),
+		ConfigManager::getInstance().configVariable("GROUP_API"));
+	Message messageClass(models, dock, userSession, chatService, messageSender, imageAssetStore,
 		globalVoice, accessibilityChat, getCurrentModelAction, voiceModeAction,
 		adminControlAction);
 	ThreadPool messageWorkers(messageWorkerCount());
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(qqSender), std::cref(running));
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::cref(running));
 
-	// 正向WebSocket连接
-	std::thread forwardWebSocketThread(MyWebSocket::connectWebSocket, "/", std::cref(running));
-
-	sleepWhileRunning(running, std::chrono::seconds(1));
-	LOG_INFO("3秒后连接反向WebSocket...");
-	sleepWhileRunning(running, std::chrono::seconds(3));
-
-	// 反向WebSocket连接
-	std::thread reverseWebSocketThread(MyReverseWebSocket::connectReverseWebSocket, std::cref(running));
+	std::thread transportThread;
+	switch (transportConfig.mode)
+	{
+	case TransportMode::ForwardWebSocket:
+		transportThread = std::thread(
+			MyWebSocket::connectWebSocket,
+			std::cref(transportConfig.forwardWebSocket),
+			std::ref(inboundQueue), std::ref(outboundQueue),
+			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
+			std::cref(running));
+		break;
+	case TransportMode::ReverseWebSocket:
+		transportThread = std::thread(
+			MyReverseWebSocket::connectReverseWebSocket,
+			std::cref(transportConfig.reverseWebSocket),
+			std::ref(inboundQueue), std::ref(outboundQueue),
+			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
+			std::cref(running));
+		break;
+	case TransportMode::Http:
+		transportThread = std::thread(
+			OneBotHttpTransport::run,
+			std::cref(transportConfig),
+			std::ref(inboundQueue), std::ref(outboundQueue),
+			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
+			std::cref(running));
+		break;
+	}
 
 	while (running.load())
 	{
@@ -270,7 +304,7 @@ int main()
 			break;
 		}
 
-		if (auto msg = MessageQueue::original_try_pop())
+		if (auto msg = inboundQueue.tryPop())
 		{
 			messageWorkers.submit([&messageClass, message = std::move(*msg)]() mutable {
 				try
@@ -290,7 +324,7 @@ int main()
 	}
 
 	resourceCleanup(running, messageWorkers, memoryService, timingThread,
-					forwardWebSocketThread, reverseWebSocketThread);
+					transportThread);
 	Log::getInstance().shutdown();
 
 	return 0;

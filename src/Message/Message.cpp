@@ -92,7 +92,7 @@ Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSess
 	this->userSession.ensureUserExists(manager_qq);
 }
 
-Message::Intent Message::classify(const JsonData &data)
+Message::Intent Message::classify(const InboundMessage &data)
 {
 	if (data.post_type != "message") // 明确为心跳包
 	{
@@ -101,7 +101,7 @@ Message::Intent Message::classify(const JsonData &data)
 	return Intent::Chat; // 正常聊天
 }
 
-void Message::handleMessage(const JsonData &current_data)
+void Message::handleMessage(const InboundMessage &current_data)
 {
 	Intent intent = classify(current_data);
 
@@ -182,7 +182,7 @@ void Message::handleMessage(const JsonData &current_data)
 	}
 }
 
-void Message::dispatch(const JsonData &data, const OutboundMessage &msg)
+void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 {
 	if (data.message_type == "group")
 	{
@@ -194,7 +194,7 @@ void Message::dispatch(const JsonData &data, const OutboundMessage &msg)
 	}
 }
 
-void Message::dispatchText(const JsonData &data, const std::string &text)
+void Message::dispatchText(const InboundMessage &data, const std::string &text)
 {
 	// 群消息上限 5000 字节，私聊 4096 字符。本函数按 UTF-8 字符切分以避免截断到半个汉字
 	const bool is_group = (data.message_type == "group");
@@ -246,7 +246,7 @@ void Message::dispatchText(const JsonData &data, const std::string &text)
 	}
 }
 
-void Message::sendError(const JsonData &current_data, const std::string &text)
+void Message::sendError(const InboundMessage &current_data, const std::string &text)
 {
 	dispatch(current_data, TextMessage{text});
 }

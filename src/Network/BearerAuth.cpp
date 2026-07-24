@@ -1,4 +1,4 @@
-#include "WebSocketAuth.h"
+#include "BearerAuth.h"
 
 #include <cctype>
 #include <cstddef>
@@ -38,12 +38,12 @@ bool constantTimeEqual(std::string_view presentedToken, std::string_view expecte
 }
 }
 
-std::string WebSocketAuth::buildAuthorizationValue(const std::string &token)
+std::string BearerAuth::buildAuthorizationValue(const std::string &token)
 {
     return "Bearer " + token;
 }
 
-bool WebSocketAuth::isAuthorized(std::string_view authorizationValue, std::string_view expectedToken)
+bool BearerAuth::isAuthorized(std::string_view authorizationValue, std::string_view expectedToken)
 {
     if (expectedToken.empty())
     {

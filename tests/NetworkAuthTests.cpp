@@ -1,36 +1,36 @@
 #include <gtest/gtest.h>
 
-#include "Network/WebSocketAuth.h"
+#include "Network/BearerAuth.h"
 
-TEST(WebSocketAuthTest, BuildsBearerAuthorizationValue)
+TEST(BearerAuthTest, BuildsBearerAuthorizationValue)
 {
-    EXPECT_EQ(WebSocketAuth::buildAuthorizationValue("secret-token"), "Bearer secret-token");
+    EXPECT_EQ(BearerAuth::buildAuthorizationValue("secret-token"), "Bearer secret-token");
 }
 
-TEST(WebSocketAuthTest, AllowsConnectionsWhenTokenIsNotConfigured)
+TEST(BearerAuthTest, AllowsConnectionsWhenTokenIsNotConfigured)
 {
-    EXPECT_TRUE(WebSocketAuth::isAuthorized("", ""));
-    EXPECT_TRUE(WebSocketAuth::isAuthorized("Bearer any-token", ""));
+    EXPECT_TRUE(BearerAuth::isAuthorized("", ""));
+    EXPECT_TRUE(BearerAuth::isAuthorized("Bearer any-token", ""));
 }
 
-TEST(WebSocketAuthTest, AcceptsCorrectBearerToken)
+TEST(BearerAuthTest, AcceptsCorrectBearerToken)
 {
-    EXPECT_TRUE(WebSocketAuth::isAuthorized("Bearer secret-token", "secret-token"));
-    EXPECT_TRUE(WebSocketAuth::isAuthorized("bearer secret-token", "secret-token"));
+    EXPECT_TRUE(BearerAuth::isAuthorized("Bearer secret-token", "secret-token"));
+    EXPECT_TRUE(BearerAuth::isAuthorized("bearer secret-token", "secret-token"));
 }
 
-TEST(WebSocketAuthTest, RejectsMissingOrIncorrectBearerToken)
+TEST(BearerAuthTest, RejectsMissingOrIncorrectBearerToken)
 {
-    EXPECT_FALSE(WebSocketAuth::isAuthorized("", "secret-token"));
-    EXPECT_FALSE(WebSocketAuth::isAuthorized("Basic secret-token", "secret-token"));
-    EXPECT_FALSE(WebSocketAuth::isAuthorized("Bearer wrong-token", "secret-token"));
-    EXPECT_FALSE(WebSocketAuth::isAuthorized("Bearer secret-token-extra", "secret-token"));
+    EXPECT_FALSE(BearerAuth::isAuthorized("", "secret-token"));
+    EXPECT_FALSE(BearerAuth::isAuthorized("Basic secret-token", "secret-token"));
+    EXPECT_FALSE(BearerAuth::isAuthorized("Bearer wrong-token", "secret-token"));
+    EXPECT_FALSE(BearerAuth::isAuthorized("Bearer secret-token-extra", "secret-token"));
 }
 
-TEST(WebSocketAuthTest, RejectsTokensWithLargeLengthDifference)
+TEST(BearerAuthTest, RejectsTokensWithLargeLengthDifference)
 {
     const std::string expectedToken(300, 'a');
     const std::string presentedToken = expectedToken + std::string(256, 'b');
 
-    EXPECT_FALSE(WebSocketAuth::isAuthorized("Bearer " + presentedToken, expectedToken));
+    EXPECT_FALSE(BearerAuth::isAuthorized("Bearer " + presentedToken, expectedToken));
 }

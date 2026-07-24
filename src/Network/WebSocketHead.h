@@ -13,7 +13,6 @@
 #endif
 #include "../ConfigManager/ConfigManager.h"
 #include "../Log/Log.h"
-#include "../MessageQueue/MessageQueue.h"
 
 namespace beast = boost::beast;         // from <boost/beast.hpp>
 namespace websocket = beast::websocket; // from <boost/beast/websocket.hpp>

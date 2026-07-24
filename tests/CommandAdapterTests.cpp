@@ -36,7 +36,7 @@ public:
     ActionContext lastContext;
 };
 
-CommandContext makeContext(JsonData &data, uint64_t userId)
+CommandContext makeContext(InboundMessage &data, uint64_t userId)
 {
     data.user_id = userId;
     data.group_id = 100;
@@ -54,7 +54,7 @@ TEST(QueryModelCommandTest, MapsExplicitCommandToAction)
 {
     RecordingAction action;
     QueryModelCommand command(action);
-    JsonData data;
+    InboundMessage data;
     data.plain_text = "#查询当前模型";
     auto context = makeContext(data, 123);
 
@@ -72,7 +72,7 @@ TEST(VoiceSwitchCommandTest, MapsEnableAndDisableArguments)
 {
     RecordingAction action;
     VoiceSwitchCommand command(action);
-    JsonData data;
+    InboundMessage data;
     auto context = makeContext(data, 321);
 
     data.plain_text = "#开启语音";
@@ -88,7 +88,7 @@ TEST(AdminCommandTest, PreservesAdminRequirementAndMapsOperation)
 {
     RecordingAction action(true);
     AdminCommand command(action);
-    JsonData data;
+    InboundMessage data;
     data.plain_text = "#刷新配置文件";
     auto context = makeContext(data, 999);
 

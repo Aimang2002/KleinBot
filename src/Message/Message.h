@@ -9,6 +9,7 @@
 #include "../UserSession/UserSessionService.h"
 #include "../ModelRegistry/ModelRegistry.h"
 #include "../Port/MessageSenderPort.h"
+#include "../Port/InboundMessage.h"
 #include "../Port/OutboundMessage.h"
 #include "../ChatService/ChatService.h"
 #include "../Asset/ImageAssetStore.h"
@@ -39,10 +40,10 @@ public:
 	bool messageFilter(std::string message_type, std::string message);
 
 	// 处理一条入站消息：分类 → 命令 / Vision / 普通对话，结果直接经由 sender 发出
-	void handleMessage(const JsonData &current_data);
+	void handleMessage(const InboundMessage &current_data);
 
 	// 错误消息分发：直接构造 TextMessage 发回去（替代 main.cpp 旧的 isErrorTransfer 分支）
-	void sendError(const JsonData &current_data, const std::string &text);
+	void sendError(const InboundMessage &current_data, const std::string &text);
 
 	~Message();
 
@@ -55,7 +56,7 @@ private:
 		Vision,
 		SystemEvent
 	};
-	Intent classify(const JsonData &data);
+	Intent classify(const InboundMessage &data);
 
 	/**
 	 * @brief 调用视觉模型对图片进行分析
@@ -90,10 +91,10 @@ private:
 	std::string textToVoice(const std::string &text);
 
 	// 把 OutboundMessage 按 message_type 路由到 send_private / send_group
-	void dispatch(const JsonData &data, const OutboundMessage &msg);
+	void dispatch(const InboundMessage &data, const OutboundMessage &msg);
 
 	// 文本超长自动分段发送（utf-8 安全切分）
-	void dispatchText(const JsonData &data, const std::string &text);
+	void dispatchText(const InboundMessage &data, const std::string &text);
 	// 在下面添加新的函数用于拓展其他内容...
 
 private:
