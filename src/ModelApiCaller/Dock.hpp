@@ -9,7 +9,7 @@
 #include "../Port/ImageResponse.h"
 #include "../Port/LLMPort.h"
 #include "../Log/Log.h"
-#include "../Configuration/AppConfig.h"
+#include "DockOptions.h"
 #include <string>
 #include <memory>
 #include <unordered_map>
@@ -18,7 +18,7 @@ class Dock
 {
 public:
     // 构造函数
-    explicit Dock(const NetworkConfig &network)
+    explicit Dock(const DockOptions &network)
     {
         this->registryLLM.emplace("OpenAI", std::make_unique<OpenAIStandard>(network.proxy));
         this->registryLLM.emplace("Anthropic", std::make_unique<AnthropicStandard>(network.proxy));

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
 
 #include <filesystem>
@@ -49,9 +50,10 @@ TEST(ConfigLoaderTest, DecodesTypedConfigurationAndDefaults)
     ASSERT_NE(result.config, nullptr);
     EXPECT_EQ(result.config->bot.id, 10001U);
     EXPECT_EQ(result.config->chat.workerThreads, 4U);
-    EXPECT_EQ(result.config->transport.mode, TransportMode::ReverseWebSocket);
-    EXPECT_EQ(result.config->transport.reverseWebSocket.bindPort, 8600);
-    EXPECT_EQ(result.config->transport.connectTimeoutMs, 5000);
+    const RuntimeSettings runtime = buildRuntimeSettings(*result.config);
+    EXPECT_EQ(runtime.transport.mode, TransportMode::ReverseWebSocket);
+    EXPECT_EQ(runtime.transport.reverseWebSocket.bindPort, 8600);
+    EXPECT_EQ(runtime.transport.connectTimeoutMs, 5000);
 }
 
 TEST(ConfigLoaderTest, UsesSafeDefaultsForInvalidOptionalFields)
@@ -66,7 +68,7 @@ TEST(ConfigLoaderTest, UsesSafeDefaultsForInvalidOptionalFields)
     EXPECT_TRUE(result.canStart());
     ASSERT_NE(result.config, nullptr);
     EXPECT_EQ(result.config->chat.workerThreads, 4U);
-    EXPECT_FALSE(result.config->features.accessibilityChat);
+    EXPECT_FALSE(result.config->accessibilityChat);
     EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "chat.worker_threads"));
     EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "features.accessibility_chat"));
 }

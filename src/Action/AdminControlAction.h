@@ -42,7 +42,7 @@ public:
         if (action == "refresh_config")
         {
             refresh();
-            return {"配置文件已刷新。", {}, {}, true};
+            return {"模型注册表已刷新；应用配置未热更新。", {}, {}, true};
         }
         if (action == "activate_global_voice")
         {

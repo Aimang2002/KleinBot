@@ -1,7 +1,7 @@
 #ifndef CONFIG_LOADER_H
 #define CONFIG_LOADER_H
 
-#include "AppConfig.h"
+#include "SchemaConfig.h"
 #include "ConfigDiagnostic.h"
 #include "../../Library/nlohmann/json.hpp"
 
@@ -11,7 +11,7 @@
 
 struct ConfigLoadResult
 {
-    std::shared_ptr<const AppConfig> config;
+    std::shared_ptr<const SchemaConfig> config;
     std::vector<ConfigDiagnostic> diagnostics;
 
     bool canStart() const;

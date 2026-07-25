@@ -6,7 +6,7 @@
 
 
 MemoryService::MemoryService(const std::string &dbPath, ConversationStore &conversationStore,
-                             Dock &dock, const ModelRegistry &models, const MemoryConfig &config)
+                             Dock &dock, const ModelRegistry &models, const MemoryOptions &config)
     : store(dbPath), conversationStore(conversationStore), extractor(dock, models, config.model)
 {
     enabled = config.enabled && store.isOpen();

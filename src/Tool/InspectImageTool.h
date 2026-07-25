@@ -3,13 +3,13 @@
 
 #include "Tool.h"
 #include "ImageToolHelpers.h"
-#include "../Configuration/AppConfig.h"
+#include "../ModelApiCaller/ModelEndpointOptions.h"
 #include "../ModelApiCaller/Dock.hpp"
 
 class InspectImageTool : public Tool
 {
 public:
-    InspectImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointConfig model)
+    InspectImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model)
         : dock(dock), assetStore(assetStore), model(std::move(model)) {}
 
     std::string name() const override { return "inspect_image"; }
@@ -57,7 +57,7 @@ public:
 private:
     Dock &dock;
     ImageAssetStore &assetStore;
-    ModelEndpointConfig model;
+    ModelEndpointOptions model;
 };
 
 #endif // INSPECT_IMAGE_TOOL_H

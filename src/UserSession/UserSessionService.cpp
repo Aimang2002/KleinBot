@@ -6,8 +6,8 @@
 #include "../Asset/ImageAssetStore.h"
 
 UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store,
-                                       const BotConfig &bot, const ChatConfig &chat)
-    : registry(mr), botConfig(bot), chatConfig(chat),
+                                       const BotIdentity &bot, const ChatOptions &chat)
+    : registry(mr), botIdentity(bot), chatOptions(chat),
       default_personality("You are my assistant, your name is " + bot.name),
       user_messages(std::make_unique<std::unordered_map<uint64_t, Person>>()),
       store(store)
@@ -30,11 +30,11 @@ Person UserSessionService::createDefaultPerson(const uint64_t user_id)
 {
     Person person;
     person.system_prompt = this->default_personality;
-    person.current_model = chatConfig.defaultModel;
+    person.current_model = chatOptions.defaultModel;
     person.isOpenVoiceMode = false;
-    person.temperature = chatConfig.temperature;
-    person.frequency_penalty = chatConfig.frequencyPenalty;
-    person.presence_penalty = chatConfig.presencePenalty;
+    person.temperature = chatOptions.temperature;
+    person.frequency_penalty = chatOptions.frequencyPenalty;
+    person.presence_penalty = chatOptions.presencePenalty;
 
     return person;
 }
@@ -201,7 +201,7 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     //   2. 若剩余条数超过 MAX_TURNS，只保留末尾若干条
     // 注意：本函数只读，不回写 user_chatHistory，原始历史保持完整
     const time_t now = std::time(nullptr);
-    const time_t survival = chatConfig.messageSurvivalSeconds;
+    const time_t survival = chatOptions.messageSurvivalSeconds;
     const size_t MAX_TURNS = 20;
 
     std::vector<ChatMessage> filtered;

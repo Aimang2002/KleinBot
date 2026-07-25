@@ -2,7 +2,7 @@
 #include "../../Library/nlohmann/json.hpp"
 #include <filesystem>
 
-Voice::Voice(VoiceConfig config) : config(std::move(config)) {}
+Voice::Voice(VoiceOptions config) : config(std::move(config)) {}
 
 // 回调函数，用于处理HTTP响应数据
 size_t so_VIST_WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)

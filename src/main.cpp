@@ -5,6 +5,7 @@
 #include <atomic>
 #include <csignal>
 #include "JsonParse/JsonParse.h"
+#include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
 #include "Message/Message.h"
 #include "Log/Log.h"
@@ -26,10 +27,22 @@
 #include "Action/GetCurrentModelAction.h"
 #include "Action/VoiceModeAction.h"
 #include "Action/AdminControlAction.h"
+#include "Command/AdminCommand.h"
+#include "Command/GeneratePictureCommand.h"
+#include "Command/HelpCommand.h"
+#include "Command/ModelListCommand.h"
+#include "Command/QueryModelCommand.h"
+#include "Command/RemoveContextCommand.h"
+#include "Command/ResetChatCommand.h"
+#include "Command/SearchSongsCommand.h"
+#include "Command/SetSoulCommand.h"
+#include "Command/SwitchModelCommand.h"
+#include "Command/VoiceSwitchCommand.h"
 #include "Tool/RecallConversationTool.h"
 #include "Tool/GenerateImageTool.h"
 #include "Tool/InspectImageTool.h"
 #include "Tool/SendImageTool.h"
+#include "ModelApiCaller/Voice/Voice.h"
 #include "Persistence/ConversationStore.h"
 #include "Asset/ImageAssetStore.h"
 #include "Memory/MemoryService.h"
@@ -159,7 +172,7 @@ void resourceCleanup(std::atomic<bool> &running, ThreadPool &messageWorkers,
 	LOG_INFO("资源回收完成，Klein 已安全退出");
 }
 
-void init(const AppConfig &config)
+void init(int schemaVersion)
 {
 
 #if defined(__WIN32) || defined(__WIN64)
@@ -181,7 +194,7 @@ void init(const AppConfig &config)
 			  << "\033[0m" << std::endl; // 显示logo
 
 	LOG_INFO("当前Klein版本：" + std::string(__KLEIN_VERSION__));
-	LOG_INFO("当前配置Schema版本：" + std::to_string(config.schemaVersion));
+	LOG_INFO("当前配置Schema版本：" + std::to_string(schemaVersion));
 }
 
 int main(int argc, char **argv)
@@ -215,28 +228,31 @@ int main(int argc, char **argv)
 		Log::getInstance().shutdown();
 		return -1;
 	}
-	const std::shared_ptr<const AppConfig> config = loadResult.config;
+	const std::shared_ptr<const SchemaConfig> schema = loadResult.config;
 	if (checkConfigOnly)
 	{
 		LOG_INFO("配置校验通过：" + configPath);
 		Log::getInstance().shutdown();
 		return 0;
 	}
-	init(*config);
-	const TransportConfig &transportConfig = config->transport;
+	const RuntimeSettings settings = buildRuntimeSettings(*schema);
+	init(settings.schemaVersion);
+	const TransportConfig &transportConfig = settings.transport;
 	LOG_INFO("当前通信模式：" + transportModeName(transportConfig.mode));
-	ModelRegistry models(config->models.registryPath);
-	const std::string &dbPath = config->storage.conversationDatabase;
+	ModelRegistry models(settings.models.registryPath);
+	const std::string &dbPath = settings.storage.conversationDatabase;
 	ConversationStore conversationStore(dbPath);
-	ImageAssetStore imageAssetStore(dbPath, config->storage.imageAssets);
-	UserSessionService userSession(models, conversationStore, config->bot, config->chat);
-	Dock dock(config->network);
-	MemoryService memoryService(dbPath, conversationStore, dock, models, config->memory);
+	ImageAssetStore imageAssetStore(dbPath, settings.storage.imageAssets);
+	UserSessionService userSession(models, conversationStore, settings.bot, settings.chat);
+	Dock dock(settings.dock);
+	MemoryService memoryService(dbPath, conversationStore, dock, models, settings.memory);
 	userSession.setMemoryService(&memoryService);
 	userSession.setImageAssetStore(&imageAssetStore);
+	if (settings.bot.managerId != 0)
+		userSession.ensureUserExists(settings.bot.managerId);
 	ToolRegistry tools;
-	bool globalVoice = config->voice.enabled;
-	bool accessibilityChat = config->features.accessibilityChat;
+	bool globalVoice = settings.voice.enabled;
+	bool accessibilityChat = schema->accessibilityChat;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
 		{ return userSession.getModelName(userId); });
@@ -249,24 +265,36 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<GetTimeTool>());
 	tools.registerTool(std::make_unique<ActionTool>(getCurrentModelAction));
 	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
-	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore, config->models.drawing));
-	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore, config->models.vision));
+	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore, settings.models.drawing));
+	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore, settings.models.vision));
 	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore));
 	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
 	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
-	ChatService chatService(dock, userSession, models, tools, memoryService, config->chat, config->bot.managerId);
+	ChatService chatService(dock, userSession, models, tools, memoryService, settings.chat, settings.bot.managerId);
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;
 	QueuedMessageSender messageSender(outboundQueue);
 	OneBotEventDecoder oneBotEventDecoder;
 	OneBotMessageEncoder oneBotMessageEncoder(
-		config->chat.privateAction, config->chat.groupAction);
-	Message messageClass(models, dock, userSession, chatService, messageSender, imageAssetStore,
-		config->bot, config->resources, config->voice, config->models,
-		globalVoice, accessibilityChat, getCurrentModelAction, voiceModeAction,
-		adminControlAction);
-	ThreadPool messageWorkers(config->chat.workerThreads);
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), config->bot.managerId, std::cref(running));
+		settings.chat.privateAction, settings.chat.groupAction);
+	Voice voice(settings.voice);
+	CommandRegistry commandRegistry(settings.bot.managerId);
+	commandRegistry.registryCommand(std::make_unique<HelpCommand>(settings.resources.helpFile));
+	commandRegistry.registryCommand(std::make_unique<ModelListCommand>(models));
+	commandRegistry.registryCommand(std::make_unique<SearchSongsCommand>());
+	commandRegistry.registryCommand(std::make_unique<QueryModelCommand>(getCurrentModelAction));
+	commandRegistry.registryCommand(std::make_unique<GeneratePictureCommand>(dock, settings.models.drawing));
+	commandRegistry.registryCommand(std::make_unique<ResetChatCommand>(userSession));
+	commandRegistry.registryCommand(std::make_unique<SetSoulCommand>(userSession));
+	commandRegistry.registryCommand(std::make_unique<SwitchModelCommand>(userSession, models));
+	commandRegistry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));
+	commandRegistry.registryCommand(std::make_unique<RemoveContextCommand>(userSession));
+	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
+	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
+		commandRegistry, voice, settings.message, settings.models.vision,
+		globalVoice, accessibilityChat);
+	ThreadPool messageWorkers(settings.chat.workerThreads);
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)
@@ -308,10 +336,11 @@ int main(int argc, char **argv)
 
 		if (auto msg = inboundQueue.tryPop())
 		{
-			messageWorkers.submit([&messageClass, config, message = std::move(*msg)]() mutable {
+			messageWorkers.submit([&messageClass, maxMessageTokens = settings.chat.maxMessageTokens,
+				message = std::move(*msg)]() mutable {
 				try
 				{
-					workingThread(messageClass, std::move(message), config->chat.maxMessageTokens);
+					workingThread(messageClass, std::move(message), maxMessageTokens);
 				}
 				catch (const std::exception &e)
 				{

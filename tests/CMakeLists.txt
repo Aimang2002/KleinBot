@@ -31,6 +31,12 @@ if(Python3_Interpreter_FOUND)
             ${CMAKE_CURRENT_SOURCE_DIR}/transport_contract_test.py
             --driver $<TARGET_FILE:transport_contract_driver>
     )
+    add_test(
+        NAME ArchitectureDependencyPython
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/architecture_dependency_test.py
+            --source-root ${PROJECT_SOURCE_DIR}/src
+    )
 else()
-    message(WARNING "Python3 not found; transport contract test will not be registered")
+    message(WARNING "Python3 not found; Python contract tests will not be registered")
 endif()

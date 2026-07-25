@@ -4,7 +4,7 @@
 #include "../ModelApiCaller/Dock.hpp"
 #include "../UserSession/UserSessionService.h"
 #include "../ModelRegistry/ModelRegistry.h"
-#include "../Configuration/AppConfig.h"
+#include "ChatOptions.h"
 #include "../Tool/ToolRegistry.h"
 #include "../Port/OutboundMessage.h"
 #include <string>
@@ -24,7 +24,7 @@ class ChatService
 public:
     ChatService(Dock &dock, UserSessionService &USS, const ModelRegistry &models,
                 const ToolRegistry &tools, MemoryService &memoryService,
-                const ChatConfig &chatConfig, uint64_t managerId)
+                const ChatOptions &chatConfig, uint64_t managerId)
         : dock(dock), userSession(USS), models(models), tools(tools), memoryService(memoryService),
           chatConfig(chatConfig), managerId(managerId) {}
     ChatReply reply(uint64_t user_id, const std::string &text, bool use_context);
@@ -36,7 +36,7 @@ private:
     const ModelRegistry &models;
     const ToolRegistry &tools;
     MemoryService &memoryService;
-    ChatConfig chatConfig;
+    ChatOptions chatConfig;
     uint64_t managerId;
 
     static constexpr int max_tool_rounds = 5; // 防工具调用死循环

@@ -1,13 +1,11 @@
-#ifndef APP_CONFIG_H
-#define APP_CONFIG_H
-
-#include "../Network/TransportConfig.h"
+#ifndef SCHEMA_CONFIG_H
+#define SCHEMA_CONFIG_H
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 
-struct BotConfig
+struct BotSchema
 {
     std::uint64_t id = 0;
     std::uint64_t managerId = 0;
@@ -15,7 +13,7 @@ struct BotConfig
     bool groupChatEnabled = true;
 };
 
-struct ChatConfig
+struct ChatSchema
 {
     std::string defaultModel;
     double temperature = 1.0;
@@ -29,7 +27,7 @@ struct ChatConfig
     std::string groupAction = "send_group_msg";
 };
 
-struct ModelEndpointConfig
+struct ModelEndpointSchema
 {
     std::string model;
     std::string endpoint;
@@ -42,16 +40,16 @@ struct ModelEndpointConfig
     }
 };
 
-struct ModelConfig
+struct ModelSchema
 {
     std::string registryPath;
-    ModelEndpointConfig drawing;
-    ModelEndpointConfig vision;
+    ModelEndpointSchema drawing;
+    ModelEndpointSchema vision;
     std::string stableDiffusionEndpoint;
     std::string stableDiffusionModel;
 };
 
-struct VoiceConfig
+struct VoiceSchema
 {
     bool enabled = false;
     std::string host;
@@ -61,12 +59,7 @@ struct VoiceConfig
     std::string referenceText;
 };
 
-struct FeatureConfig
-{
-    bool accessibilityChat = false;
-};
-
-struct MemoryConfig
+struct MemorySchema
 {
     bool enabled = true;
     std::string model;
@@ -75,37 +68,57 @@ struct MemoryConfig
     std::size_t recallLimit = 8;
 };
 
-struct StorageConfig
+struct StorageSchema
 {
     std::string conversationDatabase = "source/conversations.db";
     std::string imageAssets = "source/image_assets";
 };
 
-struct ResourceConfig
+struct ResourceSchema
 {
     std::string personalityDirectory;
     std::string helpFile;
     std::string imageDownloadDirectory;
 };
 
-struct NetworkConfig
+struct TransportProfileSchema
 {
-    std::string proxy;
+    std::string type;
+    std::string host;
+    unsigned short port = 0;
+    std::string path = "/";
+    std::string accessToken;
+    std::string apiBaseUrl;
+    std::string apiAccessToken;
+    std::string eventBindHost = "127.0.0.1";
+    unsigned short eventBindPort = 0;
+    std::string eventPath = "/onebot/events";
+    std::string eventAccessToken;
 };
 
-struct AppConfig
+struct CommunicationSchema
+{
+    std::string protocolType;
+    std::string activeTransport;
+    TransportProfileSchema activeProfile;
+    long connectTimeoutMs = 5000;
+    long requestTimeoutMs = 15000;
+    std::size_t maxBodyBytes = 1048576;
+};
+
+struct SchemaConfig
 {
     int schemaVersion = 1;
-    BotConfig bot;
-    ChatConfig chat;
-    ModelConfig models;
-    VoiceConfig voice;
-    FeatureConfig features;
-    MemoryConfig memory;
-    StorageConfig storage;
-    ResourceConfig resources;
-    NetworkConfig network;
-    TransportConfig transport;
+    BotSchema bot;
+    ChatSchema chat;
+    ModelSchema models;
+    VoiceSchema voice;
+    bool accessibilityChat = false;
+    MemorySchema memory;
+    StorageSchema storage;
+    ResourceSchema resources;
+    std::string proxy;
+    CommunicationSchema communication;
 };
 
 #endif

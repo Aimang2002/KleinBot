@@ -3,14 +3,14 @@
 
 #include "Tool.h"
 #include "../Asset/ImageAssetStore.h"
-#include "../Configuration/AppConfig.h"
+#include "../ModelApiCaller/ModelEndpointOptions.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../../Library/nlohmann/json.hpp"
 
 class GenerateImageTool : public Tool
 {
 public:
-    GenerateImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointConfig model)
+    GenerateImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model)
         : dock(dock), assetStore(assetStore), model(std::move(model)) {}
 
     std::string name() const override { return "generate_image"; }
@@ -60,7 +60,7 @@ public:
 private:
     Dock &dock;
     ImageAssetStore &assetStore;
-    ModelEndpointConfig model;
+    ModelEndpointOptions model;
 };
 
 #endif // GENERATE_IMAGE_TOOL_H

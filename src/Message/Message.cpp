@@ -2,18 +2,7 @@
 #include "../ModelApiCaller/Realesrgan/Realesrgan.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../submodules/CloudMusicID/CloudMusicID.h"
-#include "../Command/HelpCommand.h"
-#include "../Command/ModelListCommand.h"
 #include "../utils/Utils.hpp"
-#include "../Command/SearchSongsCommand.h"
-#include "../Command/QueryModelCommand.h"
-#include "../Command/GeneratePictureCommand.h"
-#include "../Command/ResetChatCommand.h"
-#include "../Command/SetSoulCommand.h"
-#include "../Command/SwitchModelCommand.h"
-#include "../Command/VoiceSwitchCommand.h"
-#include "../Command/RemoveContextCommand.h"
-#include "../Command/AdminCommand.h"
 #include "../Asset/ImageAssetStore.h"
 #include "Message.h"
 #include <iomanip>
@@ -22,77 +11,16 @@
 
 std::mt19937 mt_rand(1000);
 
-Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
-				 ChatService &chatService, MessageSenderPort &sender,
-				 ImageAssetStore &imageAssetStore, const BotConfig &botConfig,
-                 const ResourceConfig &resourceConfig, const VoiceConfig &voiceConfig,
-                 const ModelConfig &modelConfig, bool &globalVoice,
-				 bool &accessibilityChat, Action &queryModelAction,
-				 Action &voiceModeAction, Action &adminControlAction)
-	: models(models), dock(dock), userSession(userSession), chatService(chatService),
-	  sender(sender), imageAssetStore(imageAssetStore), global_Voice(globalVoice),
-	  accessibility_chat(accessibilityChat), registry(botConfig.managerId), botConfig(botConfig),
-      resourceConfig(resourceConfig), modelConfig(modelConfig)
+Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
+                 MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
+                 CommandRegistry &registry, Voice &voice, MessageOptions options,
+                 ModelEndpointOptions visionModel, bool &globalVoice,
+                 bool &accessibilityChat)
+    : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
+      imageAssetStore(imageAssetStore), registry(registry), voice(voice),
+      options(std::move(options)), visionModel(std::move(visionModel)),
+      global_Voice(globalVoice), accessibility_chat(accessibilityChat)
 {
-	// 服务器状态类初始化
-#ifdef DEBUG
-	LOG_DEBUG("服务器状态初始化...");
-#endif
-	this->voice = std::make_unique<Voice>(voiceConfig);
-
-	// 内置成员属性初始化
-
-	// 注册所有命令事件
-	this->registry.registryCommand(std::make_unique<HelpCommand>(resourceConfig.helpFile));
-	this->registry.registryCommand(std::make_unique<ModelListCommand>(this->models));
-	this->registry.registryCommand(std::make_unique<SearchSongsCommand>());
-	this->registry.registryCommand(std::make_unique<QueryModelCommand>(queryModelAction));
-	this->registry.registryCommand(std::make_unique<GeneratePictureCommand>(this->dock, modelConfig.drawing));
-	this->registry.registryCommand(std::make_unique<ResetChatCommand>(this->userSession));
-	this->registry.registryCommand(std::make_unique<SetSoulCommand>(this->userSession));
-	this->registry.registryCommand(std::make_unique<SwitchModelCommand>(this->userSession, this->models));
-	this->registry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));
-	this->registry.registryCommand(std::make_unique<RemoveContextCommand>(this->userSession));
-	this->registry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
-
-	srand((unsigned int)time(NULL));
-
-	// 轻量型人格初始化
-#ifdef DEBUG
-	LOG_DEBUG("轻量型人格初始化...");
-#endif
-	std::string path = resourceConfig.personalityDirectory + "personality.txt";
-	std::ifstream ifs(path);
-	if (!ifs.is_open())
-	{
-		perror("轻量型人格初始化失败");
-		LOG_FATAL("失败！");
-	}
-	else
-	{
-		std::string line;
-		while (!ifs.eof())
-		{
-			std::getline(ifs, line);
-			size_t pos = line.find("|");
-			if (pos != line.npos)
-			{
-				std::string key = line.substr(0, pos);
-				std::string value = line.substr(pos + 1);
-				this->LightweightPersonalityList.push_back(make_pair(key, value));
-			}
-			else
-			{
-				perror("中断读取，原始数据有误！");
-				break;
-			}
-		}
-		ifs.close();
-	}
-
-	// 初始化管理员
-	if (botConfig.managerId != 0)
-        this->userSession.ensureUserExists(botConfig.managerId);
 }
 
 Message::Intent Message::classify(const InboundMessage &data)
@@ -147,7 +75,7 @@ void Message::handleMessage(const InboundMessage &current_data)
 			}
 		}
 
-		const bool useContext = this->accessibility_chat || current_data.user_id == botConfig.managerId;
+		const bool useContext = this->accessibility_chat || current_data.user_id == options.bot.managerId;
 		ChatReply chatReply = this->chatService.reply(current_data.user_id, conversationText, useContext);
 		if (!inboundAssetId.empty())
 			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
@@ -264,12 +192,12 @@ bool Message::messageFilter(std::string message_type, std::string message)
 
 	if (!strcmp(message_type.c_str(), "group"))
 	{
-		if (!botConfig.groupChatEnabled)
+		if (!options.groupChatEnabled)
 		{
 			return false; // 群消息是否开启
 		}
 
-		if (message.find("CQ:at") == message.npos || message.find(std::to_string(botConfig.id)) == message.npos)
+		if (message.find("CQ:at") == message.npos || message.find(std::to_string(options.bot.id)) == message.npos)
 		{
 			return false; // 过滤非AT消息
 		}
@@ -403,10 +331,10 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 
 
 	ChatModel model;
-	model.endpoint = modelConfig.vision.endpoint;
-	model.api_key = modelConfig.vision.apiKey;
-	model.api_standard = modelConfig.vision.apiStandard;
-	const std::string &modelName = modelConfig.vision.model;
+	model.endpoint = visionModel.endpoint;
+	model.api_key = visionModel.apiKey;
+	model.api_standard = visionModel.apiStandard;
+	const std::string &modelName = visionModel.model;
 
 	auto response = this->dock.RequestVision(model, modelName, conversation, base64);
 	std::string answer = response.content;
@@ -445,7 +373,7 @@ size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
 }
 std::string Message::textToVoice(const std::string &text)
 {
-	std::string audioPath = this->voice->toAudio(text);
+	std::string audioPath = this->voice.toAudio(text);
 	if (audioPath.find(".wav") == std::string::npos)
 	{
 		LOG_ERROR("TTS 失败：" + audioPath);

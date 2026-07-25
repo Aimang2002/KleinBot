@@ -7,14 +7,14 @@
 #include "../ComputerStatus/ComputerStatus.h"
 #include "../Command/CommandRegistry.h"
 #include "../UserSession/UserSessionService.h"
-#include "../ModelRegistry/ModelRegistry.h"
 #include "../Port/MessageSenderPort.h"
 #include "../Port/InboundMessage.h"
 #include "../Port/OutboundMessage.h"
 #include "../ChatService/ChatService.h"
 #include "../Asset/ImageAssetStore.h"
 #include "../Action/Action.h"
-#include "../Configuration/AppConfig.h"
+#include "MessageOptions.h"
+#include "../ModelApiCaller/ModelEndpointOptions.h"
 #include <iostream>
 #include <random>
 #include <memory>
@@ -25,13 +25,11 @@ class Message
 {
 public:
 	// MessageSenderPort 由 main.cpp 装配并注入，Message 自身不负责生命周期
-	explicit Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
-				 ChatService &chatService, MessageSenderPort &sender,
-				 ImageAssetStore &imageAssetStore, const BotConfig &botConfig,
-                 const ResourceConfig &resourceConfig, const VoiceConfig &voiceConfig,
-                 const ModelConfig &modelConfig, bool &globalVoice,
-				 bool &accessibilityChat, Action &queryModelAction,
-				 Action &voiceModeAction, Action &adminControlAction);
+	explicit Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
+                     MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
+                     CommandRegistry &registry, Voice &voice, MessageOptions options,
+                     ModelEndpointOptions visionModel, bool &globalVoice,
+                     bool &accessibilityChat);
 
 	/**
 	 * @brief 消息过滤，对某些消息进行过滤
@@ -105,19 +103,16 @@ private:
 
 	bool &accessibility_chat;													 // true为开启
 	bool &global_Voice;															 // true为开启
-	std::vector<std::pair<std::string, std::string>> LightweightPersonalityList; // 轻量型人格
-	std::unique_ptr<Voice> voice;												 // 语音识别模块
 
-	ModelRegistry &models;
 	Dock &dock;
 	UserSessionService &userSession;
 	ChatService &chatService;
 	MessageSenderPort &sender;
 	ImageAssetStore &imageAssetStore;
-	CommandRegistry registry;
-    BotConfig botConfig;
-    ResourceConfig resourceConfig;
-    ModelConfig modelConfig;
+	CommandRegistry &registry;
+    Voice &voice;
+    MessageOptions options;
+    ModelEndpointOptions visionModel;
 };
 
 #endif // MESSAGE_H

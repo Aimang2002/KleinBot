@@ -5,13 +5,13 @@
 #include <fstream>
 #include <curl/curl.h>
 #include <chrono>
-#include "../../Configuration/AppConfig.h"
+#include "VoiceOptions.h"
 #include "../../Log/Log.h"
 
 class Voice
 {
 public:
-    explicit Voice(VoiceConfig config);
+    explicit Voice(VoiceOptions config);
     /**
      * @brief 修复图片
      *
@@ -31,7 +31,7 @@ public:
     ~Voice();
 
 private:
-    VoiceConfig config;
+    VoiceOptions config;
 };
 
 #endif

@@ -222,10 +222,10 @@ std::string normalizedPath(Decoder &decoder, const std::string &path, const std:
     return value;
 }
 
-ModelEndpointConfig decodeModelEndpoint(Decoder &decoder, const json &parent,
+ModelEndpointSchema decodeModelEndpoint(Decoder &decoder, const json &parent,
                                         const std::string &key, const std::string &path)
 {
-    ModelEndpointConfig result;
+    ModelEndpointSchema result;
     const json *object = decoder.object(parent, key, path);
     if (object == nullptr)
         return result;
@@ -250,9 +250,9 @@ ModelEndpointConfig decodeModelEndpoint(Decoder &decoder, const json &parent,
     return result;
 }
 
-TransportConfig decodeTransport(Decoder &decoder, const json &communication)
+CommunicationSchema decodeCommunication(Decoder &decoder, const json &communication)
 {
-    TransportConfig result;
+    CommunicationSchema result;
     decoder.unknownFields(communication,
                           {"protocol", "active_transport", "transports", "defaults"},
                           "communication");
@@ -261,29 +261,33 @@ TransportConfig decodeTransport(Decoder &decoder, const json &communication)
     if (protocol != nullptr)
     {
         decoder.unknownFields(*protocol, {"type", "options"}, "communication.protocol");
-        const std::string type = decoder.string(*protocol, "type", "communication.protocol.type", {}, true);
-        if (!type.empty() && type != "onebot")
+        result.protocolType = decoder.string(
+            *protocol, "type", "communication.protocol.type", {}, true);
+        if (!result.protocolType.empty() && result.protocolType != "onebot")
             decoder.diagnostic(ConfigSeverity::Fatal, ConfigErrorCategory::Dependency,
                                "communication.protocol.type", "当前版本仅支持 onebot");
     }
 
-    const std::string active = decoder.string(
+    result.activeTransport = decoder.string(
         communication, "active_transport", "communication.active_transport", {}, true);
     const json *transports = decoder.object(
         communication, "transports", "communication.transports", true);
-    if (transports == nullptr || active.empty())
+    if (transports == nullptr || result.activeTransport.empty())
         return result;
-    auto profileIterator = transports->find(active);
+
+    auto profileIterator = transports->find(result.activeTransport);
     if (profileIterator == transports->end() || !profileIterator->is_object())
     {
         decoder.diagnostic(ConfigSeverity::Fatal, ConfigErrorCategory::Missing,
-                           "communication.transports." + active, "活动传输配置不存在或不是对象");
+                           "communication.transports." + result.activeTransport,
+                           "活动传输配置不存在或不是对象");
         return result;
     }
 
     const json &profile = *profileIterator;
-    const std::string profilePath = "communication.transports." + active;
-    const std::string type = decoder.string(profile, "type", profilePath + ".type", {}, true);
+    const std::string profilePath = "communication.transports." + result.activeTransport;
+    TransportProfileSchema &output = result.activeProfile;
+    output.type = decoder.string(profile, "type", profilePath + ".type", {}, true);
 
     const json *defaults = decoder.object(communication, "defaults", "communication.defaults");
     const json empty = json::object();
@@ -292,66 +296,67 @@ TransportConfig decodeTransport(Decoder &decoder, const json &communication)
         decoder.unknownFields(*defaults,
                               {"connect_timeout_ms", "request_timeout_ms", "max_event_body_bytes"},
                               "communication.defaults");
-    result.connectTimeoutMs = decoder.integer(defaultValues, "connect_timeout_ms",
-                                               "communication.defaults.connect_timeout_ms",
-                                               5000, 1, 300000);
-    result.requestTimeoutMs = decoder.integer(defaultValues, "request_timeout_ms",
-                                               "communication.defaults.request_timeout_ms",
-                                               15000, 1, 300000);
+    result.connectTimeoutMs = decoder.integer(
+        defaultValues, "connect_timeout_ms", "communication.defaults.connect_timeout_ms",
+        5000, 1, 300000);
+    result.requestTimeoutMs = decoder.integer(
+        defaultValues, "request_timeout_ms", "communication.defaults.request_timeout_ms",
+        15000, 1, 300000);
     result.maxBodyBytes = static_cast<std::size_t>(decoder.integer(
         defaultValues, "max_event_body_bytes", "communication.defaults.max_event_body_bytes",
         1048576, 1024, std::numeric_limits<int>::max()));
 
-    if (type == "forward_websocket")
+    if (output.type == "forward_websocket")
     {
-        result.mode = TransportMode::ForwardWebSocket;
         decoder.unknownFields(profile, {"type", "host", "port", "path", "access_token"}, profilePath);
-        result.forwardWebSocket.host = decoder.string(profile, "host", profilePath + ".host", {}, true);
-        result.forwardWebSocket.port = std::to_string(decoder.integer(
+        output.host = decoder.string(profile, "host", profilePath + ".host", {}, true);
+        output.port = static_cast<unsigned short>(decoder.integer(
             profile, "port", profilePath + ".port", 0, 1, 65535, true));
-        result.forwardWebSocket.path = normalizedPath(
+        output.path = normalizedPath(
             decoder, profilePath + ".path",
             decoder.string(profile, "path", profilePath + ".path", "/"));
-        result.forwardWebSocket.authToken = decoder.secret(profile, "access_token", profilePath + ".access_token");
+        output.accessToken = decoder.secret(profile, "access_token", profilePath + ".access_token");
     }
-    else if (type == "reverse_websocket")
+    else if (output.type == "reverse_websocket")
     {
-        result.mode = TransportMode::ReverseWebSocket;
         decoder.unknownFields(profile, {"type", "bind", "port", "path", "access_token"}, profilePath);
-        result.reverseWebSocket.bindHost = decoder.string(
-            profile, "bind", profilePath + ".bind", "127.0.0.1");
-        result.reverseWebSocket.bindPort = static_cast<unsigned short>(decoder.integer(
+        output.host = decoder.string(profile, "bind", profilePath + ".bind", "127.0.0.1");
+        output.port = static_cast<unsigned short>(decoder.integer(
             profile, "port", profilePath + ".port", 0, 1, 65535, true));
-        result.reverseWebSocket.path = normalizedPath(
+        output.path = normalizedPath(
             decoder, profilePath + ".path",
             decoder.string(profile, "path", profilePath + ".path", "/"));
-        result.reverseWebSocket.authToken = decoder.secret(profile, "access_token", profilePath + ".access_token");
+        output.accessToken = decoder.secret(profile, "access_token", profilePath + ".access_token");
     }
-    else if (type == "http")
+    else if (output.type == "http")
     {
-        result.mode = TransportMode::Http;
         decoder.unknownFields(profile, {"type", "api", "events"}, profilePath);
         const json *api = decoder.object(profile, "api", profilePath + ".api", true);
         const json *events = decoder.object(profile, "events", profilePath + ".events", true);
         if (api != nullptr)
         {
             decoder.unknownFields(*api, {"base_url", "access_token"}, profilePath + ".api");
-            result.http.apiBaseUrl = decoder.string(*api, "base_url", profilePath + ".api.base_url", {}, true);
-            result.http.apiAuthToken = decoder.secret(*api, "access_token", profilePath + ".api.access_token");
+            output.apiBaseUrl = decoder.string(
+                *api, "base_url", profilePath + ".api.base_url", {}, true);
+            output.apiAccessToken = decoder.secret(
+                *api, "access_token", profilePath + ".api.access_token");
         }
         if (events != nullptr)
         {
-            decoder.unknownFields(*events, {"bind", "port", "path", "access_token"}, profilePath + ".events");
-            result.http.eventBindHost = decoder.string(*events, "bind", profilePath + ".events.bind", "127.0.0.1");
-            result.http.eventBindPort = static_cast<unsigned short>(decoder.integer(
+            decoder.unknownFields(*events, {"bind", "port", "path", "access_token"},
+                                  profilePath + ".events");
+            output.eventBindHost = decoder.string(
+                *events, "bind", profilePath + ".events.bind", "127.0.0.1");
+            output.eventBindPort = static_cast<unsigned short>(decoder.integer(
                 *events, "port", profilePath + ".events.port", 0, 1, 65535, true));
-            result.http.eventPath = normalizedPath(
+            output.eventPath = normalizedPath(
                 decoder, profilePath + ".events.path",
                 decoder.string(*events, "path", profilePath + ".events.path", "/onebot/events"));
-            result.http.eventAuthToken = decoder.secret(*events, "access_token", profilePath + ".events.access_token");
+            output.eventAccessToken = decoder.secret(
+                *events, "access_token", profilePath + ".events.access_token");
         }
     }
-    else if (!type.empty())
+    else if (!output.type.empty())
     {
         decoder.diagnostic(ConfigSeverity::Fatal, ConfigErrorCategory::Dependency,
                            profilePath + ".type", "未知传输类型");
@@ -423,7 +428,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
                            "memory", "storage", "resources", "network", "communication"},
                           "$" );
 
-    AppConfig config;
+    SchemaConfig config;
     config.schemaVersion = static_cast<int>(decoder.integer(
         document, "schema_version", "schema_version", 1, 1, 1, true));
 
@@ -498,7 +503,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     if (features != nullptr)
     {
         decoder.unknownFields(*features, {"accessibility_chat"}, "features");
-        config.features.accessibilityChat = decoder.boolean(
+        config.accessibilityChat = decoder.boolean(
             *features, "accessibility_chat", "features.accessibility_chat", false);
     }
 
@@ -538,13 +543,13 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     if (network != nullptr)
     {
         decoder.unknownFields(*network, {"proxy"}, "network");
-        config.network.proxy = decoder.string(*network, "proxy", "network.proxy");
+        config.proxy = decoder.string(*network, "proxy", "network.proxy");
     }
 
     const json *communication = decoder.object(document, "communication", "communication", true);
     if (communication != nullptr)
-        config.transport = decodeTransport(decoder, *communication);
+        config.communication = decodeCommunication(decoder, *communication);
 
-    result.config = std::make_shared<const AppConfig>(std::move(config));
+    result.config = std::make_shared<const SchemaConfig>(std::move(config));
     return result;
 }
