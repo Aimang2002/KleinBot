@@ -9,7 +9,7 @@ class AdminControlAction : public Action
 {
 public:
     AdminControlAction(ComputerStatus &computerStatus, bool &accessibilityChat,
-                       bool &globalVoice, std::function<void()> refresh)
+                       bool &globalVoice, std::function<std::string()> refresh)
         : computerStatus(computerStatus), accessibilityChat(accessibilityChat),
           globalVoice(globalVoice), refresh(std::move(refresh)) {}
 
@@ -40,10 +40,7 @@ public:
             return {"无障碍聊天已关闭！", {}, {}, true};
         }
         if (action == "refresh_config")
-        {
-            refresh();
-            return {"模型注册表已刷新；应用配置未热更新。", {}, {}, true};
-        }
+            return {refresh(), {}, {}, true};
         if (action == "activate_global_voice")
         {
             globalVoice = true;
@@ -67,7 +64,7 @@ private:
     ComputerStatus &computerStatus;
     bool &accessibilityChat;
     bool &globalVoice;
-    std::function<void()> refresh;
+    std::function<std::string()> refresh;
 };
 
 #endif // ADMIN_CONTROL_ACTION_H

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <csignal>
 #include "JsonParse/JsonParse.h"
+#include "Bootstrap/ConfigSnapshotStore.h"
 #include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
 #include "Message/Message.h"
@@ -60,9 +61,9 @@ void signalHandler(int signal)
 }
 
 
-void logConfigDiagnostics(const ConfigLoadResult &result)
+void logConfigDiagnostics(const std::vector<ConfigDiagnostic> &diagnostics)
 {
-	for (const ConfigDiagnostic &diagnostic : result.diagnostics)
+	for (const ConfigDiagnostic &diagnostic : diagnostics)
 	{
 		const std::string message = configSeverityName(diagnostic.severity) + ": " +
 			diagnostic.path + " - " + diagnostic.message;
@@ -73,6 +74,23 @@ void logConfigDiagnostics(const ConfigLoadResult &result)
 		else
 			LOG_INFO(message);
 	}
+}
+
+std::string summarizeReload(const ConfigReloadResult &result)
+{
+	if (!result.success)
+		return "配置刷新失败，继续使用当前内存快照。";
+	if (result.diff.empty())
+		return "配置校验通过，内存快照无变化。";
+
+	return "配置内存快照已更新：" + std::to_string(result.diff.size()) +
+		" 项变化（动态 " +
+		std::to_string(result.diff.count(ConfigChangeImpact::Dynamic)) +
+		"、需重建 " +
+		std::to_string(result.diff.count(ConfigChangeImpact::Rebuild)) +
+		"、需重启 " +
+		std::to_string(result.diff.count(ConfigChangeImpact::Restart)) +
+		"）。当前运行模块尚未重新应用这些参数。";
 }
 
 bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::milliseconds duration)
@@ -221,7 +239,7 @@ int main(int argc, char **argv)
 
 	ConfigLoader configLoader;
 	ConfigLoadResult loadResult = configLoader.loadFile(configPath);
-	logConfigDiagnostics(loadResult);
+	logConfigDiagnostics(loadResult.diagnostics);
 	if (!loadResult.canStart())
 	{
 		LOG_FATAL("配置加载失败，程序无法安全启动");
@@ -235,7 +253,9 @@ int main(int argc, char **argv)
 		Log::getInstance().shutdown();
 		return 0;
 	}
-	const RuntimeSettings settings = buildRuntimeSettings(*schema);
+	ConfigSnapshotStore configStore(configPath, schema);
+	const std::shared_ptr<const ConfigSnapshot> startupSnapshot = configStore.current();
+	const RuntimeSettings &settings = startupSnapshot->runtime;
 	init(settings.schemaVersion);
 	const TransportConfig &transportConfig = settings.transport;
 	LOG_INFO("当前通信模式：" + transportModeName(transportConfig.mode));
@@ -252,15 +272,22 @@ int main(int argc, char **argv)
 		userSession.ensureUserExists(settings.bot.managerId);
 	ToolRegistry tools;
 	bool globalVoice = settings.voice.enabled;
-	bool accessibilityChat = schema->accessibilityChat;
+	bool accessibilityChat = startupSnapshot->schema->accessibilityChat;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
 		{ return userSession.getModelName(userId); });
 	VoiceModeAction voiceModeAction(userSession, globalVoice);
 	AdminControlAction adminControlAction(adminComputerStatus, accessibilityChat,
-		globalVoice, [&models]()
+		globalVoice, [&configStore]()
 		{
-			models.reload();
+			ConfigReloadResult result = configStore.reload();
+			logConfigDiagnostics(result.diagnostics);
+			for (const ConfigChange &change : result.diff.changes())
+			{
+				LOG_INFO("配置变化：" + change.path + " [" +
+					configChangeImpactName(change.impact) + "]");
+			}
+			return summarizeReload(result);
 		});
 	tools.registerTool(std::make_unique<GetTimeTool>());
 	tools.registerTool(std::make_unique<ActionTool>(getCurrentModelAction));
