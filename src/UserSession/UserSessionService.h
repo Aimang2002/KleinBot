@@ -9,6 +9,7 @@
 #include "../Message/Person.hpp"
 #include "../ModelRegistry/ModelRegistry.h"
 #include "../ModelRegistry/ChatModel.h"
+#include "../Configuration/AppConfig.h"
 #include "../Port/ChatRequest.h"
 
 class ConversationStore;
@@ -25,7 +26,7 @@ struct ChatCallBundle
 class UserSessionService
 {
 public:
-    UserSessionService(const ModelRegistry &mr, ConversationStore &store);
+    UserSessionService(const ModelRegistry &mr, ConversationStore &store, const BotConfig &bot, const ChatConfig &chat);
     void setMemoryService(MemoryService *service);
     void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
@@ -52,6 +53,8 @@ private:
     void ensureUserExistsUnlock(const uint64_t user_id);
     Person createDefaultPerson(const uint64_t user_id);
     const ModelRegistry &registry;
+    BotConfig botConfig;
+    ChatConfig chatConfig;
     ConversationStore &store;
     MemoryService *memoryService = nullptr;
     ImageAssetStore *imageAssetStore = nullptr;

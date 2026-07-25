@@ -3,15 +3,15 @@
 
 #include "Tool.h"
 #include "../Asset/ImageAssetStore.h"
-#include "../ConfigManager/ConfigManager.h"
+#include "../Configuration/AppConfig.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../../Library/nlohmann/json.hpp"
 
 class GenerateImageTool : public Tool
 {
 public:
-    GenerateImageTool(Dock &dock, ImageAssetStore &assetStore)
-        : dock(dock), assetStore(assetStore) {}
+    GenerateImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointConfig model)
+        : dock(dock), assetStore(assetStore), model(std::move(model)) {}
 
     std::string name() const override { return "generate_image"; }
 
@@ -34,12 +34,11 @@ public:
             if (prompt.empty())
                 return {"错误：图片提示词不能为空。", {}, {}};
 
-            ChatModel model;
-            model.endpoint = ConfigManager::getInstance().configVariable("DRAW_MODEL_ENDPOINT");
-            model.api_key = ConfigManager::getInstance().configVariable("DRAW_MODEL_API_KEY");
-            model.api_standard = ConfigManager::getInstance().configVariable("DRAW_MODEL_APISTANDARD");
-            const std::string modelName = ConfigManager::getInstance().configVariable("DRAW_MODEL");
-            const ImageResponse response = dock.RequestDraw(model, modelName, prompt);
+            ChatModel requestModel;
+            requestModel.endpoint = model.endpoint;
+            requestModel.api_key = model.apiKey;
+            requestModel.api_standard = model.apiStandard;
+            const ImageResponse response = dock.RequestDraw(requestModel, model.model, prompt);
             if (response.code >= 400 || response.image_base64.empty())
                 return {"错误：图片生成失败。", {}, {}};
 
@@ -61,6 +60,7 @@ public:
 private:
     Dock &dock;
     ImageAssetStore &assetStore;
+    ModelEndpointConfig model;
 };
 
 #endif // GENERATE_IMAGE_TOOL_H

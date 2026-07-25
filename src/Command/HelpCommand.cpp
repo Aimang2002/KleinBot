@@ -1,10 +1,8 @@
 #include "HelpCommand.h"
-#include "ConfigManager/ConfigManager.h"
 #include <fstream>
 
 CommandResult HelpCommand::execute(const CommandContext &ctx)
 {
-    std::string helpPath = ConfigManager::getInstance().configVariable("HELP_PATH");
     std::ifstream ifs(helpPath);
     if (!ifs.is_open())
     {

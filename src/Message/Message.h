@@ -14,6 +14,7 @@
 #include "../ChatService/ChatService.h"
 #include "../Asset/ImageAssetStore.h"
 #include "../Action/Action.h"
+#include "../Configuration/AppConfig.h"
 #include <iostream>
 #include <random>
 #include <memory>
@@ -26,7 +27,9 @@ public:
 	// MessageSenderPort 由 main.cpp 装配并注入，Message 自身不负责生命周期
 	explicit Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
 				 ChatService &chatService, MessageSenderPort &sender,
-				 ImageAssetStore &imageAssetStore, bool &globalVoice,
+				 ImageAssetStore &imageAssetStore, const BotConfig &botConfig,
+                 const ResourceConfig &resourceConfig, const VoiceConfig &voiceConfig,
+                 const ModelConfig &modelConfig, bool &globalVoice,
 				 bool &accessibilityChat, Action &queryModelAction,
 				 Action &voiceModeAction, Action &adminControlAction);
 
@@ -112,6 +115,9 @@ private:
 	MessageSenderPort &sender;
 	ImageAssetStore &imageAssetStore;
 	CommandRegistry registry;
+    BotConfig botConfig;
+    ResourceConfig resourceConfig;
+    ModelConfig modelConfig;
 };
 
 #endif // MESSAGE_H

@@ -1,45 +1,18 @@
 #include "MemoryService.h"
-#include "../ConfigManager/ConfigManager.h"
 #include "../Log/Log.h"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
 
-namespace
-{
-bool configBool(const std::string &name, bool defaultValue)
-{
-    std::string value = ConfigManager::getInstance().configVariableOpt(
-        name, defaultValue ? "true" : "false");
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
-    return value == "true" || value == "1" || value == "yes" || value == "on";
-}
-
-std::size_t configSize(const std::string &name, std::size_t defaultValue)
-{
-    try
-    {
-        const long long value = std::stoll(
-            ConfigManager::getInstance().configVariableOpt(name, std::to_string(defaultValue)));
-        return value > 0 ? static_cast<std::size_t>(value) : defaultValue;
-    }
-    catch (const std::exception &)
-    {
-        return defaultValue;
-    }
-}
-}
 
 MemoryService::MemoryService(const std::string &dbPath, ConversationStore &conversationStore,
-                             Dock &dock, const ModelRegistry &models)
-    : store(dbPath), conversationStore(conversationStore), extractor(dock, models)
+                             Dock &dock, const ModelRegistry &models, const MemoryConfig &config)
+    : store(dbPath), conversationStore(conversationStore), extractor(dock, models, config.model)
 {
-    enabled = configBool("MEMORY_ENABLED", true) && store.isOpen();
-    batchTurns = configSize("MEMORY_BATCH_TURNS", 3);
-    recallLimit = configSize("MEMORY_RECALL_LIMIT", 8);
-    idleDelay = std::chrono::seconds(configSize("MEMORY_IDLE_SECONDS", 20));
+    enabled = config.enabled && store.isOpen();
+    batchTurns = config.batchTurns;
+    recallLimit = config.recallLimit;
+    idleDelay = std::chrono::seconds(config.idleSeconds);
     if (enabled)
     {
         worker = std::thread(&MemoryService::workerLoop, this);

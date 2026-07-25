@@ -11,7 +11,6 @@
 #include <boost/beast.hpp>
 #include <boost/asio.hpp>
 #endif
-#include "../ConfigManager/ConfigManager.h"
 #include "../Log/Log.h"
 
 namespace beast = boost::beast;         // from <boost/beast.hpp>

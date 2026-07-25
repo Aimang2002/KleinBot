@@ -13,6 +13,7 @@
 class OpenAIStandard : public LLMPort
 {
 public:
+    explicit OpenAIStandard(std::string proxy = {}) : proxy(std::move(proxy)) {}
     ChatResponse request_chat(const ChatModel &model, const std::string &model_name, const ChatRequest &request) override;
 
     VisionResponse request_vision(const ChatModel &model, const std::string &model_name, const std::string &prompt, const std::string &base64) override;
@@ -41,6 +42,7 @@ private:
     void VerifyCertificate(CURL *curl);
 
 private:
+    std::string proxy;
 };
 
 #endif // OPENAI_STANDARD_H

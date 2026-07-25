@@ -4,6 +4,7 @@
 #include "MemoryExtractor.h"
 #include "MemoryStore.h"
 #include "../Persistence/ConversationStore.h"
+#include "../Configuration/AppConfig.h"
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -17,7 +18,7 @@ class MemoryService
 {
 public:
     MemoryService(const std::string &dbPath, ConversationStore &conversationStore,
-                  Dock &dock, const ModelRegistry &models);
+                  Dock &dock, const ModelRegistry &models, const MemoryConfig &config);
     ~MemoryService();
 
     MemoryService(const MemoryService &) = delete;

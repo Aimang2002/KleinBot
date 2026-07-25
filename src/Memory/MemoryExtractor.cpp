@@ -1,5 +1,4 @@
 #include "MemoryExtractor.h"
-#include "../ConfigManager/ConfigManager.h"
 #include "../Log/Log.h"
 #include "../../Library/nlohmann/json.hpp"
 #include <algorithm>
@@ -27,8 +26,6 @@ std::vector<MemoryMutation> MemoryExtractor::extract(uint64_t user_id,
     if (turns.empty())
         return {};
 
-    const std::string modelName = ConfigManager::getInstance().configVariableOpt(
-        "MEMORY_MODEL", ConfigManager::getInstance().configVariable("DEFAULT_MODEL"));
     const ChatModel *model = models.find(modelName);
     if (model == nullptr)
     {

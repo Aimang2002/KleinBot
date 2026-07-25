@@ -3,7 +3,6 @@
 
 #include <cstddef>
 #include <string>
-#include <unordered_map>
 
 enum class TransportMode
 {
@@ -47,11 +46,8 @@ struct TransportConfig
     long connectTimeoutMs = 5000;
     long requestTimeoutMs = 15000;
     std::size_t maxBodyBytes = 1048576;
-
-    static TransportConfig fromConfigManager();
-    static TransportConfig fromValues(const std::unordered_map<std::string, std::string> &values);
 };
 
 std::string transportModeName(TransportMode mode);
 
-#endif // TRANSPORT_CONFIG_H
+#endif

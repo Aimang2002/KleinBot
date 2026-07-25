@@ -1,14 +1,14 @@
 #include "UserSessionService.h"
-#include "../ConfigManager/ConfigManager.h"
 #include "../JsonParse/JsonParse.h"
 #include "../Log/Log.h"
 #include "../Persistence/ConversationStore.h"
 #include "../Memory/MemoryService.h"
 #include "../Asset/ImageAssetStore.h"
 
-UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store)
-    : registry(mr),
-      default_personality("You are my assistant, your name is " + ConfigManager::getInstance().configVariable("QBOT_NAME")),
+UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store,
+                                       const BotConfig &bot, const ChatConfig &chat)
+    : registry(mr), botConfig(bot), chatConfig(chat),
+      default_personality("You are my assistant, your name is " + bot.name),
       user_messages(std::make_unique<std::unordered_map<uint64_t, Person>>()),
       store(store)
 {
@@ -30,11 +30,11 @@ Person UserSessionService::createDefaultPerson(const uint64_t user_id)
 {
     Person person;
     person.system_prompt = this->default_personality;
-    person.current_model = ConfigManager::getInstance().configVariable("DEFAULT_MODEL"); // 默认模型
+    person.current_model = chatConfig.defaultModel;
     person.isOpenVoiceMode = false;
-    person.temperature = std::stod(ConfigManager::getInstance().configVariable("temperature"));
-    person.frequency_penalty = std::stod(ConfigManager::getInstance().configVariable("frequency_penalty"));
-    person.presence_penalty = std::stod(ConfigManager::getInstance().configVariable("presence_penalty"));
+    person.temperature = chatConfig.temperature;
+    person.frequency_penalty = chatConfig.frequencyPenalty;
+    person.presence_penalty = chatConfig.presencePenalty;
 
     return person;
 }
@@ -201,8 +201,7 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     //   2. 若剩余条数超过 MAX_TURNS，只保留末尾若干条
     // 注意：本函数只读，不回写 user_chatHistory，原始历史保持完整
     const time_t now = std::time(nullptr);
-    const time_t survival = std::stoll(
-        ConfigManager::getInstance().configVariable("MESSAGE_SURVIVAL_TIME"));
+    const time_t survival = chatConfig.messageSurvivalSeconds;
     const size_t MAX_TURNS = 20;
 
     std::vector<ChatMessage> filtered;

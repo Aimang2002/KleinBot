@@ -1,89 +1,119 @@
 #include <gtest/gtest.h>
 
-#include "Network/TransportConfig.h"
-#include "Protocol/OneBot/OneBotEventDecoder.h"
+#include "Configuration/ConfigLoader.h"
 
-TEST(TransportConfigTest, ReadsLegacyWebSocketKeys)
+#include <filesystem>
+#include <fstream>
+
+namespace
 {
-    const auto config = TransportConfig::fromValues({
-        {"TRANSPORT_MODE", "forward_websocket"},
-        {"WEBSOCKET_MESSAGE_IP", "127.0.0.1"},
-        {"WEBSOCKET_MESSAGE_PORT", "9999"},
-        {"REVERSEWEBSOCKET_MESSAGE_IP", "127.0.0.1"},
-        {"REVERSEWEBSOCKET_MESSAGE_PORT", "8600"},
-        {"WEBSOCKET_AUTH_TOKEN", "secret"}
-    });
+const char *validConfig = R"({
+    "schema_version": 1,
+    "bot": {"id": 10001, "manager_id": 10002, "name": "Klein"},
+    "chat": {"default_model": "test-model"},
+    "models": {"registry_path": "ModelsName.json"},
+    "resources": {
+        "personality_directory": "source/personality/",
+        "help_file": "source/help.txt"
+    },
+    "communication": {
+        "protocol": {"type": "onebot"},
+        "active_transport": "local",
+        "transports": {
+            "local": {
+                "type": "reverse_websocket",
+                "bind": "127.0.0.1",
+                "port": 8600
+            }
+        }
+    }
+})";
 
-    EXPECT_EQ(config.mode, TransportMode::ForwardWebSocket);
-    EXPECT_EQ(config.forwardWebSocket.host, "127.0.0.1");
-    EXPECT_EQ(config.forwardWebSocket.port, "9999");
-    EXPECT_EQ(config.forwardWebSocket.path, "/");
-    EXPECT_EQ(config.forwardWebSocket.authToken, "secret");
-    EXPECT_EQ(config.reverseWebSocket.bindPort, 8600);
+bool hasDiagnostic(const ConfigLoadResult &result, ConfigSeverity severity, const std::string &path)
+{
+    for (const auto &diagnostic : result.diagnostics)
+    {
+        if (diagnostic.severity == severity && diagnostic.path == path)
+            return true;
+    }
+    return false;
+}
 }
 
-TEST(TransportConfigTest, ValidatesHttpModeAndDefaults)
+TEST(ConfigLoaderTest, DecodesTypedConfigurationAndDefaults)
 {
-    const auto config = TransportConfig::fromValues({
-        {"TRANSPORT_MODE", "http"},
-        {"HTTP_API_BASE_URL", "https://127.0.0.1:5700"},
-        {"HTTP_EVENT_BIND_PORT", "8080"}
-    });
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadText(validConfig);
 
-    EXPECT_EQ(config.mode, TransportMode::Http);
-    EXPECT_EQ(config.http.eventBindHost, "127.0.0.1");
-    EXPECT_EQ(config.http.eventPath, "/onebot/events");
-    EXPECT_EQ(config.connectTimeoutMs, 5000);
-    EXPECT_EQ(config.requestTimeoutMs, 15000);
-    EXPECT_EQ(config.maxBodyBytes, 1048576U);
+    ASSERT_TRUE(result.canStart());
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_EQ(result.config->bot.id, 10001U);
+    EXPECT_EQ(result.config->chat.workerThreads, 4U);
+    EXPECT_EQ(result.config->transport.mode, TransportMode::ReverseWebSocket);
+    EXPECT_EQ(result.config->transport.reverseWebSocket.bindPort, 8600);
+    EXPECT_EQ(result.config->transport.connectTimeoutMs, 5000);
 }
 
-TEST(TransportConfigTest, RejectsInvalidModeAndPath)
+TEST(ConfigLoaderTest, UsesSafeDefaultsForInvalidOptionalFields)
 {
-    EXPECT_THROW(TransportConfig::fromValues({
-        {"TRANSPORT_MODE", "hybrid"}
-    }), std::invalid_argument);
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["chat"]["worker_threads"] = "many";
+    document["features"] = {{"accessibility_chat", "yes"}};
 
-    EXPECT_THROW(TransportConfig::fromValues({
-        {"TRANSPORT_MODE", "forward_websocket"},
-        {"WS_EVENT_HOST", "127.0.0.1"},
-        {"WS_EVENT_PORT", "9999"},
-        {"WS_EVENT_PATH", "onebot"}
-    }), std::invalid_argument);
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    EXPECT_TRUE(result.canStart());
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_EQ(result.config->chat.workerThreads, 4U);
+    EXPECT_FALSE(result.config->features.accessibilityChat);
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "chat.worker_threads"));
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "features.accessibility_chat"));
 }
 
-TEST(OneBotEventDecoderTest, ProducesProtocolIndependentInboundMessage)
+TEST(ConfigLoaderTest, RejectsMissingActiveTransportButIgnoresUnknownFields)
 {
-    OneBotEventDecoder decoder;
-    const std::string payload = R"({
-        "post_type":"message",
-        "message_type":"group",
-        "user_id":42,
-        "group_id":88,
-        "message_id":123,
-        "time":456,
-        "raw_message":"hello[CQ:image]",
-        "sender":{"nickname":"nick","card":"card"},
-        "message":[
-            {"type":"text","data":{"text":"hello"}},
-            {"type":"image","data":{"url":"https://example.test/a.png"}}
-        ]
-    })";
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["future_extension"] = true;
+    document["communication"]["active_transport"] = "missing";
 
-    const auto message = decoder.decode(payload);
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
 
-    ASSERT_TRUE(message.has_value());
-    EXPECT_EQ(message->user_id, 42U);
-    EXPECT_EQ(message->group_id, 88U);
-    EXPECT_EQ(message->plain_text, "hello");
-    EXPECT_EQ(message->message_data_url, "https://example.test/a.png");
-    EXPECT_EQ(message->payload_size_bytes, payload.size());
+    EXPECT_FALSE(result.canStart());
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "$.future_extension"));
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Fatal,
+                              "communication.transports.missing"));
 }
 
-TEST(OneBotEventDecoderTest, IgnoresApiResponsesAndMetaEvents)
+TEST(ConfigLoaderTest, DisablesIncompleteOptionalVoiceFeature)
 {
-    OneBotEventDecoder decoder;
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["voice"] = {{"enabled", true}, {"host", "http://127.0.0.1"}};
 
-    EXPECT_FALSE(decoder.decode(R"({"status":"ok","retcode":0})").has_value());
-    EXPECT_FALSE(decoder.decode(R"({"post_type":"meta_event"})").has_value());
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    EXPECT_TRUE(result.canStart());
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_FALSE(result.config->voice.enabled);
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::FeatureDisabled, "voice"));
+}
+
+TEST(ConfigLoaderTest, MissingOptionalModelSecretDisablesFeatureWithoutBlockingStartup)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["models"]["drawing"] = {
+        {"model", "image-model"},
+        {"endpoint", "https://example.invalid"},
+        {"api_standard", "OpenAI"},
+        {"api_key", {{"from_env", "KLEINBOT_TEST_MISSING_SECRET"}}}
+    };
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    EXPECT_TRUE(result.canStart());
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::FeatureDisabled,
+                              "models.drawing.api_key"));
 }

@@ -5,7 +5,7 @@
 #include <atomic>
 #include <csignal>
 #include "JsonParse/JsonParse.h"
-#include "ConfigManager/ConfigManager.h"
+#include "Configuration/ConfigLoader.h"
 #include "Message/Message.h"
 #include "Log/Log.h"
 #include "MessageQueue/InboundMessageQueue.h"
@@ -46,6 +46,22 @@ void signalHandler(int signal)
 	receivedSignal = signal;
 }
 
+
+void logConfigDiagnostics(const ConfigLoadResult &result)
+{
+	for (const ConfigDiagnostic &diagnostic : result.diagnostics)
+	{
+		const std::string message = configSeverityName(diagnostic.severity) + ": " +
+			diagnostic.path + " - " + diagnostic.message;
+		if (diagnostic.severity == ConfigSeverity::Fatal || diagnostic.severity == ConfigSeverity::Error)
+			LOG_ERROR(message);
+		else if (diagnostic.severity == ConfigSeverity::Warning || diagnostic.severity == ConfigSeverity::FeatureDisabled)
+			LOG_WARNING(message);
+		else
+			LOG_INFO(message);
+	}
+}
+
 bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::milliseconds duration)
 {
 	const auto deadline = std::chrono::steady_clock::now() + duration;
@@ -56,31 +72,10 @@ bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::millisecon
 	return running.load();
 }
 
-std::size_t messageWorkerCount()
-{
-	std::string configured = ConfigManager::getInstance().configVariableOpt("MESSAGE_WORKER_THREADS");
-	if (!configured.empty())
-	{
-		try
-		{
-			const int value = std::stoi(configured);
-			if (value > 0)
-			{
-				return static_cast<std::size_t>(value);
-			}
-		}
-		catch (const std::exception &)
-		{
-			LOG_WARNING("MESSAGE_WORKER_THREADS 配置无效，将使用默认值");
-		}
-	}
-
-	return 4;
-}
 }
 
 // 子线程
-void pollingThread(ChatService &chatService, MessageSenderPort &sender, const std::atomic<bool> &running)
+void pollingThread(ChatService &chatService, MessageSenderPort &sender, uint64_t managerId, const std::atomic<bool> &running)
 {
 	std::string message;
 	uint64_t user_id;
@@ -90,10 +85,10 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender, const st
 	{
 		std::time_t now = std::time(nullptr);
 		std::tm *local_time = std::localtime(&now);
-		if (local_time->tm_hour == 8 && local_time->tm_min == 0 && local_time->tm_sec < 4)
+		if (managerId != 0 && local_time->tm_hour == 8 && local_time->tm_min == 0 && local_time->tm_sec < 4)
 		{
 			message = "早上好，请跟我打招呼的同时来一句元气满满的句子，让我一整天都有活力（直接说就好，不要在前面加上语气词例如“好的”）";
-			user_id = stoi(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
+			user_id = managerId;
 			LOG_INFO("每日早安即将发送，亲爱的管理员，早上好。");
 			tag = true;
 		}
@@ -116,11 +111,11 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender, const st
 }
 
 // 子线程
-void workingThread(Message &messageClass, InboundMessage data)
+void workingThread(Message &messageClass, InboundMessage data, std::size_t maxMessageTokens)
 {
 	// UTF-8 下 1 汉字 ≈ 3 字节；OpenAI 分词器以汉字数计 token，这里按 3 倍粗略放宽上限
 	if (data.payload_size_bytes >
-		(static_cast<std::size_t>(stoi(ConfigManager::getInstance().configVariable("MODEL_SIGLE_TOKEN_MAX"))) * 3))
+		(maxMessageTokens * 3))
 	{
 		if (data.message_type == "group" && !messageClass.messageFilter(data.message_type, data.raw_message))
 		{
@@ -164,7 +159,7 @@ void resourceCleanup(std::atomic<bool> &running, ThreadPool &messageWorkers,
 	LOG_INFO("资源回收完成，Klein 已安全退出");
 }
 
-void init()
+void init(const AppConfig &config)
 {
 
 #if defined(__WIN32) || defined(__WIN64)
@@ -185,55 +180,63 @@ void init()
 			  << Klein_logo << "\n"
 			  << "\033[0m" << std::endl; // 显示logo
 
-	// 版本
 	LOG_INFO("当前Klein版本：" + std::string(__KLEIN_VERSION__));
-	LOG_INFO("当前配置文件版本：" + ConfigManager::getInstance().configVariable("CONFIG_VERSION"));
-
-	// 配置文件版本检查
-	if (ConfigManager::getInstance().configVariable("CONFIG_VERSION") == __KLEIN_VERSION__)
-	{
-		LOG_INFO("配置文件符合版本。");
-	}
-	else
-	{
-		LOG_WARNING("配置文件不符合当前版本，程序可能会不稳定，建议使用适合版本的配置文件！");
-	}
+	LOG_INFO("当前配置Schema版本：" + std::to_string(config.schemaVersion));
 }
 
-int main()
+int main(int argc, char **argv)
 {
 	std::signal(SIGINT, signalHandler);
 	std::signal(SIGTERM, signalHandler);
 	std::atomic<bool> running{true};
 
-	init();
-	TransportConfig transportConfig;
-	try
+	std::string configPath = "config.json";
+	bool checkConfigOnly = false;
+	for (int index = 1; index < argc; ++index)
 	{
-		transportConfig = TransportConfig::fromConfigManager();
+		const std::string argument = argv[index];
+		if (argument == "--check-config")
+			checkConfigOnly = true;
+		else if (argument == "--config" && index + 1 < argc)
+			configPath = argv[++index];
+		else
+		{
+			std::cerr << "未知参数或缺少参数值：" << argument << std::endl;
+			return -1;
+		}
 	}
-	catch (const std::exception &error)
+
+	ConfigLoader configLoader;
+	ConfigLoadResult loadResult = configLoader.loadFile(configPath);
+	logConfigDiagnostics(loadResult);
+	if (!loadResult.canStart())
 	{
-		LOG_FATAL("通信配置无效：" + std::string(error.what()));
+		LOG_FATAL("配置加载失败，程序无法安全启动");
 		Log::getInstance().shutdown();
 		return -1;
 	}
+	const std::shared_ptr<const AppConfig> config = loadResult.config;
+	if (checkConfigOnly)
+	{
+		LOG_INFO("配置校验通过：" + configPath);
+		Log::getInstance().shutdown();
+		return 0;
+	}
+	init(*config);
+	const TransportConfig &transportConfig = config->transport;
 	LOG_INFO("当前通信模式：" + transportModeName(transportConfig.mode));
-	ModelRegistry models;
-	std::string dbPath = ConfigManager::getInstance().configVariableOpt(
-		"CONVERSATION_DB_PATH", "source/conversations.db");
+	ModelRegistry models(config->models.registryPath);
+	const std::string &dbPath = config->storage.conversationDatabase;
 	ConversationStore conversationStore(dbPath);
-	std::string imageAssetPath = ConfigManager::getInstance().configVariableOpt(
-		"IMAGE_ASSET_PATH", "source/image_assets");
-	ImageAssetStore imageAssetStore(dbPath, imageAssetPath);
-	UserSessionService userSession(models, conversationStore);
-	Dock dock;
-	MemoryService memoryService(dbPath, conversationStore, dock, models);
+	ImageAssetStore imageAssetStore(dbPath, config->storage.imageAssets);
+	UserSessionService userSession(models, conversationStore, config->bot, config->chat);
+	Dock dock(config->network);
+	MemoryService memoryService(dbPath, conversationStore, dock, models, config->memory);
 	userSession.setMemoryService(&memoryService);
 	userSession.setImageAssetStore(&imageAssetStore);
 	ToolRegistry tools;
-	bool globalVoice = ConfigManager::getInstance().configVariable("GLOBAL_VOICE") == "true";
-	bool accessibilityChat = ConfigManager::getInstance().configVariable("ACCESSIBLITY_CHAT") == "true";
+	bool globalVoice = config->voice.enabled;
+	bool accessibilityChat = config->features.accessibilityChat;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
 		{ return userSession.getModelName(userId); });
@@ -241,30 +244,29 @@ int main()
 	AdminControlAction adminControlAction(adminComputerStatus, accessibilityChat,
 		globalVoice, [&models]()
 		{
-			ConfigManager::getInstance().refreshConfiguation();
 			models.reload();
 		});
 	tools.registerTool(std::make_unique<GetTimeTool>());
 	tools.registerTool(std::make_unique<ActionTool>(getCurrentModelAction));
 	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
-	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore));
-	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore));
+	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore, config->models.drawing));
+	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore, config->models.vision));
 	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore));
 	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
 	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
-	ChatService chatService(dock, userSession, models, tools, memoryService);
+	ChatService chatService(dock, userSession, models, tools, memoryService, config->chat, config->bot.managerId);
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;
 	QueuedMessageSender messageSender(outboundQueue);
 	OneBotEventDecoder oneBotEventDecoder;
 	OneBotMessageEncoder oneBotMessageEncoder(
-		ConfigManager::getInstance().configVariable("PRIVATE_API"),
-		ConfigManager::getInstance().configVariable("GROUP_API"));
+		config->chat.privateAction, config->chat.groupAction);
 	Message messageClass(models, dock, userSession, chatService, messageSender, imageAssetStore,
+		config->bot, config->resources, config->voice, config->models,
 		globalVoice, accessibilityChat, getCurrentModelAction, voiceModeAction,
 		adminControlAction);
-	ThreadPool messageWorkers(messageWorkerCount());
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::cref(running));
+	ThreadPool messageWorkers(config->chat.workerThreads);
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), config->bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)
@@ -306,10 +308,10 @@ int main()
 
 		if (auto msg = inboundQueue.tryPop())
 		{
-			messageWorkers.submit([&messageClass, message = std::move(*msg)]() mutable {
+			messageWorkers.submit([&messageClass, config, message = std::move(*msg)]() mutable {
 				try
 				{
-					workingThread(messageClass, std::move(message));
+					workingThread(messageClass, std::move(message), config->chat.maxMessageTokens);
 				}
 				catch (const std::exception &e)
 				{

@@ -16,8 +16,6 @@ std::string StableDiffusion::connectStableDiffusion(const std::string prompt)
         {"prompt", revised_prompt + payload},
         {"steps", 35}};
 
-    // 获取端点
-    std::string endpint = ConfigManager::getInstance().configVariable("STABLEDIFFUSION_ENDPOINT");
 
     // 初始化curl
     CURL *curl;
@@ -29,7 +27,7 @@ std::string StableDiffusion::connectStableDiffusion(const std::string prompt)
     if (curl)
     {
         // 配置API的URL
-        curl_easy_setopt(curl, CURLOPT_URL, endpint.c_str());
+        curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
 
         // 配置HTTP POST
         curl_easy_setopt(curl, CURLOPT_POST, 1L);

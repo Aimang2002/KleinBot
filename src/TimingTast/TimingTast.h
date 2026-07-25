@@ -12,7 +12,6 @@
 #include <memory>
 #include <unistd.h>
 #include "../Log/Log.h"
-#include "../ConfigManager/ConfigManager.h"
 #include "../ModelApiCaller/OpenAIStandard/OpenAIStandard.h"
 
 // 已到期事件，由 popDueEvent 原子取出

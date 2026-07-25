@@ -24,27 +24,30 @@ std::mt19937 mt_rand(1000);
 
 Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession,
 				 ChatService &chatService, MessageSenderPort &sender,
-				 ImageAssetStore &imageAssetStore, bool &globalVoice,
+				 ImageAssetStore &imageAssetStore, const BotConfig &botConfig,
+                 const ResourceConfig &resourceConfig, const VoiceConfig &voiceConfig,
+                 const ModelConfig &modelConfig, bool &globalVoice,
 				 bool &accessibilityChat, Action &queryModelAction,
 				 Action &voiceModeAction, Action &adminControlAction)
 	: models(models), dock(dock), userSession(userSession), chatService(chatService),
 	  sender(sender), imageAssetStore(imageAssetStore), global_Voice(globalVoice),
-	  accessibility_chat(accessibilityChat)
+	  accessibility_chat(accessibilityChat), registry(botConfig.managerId), botConfig(botConfig),
+      resourceConfig(resourceConfig), modelConfig(modelConfig)
 {
 	// 服务器状态类初始化
 #ifdef DEBUG
 	LOG_DEBUG("服务器状态初始化...");
 #endif
-	this->voice = std::make_unique<Voice>();
+	this->voice = std::make_unique<Voice>(voiceConfig);
 
 	// 内置成员属性初始化
 
 	// 注册所有命令事件
-	this->registry.registryCommand(std::make_unique<HelpCommand>());
+	this->registry.registryCommand(std::make_unique<HelpCommand>(resourceConfig.helpFile));
 	this->registry.registryCommand(std::make_unique<ModelListCommand>(this->models));
 	this->registry.registryCommand(std::make_unique<SearchSongsCommand>());
 	this->registry.registryCommand(std::make_unique<QueryModelCommand>(queryModelAction));
-	this->registry.registryCommand(std::make_unique<GeneratePictureCommand>(this->dock));
+	this->registry.registryCommand(std::make_unique<GeneratePictureCommand>(this->dock, modelConfig.drawing));
 	this->registry.registryCommand(std::make_unique<ResetChatCommand>(this->userSession));
 	this->registry.registryCommand(std::make_unique<SetSoulCommand>(this->userSession));
 	this->registry.registryCommand(std::make_unique<SwitchModelCommand>(this->userSession, this->models));
@@ -58,7 +61,7 @@ Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSess
 #ifdef DEBUG
 	LOG_DEBUG("轻量型人格初始化...");
 #endif
-	std::string path = ConfigManager::getInstance().configVariable("PERSONALITY_PATH") + "personality.txt";
+	std::string path = resourceConfig.personalityDirectory + "personality.txt";
 	std::ifstream ifs(path);
 	if (!ifs.is_open())
 	{
@@ -88,8 +91,8 @@ Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSess
 	}
 
 	// 初始化管理员
-	uint64_t manager_qq = std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
-	this->userSession.ensureUserExists(manager_qq);
+	if (botConfig.managerId != 0)
+        this->userSession.ensureUserExists(botConfig.managerId);
 }
 
 Message::Intent Message::classify(const InboundMessage &data)
@@ -144,7 +147,7 @@ void Message::handleMessage(const InboundMessage &current_data)
 			}
 		}
 
-		const bool useContext = this->accessibility_chat || current_data.user_id == std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
+		const bool useContext = this->accessibility_chat || current_data.user_id == botConfig.managerId;
 		ChatReply chatReply = this->chatService.reply(current_data.user_id, conversationText, useContext);
 		if (!inboundAssetId.empty())
 			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
@@ -261,12 +264,12 @@ bool Message::messageFilter(std::string message_type, std::string message)
 
 	if (!strcmp(message_type.c_str(), "group"))
 	{
-		if (ConfigManager::getInstance().configVariable("OPEN_GROUPCHAT_MESSAGE") == "false")
+		if (!botConfig.groupChatEnabled)
 		{
 			return false; // 群消息是否开启
 		}
 
-		if (message.find("CQ:at") == message.npos || message.find(ConfigManager::getInstance().configVariable("BOT_QQ")) == message.npos)
+		if (message.find("CQ:at") == message.npos || message.find(std::to_string(botConfig.id)) == message.npos)
 		{
 			return false; // 过滤非AT消息
 		}
@@ -400,10 +403,10 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 
 
 	ChatModel model;
-	model.endpoint = ConfigManager::getInstance().configVariable("VISION_MODEL_ENDPOINT");
-	model.api_key = ConfigManager::getInstance().configVariable("VISION_MODEL_API_KEY");
-	model.api_standard = ConfigManager::getInstance().configVariable("VISION_MODEL_APISTANDARD");
-	std::string modelName = ConfigManager::getInstance().configVariable("VISION_MODEL");
+	model.endpoint = modelConfig.vision.endpoint;
+	model.api_key = modelConfig.vision.apiKey;
+	model.api_standard = modelConfig.vision.apiStandard;
+	const std::string &modelName = modelConfig.vision.model;
 
 	auto response = this->dock.RequestVision(model, modelName, conversation, base64);
 	std::string answer = response.content;

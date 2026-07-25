@@ -82,7 +82,6 @@ std::string Realesrgan::fixImageSizeTo4K(const std::string &message)
     //         filename += (char)number;
     //     }
 
-    //     std::string inputPath = ConfigManager::getInstance().configVariable("IMAGE_DOWNLOAD_PATH") + filename;
     //     std::string outputPath = inputPath;
     //     outputPath += "_4k";
     //     inputPath += ".jpg";
@@ -141,9 +140,7 @@ std::string Realesrgan::fixImageSizeTo4K(const std::string &message)
 
     //     // 对图片进行4K修复
     //     {
-    //         std::string command = "" + ConfigManager::getInstance().configVariable("REALESGAN_PATH") + "realesrgan-ncnn-vulkan -i ";
     //         command += inputPath + " -o ";
-    //         command += outputPath + " -n " + ConfigManager::getInstance().configVariable("REALESGAN_MODEL");
     //         command += " > /dev/null 2>&1"; // 丢弃日志输出 Windows中是 >nul 2>&1
 
     //         LOG_INFO("图片修复中...");

@@ -9,6 +9,7 @@
 class CommandRegistry
 {
 public:
+    explicit CommandRegistry(uint64_t managerId) : managerId(managerId) {}
     void registryCommand(std::unique_ptr<Command> cmd);
     // 查找并执行匹配命令，并且返回是否找到匹配
     std::optional<CommandResult> execute(const std::string &message, const CommandContext &ctx);
@@ -16,6 +17,7 @@ public:
     // std::string getAllHelp() const {};
 
 private:
+    uint64_t managerId;
     std::vector<std::unique_ptr<Command>> commands;
 };
 

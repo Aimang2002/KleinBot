@@ -3,14 +3,14 @@
 
 #include "Tool.h"
 #include "ImageToolHelpers.h"
-#include "../ConfigManager/ConfigManager.h"
+#include "../Configuration/AppConfig.h"
 #include "../ModelApiCaller/Dock.hpp"
 
 class InspectImageTool : public Tool
 {
 public:
-    InspectImageTool(Dock &dock, ImageAssetStore &assetStore)
-        : dock(dock), assetStore(assetStore) {}
+    InspectImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointConfig model)
+        : dock(dock), assetStore(assetStore), model(std::move(model)) {}
 
     std::string name() const override { return "inspect_image"; }
 
@@ -38,12 +38,11 @@ public:
             if (base64.empty())
                 return {"错误：图片文件不可读。", {}, {}};
 
-            ChatModel model;
-            model.endpoint = ConfigManager::getInstance().configVariable("VISION_MODEL_ENDPOINT");
-            model.api_key = ConfigManager::getInstance().configVariable("VISION_MODEL_API_KEY");
-            model.api_standard = ConfigManager::getInstance().configVariable("VISION_MODEL_APISTANDARD");
-            const std::string modelName = ConfigManager::getInstance().configVariable("VISION_MODEL");
-            const VisionResponse response = dock.RequestVision(model, modelName, question, base64);
+            ChatModel requestModel;
+            requestModel.endpoint = model.endpoint;
+            requestModel.api_key = model.apiKey;
+            requestModel.api_standard = model.apiStandard;
+            const VisionResponse response = dock.RequestVision(requestModel, model.model, question, base64);
             if (response.code != 200)
                 return {"错误：视觉模型调用失败。", {}, {}};
 
@@ -58,6 +57,7 @@ public:
 private:
     Dock &dock;
     ImageAssetStore &assetStore;
+    ModelEndpointConfig model;
 };
 
 #endif // INSPECT_IMAGE_TOOL_H

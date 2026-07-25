@@ -236,89 +236,61 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 
 # 配置文件
 
-下面是对配置文件的参数进行解释：
+KleinBot 使用 Schema 化 JSON 配置。运行时读取当前工作目录的 `config.json`；仓库中的 `config.example.json` 是不含密钥的完整模板。
 
-| 参数名                        | 参数描述                                            |
-| ----------------------------- | --------------------------------------------------- |
-| CONTEXT_MAX                   | 上下文最大token数，取值范围建议在1000~99999         |
-| MODEL_SIGLE_TOKEN_MAX         | 单次发送给模型的最大token数，取值范围建议在100~4999 |
-| GLOBAL_VOICE                  | 是否开启语音推理（true/false）                      |
-| ACCESSIBLITY_CHAT             | 是否开启无障碍聊天（true/false）                    |
-| CONFIG_VERSION                | 配置文件版本                                        |
-| GROUP_API                     | 通常来说不建议对其更改                              |
-| PRIVATE_API                   | 通常来说不建议对其更改                              |
-| QBOT_NAME                     | 机器人名称，可自定义                                |
-| OPEN_GROUPCHAT_MESSAGE        | 是否开启群聊（true/false）                          |
-| MANAGER_QQ                    | 管理员QQ                                            |
-| BOT_QQ                        | 机器人QQ                                            |
-| TRANSPORT_MODE                | `forward_websocket`、`reverse_websocket` 或 `http`  |
-| WEBSOCKET_MESSAGE_IP          | 正向WS IP地址                                       |
-| WEBSOCKET_MESSAGE_PORT        | 正向WS 端口                                         |
-| REVERSEWEBSOCKET_MESSAGE_IP   | 反向WS IP地址                                       |
-| REVERSEWEBSOCKET_MESSAGE_PORT | 反向WS 端口                                         |
-| WEBSOCKET_AUTH_TOKEN          | 可选WS Bearer Token；为空或未配置时关闭鉴权         |
-| WS_EVENT_HOST                 | 新正向WS主机名；未配置时兼容 WEBSOCKET_MESSAGE_IP   |
-| WS_EVENT_PORT                 | 新正向WS端口；未配置时兼容 WEBSOCKET_MESSAGE_PORT   |
-| WS_EVENT_PATH                 | 正向Universal WS路径，默认 `/`                      |
-| WS_API_BIND_HOST              | 新反向WS监听地址；兼容 REVERSEWEBSOCKET_MESSAGE_IP  |
-| WS_API_BIND_PORT              | 新反向WS监听端口；兼容 REVERSEWEBSOCKET_MESSAGE_PORT |
-| WS_API_PATH                   | 反向Universal WS路径，默认 `/`                      |
-| HTTP_API_BASE_URL             | OneBot HTTP/HTTPS API基础地址                       |
-| HTTP_API_AUTH_TOKEN           | HTTP API Bearer Token，可为空                       |
-| HTTP_EVENT_BIND_HOST          | HTTP事件监听地址，默认 `127.0.0.1`                  |
-| HTTP_EVENT_BIND_PORT          | HTTP事件监听端口                                    |
-| HTTP_EVENT_PATH               | HTTP事件上报路径，默认 `/onebot/events`             |
-| HTTP_EVENT_AUTH_TOKEN         | HTTP事件上报 Bearer Token，可为空                   |
-| NETWORK_CONNECT_TIMEOUT_MS    | HTTP建连超时，默认5000ms                            |
-| NETWORK_REQUEST_TIMEOUT_MS    | HTTP请求/读取超时，默认15000ms                      |
-| NETWORK_MAX_BODY_BYTES        | HTTP事件最大请求体，默认1048576字节                 |
-| WYY_SONGID_PATH               | 网易云音乐ID文件路径                                |
-| HELP_PATH                     | #帮助 文本文件路径                                  |
-| HELP_PERSONALITY_PATH         | #人格帮助 文本文件路径                              |
-| PERSONALITY_PATH              | 人格目录路径                                        |
-| CHATMODELS_PATH               | 模型名称注册路径                                    |
-| temperature                   | ”温度“超参数，默认为1                               |
-| top_p                         | 核抽样,默认为1                                      |
-| frequency_penalty             | 频率惩罚，默认为0                                   |
-| presence_penalty              | 存在惩罚，默认为0                                   |
-| MESSAGE_SURVIVAL_TIME         | 上下文存活时间，单位是秒                            |
-| MESSAGE_WORKER_THREADS        | 消息处理线程池大小，未配置时默认为4                 |
-| CONVERSATION_DB_PATH          | 对话与长期记忆 SQLite 路径，默认 source/conversations.db |
-| IMAGE_ASSET_PATH              | 图片资源目录，默认 source/image_assets                  |
-| MEMORY_ENABLED                | 是否启用长期记忆，未配置时默认 true                 |
-| MEMORY_MODEL                  | 长期记忆提取模型名称，未配置时使用 DEFAULT_MODEL    |
-| MEMORY_BATCH_TURNS            | 累计多少轮对话后触发记忆提取，默认3                 |
-| MEMORY_IDLE_SECONDS           | 会话空闲多少秒后提取未满批次的记忆，默认20          |
-| MEMORY_RECALL_LIMIT           | 单次长期记忆召回上限，默认8                         |
-| IMAGE_DOWNLOAD_PATH           | 图片下载存放路径，图片分析时需要用到                |
-| XXX_MODEL_API_KEY             | 请求模型的API KEY                                   |
-| XXX_MODEL_ENDPOINT            | 请求模型的请求端点                                  |
-| XXX_DEFAULT_MODEL             | 请求的模型                                          |
-| XXX_MODEL_APISTANDARD         | 模型使用的API规范                                   |
-| STABLEDIFFUSION_ENDPOINT      | Stable Diffusion 的请求端点                         |
-| DEFAULT_MODEL                 | Stable Diffusion 的默认模型，目前不填               |
-| VIST_API_URL                  | GPT-SoVIST API的IP                                  |
-| VIST_API_PORT                 | GPT-SoVIST API的端口                                |
-| VIST_REFERVOICE_PATH          | GPT-SoVIST 的参考音频                               |
-| VIST_REFERVOICE_TEXT          | GPT-SoVIST 的参考音频文本                           |
-| VIST_FILE_SAVE_PATH           | GPT-SoVIST 推理后音频文件存放的位置                 |
-| REALESGAN_PATH                | REALESGAN项目的路径                                 |
-| REALESGAN_MODEL               | REALESGAN使用的修复模型                             |
-| IMAGE_DOWNLOAD_PATH           | 图片下载后的位置(供REALESGAN使用)                   |
+配置根节点按职责划分：
 
-`WEBSOCKET_AUTH_TOKEN` 同时用于正向和反向 WebSocket：正向连接会在升级请求中携带 `Authorization: Bearer <token>`，反向连接会拒绝未携带正确 Token 的客户端。HTTP API 与事件上报分别使用独立 Token。通信配置在启动时生成不可变快照，修改后需要重启 KleinBot。
+| 节点 | 作用 |
+| --- | --- |
+| `schema_version` | 配置结构版本，当前必须为 `1` |
+| `bot` | Bot ID、管理员、名称和群聊策略 |
+| `chat` | 默认模型、采样参数、消息限制和 OneBot action 名称 |
+| `models` | 模型注册文件、绘图、视觉和 Stable Diffusion 配置 |
+| `voice` | TTS 开关、服务地址、输出目录和参考音频 |
+| `features` | 可选业务功能开关 |
+| `memory` | 长期记忆模型、批次和召回限制 |
+| `storage` | SQLite 与图片资源目录 |
+| `resources` | 人格、帮助文件和下载目录 |
+| `network` | 公共代理配置 |
+| `communication` | 协议、活动传输 Profile 和网络默认值 |
 
-现有配置可以继续把这些字段放在 `"QQ通信端口"` 二级对象中。例如：
+通信配置使用命名 Profile，并通过 `active_transport` 互斥选择一个传输：
 
 ```json
-"QQ通信端口": {
-    "TRANSPORT_MODE": "reverse_websocket",
-    "REVERSEWEBSOCKET_MESSAGE_IP": "127.0.0.1",
-    "REVERSEWEBSOCKET_MESSAGE_PORT": 8600,
-    "WS_API_PATH": "/onebot",
-    "WEBSOCKET_AUTH_TOKEN": ""
+"communication": {
+    "protocol": {"type": "onebot", "options": {}},
+    "active_transport": "onebot-http",
+    "transports": {
+        "onebot-http": {
+            "type": "http",
+            "api": {
+                "base_url": "http://127.0.0.1:3000",
+                "access_token": {"from_env": "KLEIN_ONEBOT_API_TOKEN"}
+            },
+            "events": {
+                "bind": "127.0.0.1",
+                "port": 8080,
+                "path": "/onebot/events",
+                "access_token": {"from_env": "KLEIN_ONEBOT_EVENT_TOKEN"}
+            }
+        }
+    }
 }
 ```
+
+Secret 字段支持本地字面量或环境变量：
+
+```json
+{"literal": "local-token"}
+```
+
+```json
+{"from_env": "KLEIN_ONEBOT_TOKEN"}
+```
+
+配置加载会统一完成类型转换、默认值填充和语义校验。可选字段损坏时使用安全默认值或关闭对应功能；核心身份、活动协议和活动传输无效时拒绝启动。额外字段会产生警告但不会直接终止程序。配置在启动后以不可变强类型对象注入业务模块，修改静态配置后需要重启 KleinBot。
+
+本地 `build/config.json`、API key、Token、QQ ID、数据库和生成媒体不得提交。
 
 
 # 长期记忆

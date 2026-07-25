@@ -1,5 +1,4 @@
 #include "ChatService.h"
-#include "../ConfigManager/ConfigManager.h"
 #include "../Memory/MemoryService.h"
 #include "../Tool/ToolContext.h"
 
@@ -81,8 +80,6 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
             }
             else
             {
-                const uint64_t managerId = static_cast<uint64_t>(std::stoull(
-                    ConfigManager::getInstance().configVariable("MANAGER_QQ")));
                 if (tool->requiresAdmin() && user_id != managerId)
                 {
                     toolResult = {"权限不足：该操作仅限管理员。", {}, {}, true};
@@ -167,7 +164,7 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
 
 std::string ChatService::replyOneShot(const std::string &prompt)
 {
-    std::string modelName = ConfigManager::getInstance().configVariable("DEFAULT_MODEL");
+    const std::string &modelName = chatConfig.defaultModel;
 
     const ChatModel *modelPtr = this->models.find(modelName);
     if (modelPtr == nullptr)
@@ -177,9 +174,9 @@ std::string ChatService::replyOneShot(const std::string &prompt)
     }
 
     ChatRequest request;
-    request.frequency_penalty = std::stod(ConfigManager::getInstance().configVariable("frequency_penalty"));
-    request.presence_penalty = std::stod(ConfigManager::getInstance().configVariable("presence_penalty"));
-    request.temperature = std::stod(ConfigManager::getInstance().configVariable("temperature"));
+    request.frequency_penalty = chatConfig.frequencyPenalty;
+    request.presence_penalty = chatConfig.presencePenalty;
+    request.temperature = chatConfig.temperature;
     request.system_prompt = "你是人工助手";
     request.history.push_back({"user", prompt});
 

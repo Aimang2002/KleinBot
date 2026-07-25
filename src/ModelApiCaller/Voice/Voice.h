@@ -5,15 +5,13 @@
 #include <fstream>
 #include <curl/curl.h>
 #include <chrono>
-#include "../../ConfigManager/ConfigManager.h"
+#include "../../Configuration/AppConfig.h"
 #include "../../Log/Log.h"
-
-// extern ConfigManager &ConfigManager::getInstance();
 
 class Voice
 {
 public:
-    Voice();
+    explicit Voice(VoiceConfig config);
     /**
      * @brief 修复图片
      *
@@ -33,6 +31,7 @@ public:
     ~Voice();
 
 private:
+    VoiceConfig config;
 };
 
 #endif

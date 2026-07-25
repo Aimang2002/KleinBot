@@ -1,6 +1,5 @@
 #include "ModelRegistry.h"
 #include "../JsonParse/JsonParse.h"
-#include "../ConfigManager/ConfigManager.h"
 #include "../Log/Log.h"
 #include <fstream>
 
@@ -25,7 +24,7 @@ const std::vector<ChatModel> &ModelRegistry::all() const
 void ModelRegistry::reload()
 {
     // 载入模型名称
-    std::ifstream ifsJson(ConfigManager::getInstance().configVariable("CHATMODELS_PATH"));
+    std::ifstream ifsJson(registryPath);
     if (!ifsJson.is_open())
     {
         LOG_ERROR("模型配置文件打开失败！请检查该文件是否存在。");

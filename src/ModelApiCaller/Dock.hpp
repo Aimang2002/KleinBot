@@ -9,6 +9,7 @@
 #include "../Port/ImageResponse.h"
 #include "../Port/LLMPort.h"
 #include "../Log/Log.h"
+#include "../Configuration/AppConfig.h"
 #include <string>
 #include <memory>
 #include <unordered_map>
@@ -17,10 +18,10 @@ class Dock
 {
 public:
     // 构造函数
-    Dock()
+    explicit Dock(const NetworkConfig &network)
     {
-        this->registryLLM.emplace("OpenAI", std::make_unique<OpenAIStandard>());
-        this->registryLLM.emplace("Anthropic", std::make_unique<AnthropicStandard>());
+        this->registryLLM.emplace("OpenAI", std::make_unique<OpenAIStandard>(network.proxy));
+        this->registryLLM.emplace("Anthropic", std::make_unique<AnthropicStandard>(network.proxy));
     }
 
     ChatResponse RequestChat(const ChatModel &model, const std::string &model_name, const ChatRequest &request)

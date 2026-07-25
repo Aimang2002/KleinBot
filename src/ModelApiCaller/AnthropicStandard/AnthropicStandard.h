@@ -11,6 +11,7 @@
 class AnthropicStandard : public LLMPort
 {
 public:
+    explicit AnthropicStandard(std::string proxy = {}) : proxy(std::move(proxy)) {}
     ChatResponse request_chat(const ChatModel &model, const std::string &model_name, const ChatRequest &request) override;
     VisionResponse request_vision(const ChatModel &model, const std::string &model_name, const std::string &prompt, const std::string &base64) override;
     ImageResponse request_image(const ChatModel &model, const std::string &model_name, const std::string &prompt) override;
@@ -27,6 +28,7 @@ private:
     std::string filterNonNormalChars(std::string str);
 
     void VerifyCertificate(CURL *curl);
+    std::string proxy;
 };
 
 #endif // ANTHROPIC_STANDARD_H
