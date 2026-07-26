@@ -3,6 +3,7 @@
 import argparse
 import base64
 import hashlib
+import hmac
 import http.client
 import json
 import os
@@ -220,8 +221,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         pass
 
 
-def post_event_with_retry(port, token=TOKEN):
+def post_event_with_retry(port, secret=TOKEN):
     payload = json.dumps(EVENT).encode()
+    signature = "sha1=" + hmac.new(secret.encode(), payload, hashlib.sha1).hexdigest()
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         try:
@@ -232,7 +234,7 @@ def post_event_with_retry(port, token=TOKEN):
                 body=payload,
                 headers={
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {token}",
+                    "X-Signature": signature,
                 },
             )
             response = connection.getresponse()

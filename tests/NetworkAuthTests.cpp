@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "Network/BearerAuth.h"
+#include "Network/WebhookSignature.h"
 
 TEST(BearerAuthTest, BuildsBearerAuthorizationValue)
 {
@@ -33,4 +34,23 @@ TEST(BearerAuthTest, RejectsTokensWithLargeLengthDifference)
     const std::string presentedToken = expectedToken + std::string(256, 'b');
 
     EXPECT_FALSE(BearerAuth::isAuthorized("Bearer " + presentedToken, expectedToken));
+}
+
+TEST(WebhookSignatureTest, BuildsOneBotHmacSha1Signature)
+{
+    EXPECT_EQ(
+        WebhookSignature::signSha1(
+            "The quick brown fox jumps over the lazy dog", "key"),
+        "sha1=de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9");
+}
+
+TEST(WebhookSignatureTest, AcceptsCorrectSignatureAndRejectsInvalidValues)
+{
+    const std::string body = R"({"post_type":"message"})";
+    const std::string signature = WebhookSignature::signSha1(body, "secret");
+
+    EXPECT_TRUE(WebhookSignature::isAuthorized(signature, body, "secret"));
+    EXPECT_FALSE(WebhookSignature::isAuthorized(signature, body + " ", "secret"));
+    EXPECT_FALSE(WebhookSignature::isAuthorized("sha1=invalid", body, "secret"));
+    EXPECT_TRUE(WebhookSignature::isAuthorized("", body, ""));
 }

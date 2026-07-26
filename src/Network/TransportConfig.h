@@ -35,6 +35,7 @@ struct HttpTransportConfig
     unsigned short eventBindPort = 0;
     std::string eventPath = "/onebot/events";
     std::string eventAuthToken;
+    std::string eventSignatureSecret;
 };
 
 struct TransportConfig

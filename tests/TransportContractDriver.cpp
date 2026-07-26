@@ -57,7 +57,7 @@ int main(int argc, char **argv)
         config.http.eventBindHost = "127.0.0.1";
         config.http.eventBindPort = static_cast<unsigned short>(std::stoul(argv[3]));
         config.http.eventPath = "/onebot/events";
-        config.http.eventAuthToken = "contract-token";
+        config.http.eventSignatureSecret = "contract-token";
     }
     else
     {

@@ -271,12 +271,14 @@ KleinBot 使用 Schema 化 JSON 配置。运行时读取当前工作目录的 `c
                 "bind": "127.0.0.1",
                 "port": 8080,
                 "path": "/onebot/events",
-                "access_token": {"from_env": "KLEIN_ONEBOT_EVENT_TOKEN"}
+                "secret": {"from_env": "KLEIN_ONEBOT_EVENT_SECRET"}
             }
         }
     }
 }
 ```
+
+HTTP 的两个方向使用不同认证语义：KleinBot 调用 OneBot API 时通过 `api.access_token` 发送 `Authorization: Bearer`；LLOneBot 上报事件时通过 `events.secret` 对原始请求体计算 HMAC-SHA1，并发送 `X-Signature: sha1=<hex>`。旧版 `events.access_token` 仍兼容 Bearer，也会作为签名 Secret 使用，但新配置应使用 `events.secret`。
 
 Secret 字段支持本地字面量或环境变量：
 

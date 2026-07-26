@@ -343,7 +343,7 @@ CommunicationSchema decodeCommunication(Decoder &decoder, const json &communicat
         }
         if (events != nullptr)
         {
-            decoder.unknownFields(*events, {"bind", "port", "path", "access_token"},
+            decoder.unknownFields(*events, {"bind", "port", "path", "access_token", "secret"},
                                   profilePath + ".events");
             output.eventBindHost = decoder.string(
                 *events, "bind", profilePath + ".events.bind", "127.0.0.1");
@@ -354,6 +354,8 @@ CommunicationSchema decodeCommunication(Decoder &decoder, const json &communicat
                 decoder.string(*events, "path", profilePath + ".events.path", "/onebot/events"));
             output.eventAccessToken = decoder.secret(
                 *events, "access_token", profilePath + ".events.access_token");
+            output.eventSecret = decoder.secret(
+                *events, "secret", profilePath + ".events.secret");
         }
     }
     else if (!output.type.empty())

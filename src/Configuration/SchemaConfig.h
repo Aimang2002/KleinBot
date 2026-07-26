@@ -94,6 +94,7 @@ struct TransportProfileSchema
     unsigned short eventBindPort = 0;
     std::string eventPath = "/onebot/events";
     std::string eventAccessToken;
+    std::string eventSecret;
 };
 
 struct CommunicationSchema

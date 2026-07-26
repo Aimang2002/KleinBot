@@ -48,6 +48,8 @@ void compareTransportProfile(ConfigDiff &diff, const TransportProfileSchema &cur
                  "communication.active_profile.events.path", impact);
     addIfChanged(diff, current.eventAccessToken, candidate.eventAccessToken,
                  "communication.active_profile.events.access_token", impact);
+    addIfChanged(diff, current.eventSecret, candidate.eventSecret,
+                 "communication.active_profile.events.secret", impact);
 }
 }
 

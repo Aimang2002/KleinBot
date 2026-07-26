@@ -91,7 +91,7 @@
                     "bind": "127.0.0.1",
                     "port": 8080,
                     "path": "/onebot/events",
-                    "access_token": {"from_env": "KLEIN_ONEBOT_EVENT_TOKEN"}
+                    "secret": {"from_env": "KLEIN_ONEBOT_EVENT_SECRET"}
                 }
             }
         },

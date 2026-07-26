@@ -1,6 +1,7 @@
 #include "OneBotHttpTransport.h"
 
 #include "BearerAuth.h"
+#include "WebhookSignature.h"
 #include "WebSocketHead.h"
 #include "../Log/Log.h"
 
@@ -273,9 +274,21 @@ void OneBotHttpTransport::runEventServer(
             }
 
             const auto authorization = request[beast::http::field::authorization];
-            if (!BearerAuth::isAuthorized(
+            const auto signature = request["X-Signature"];
+            const bool authenticationConfigured =
+                !config.http.eventAuthToken.empty() ||
+                !config.http.eventSignatureSecret.empty();
+            const bool bearerAuthorized =
+                !config.http.eventAuthToken.empty() &&
+                BearerAuth::isAuthorized(
                     std::string_view(authorization.data(), authorization.size()),
-                    config.http.eventAuthToken))
+                    config.http.eventAuthToken);
+            const bool signatureAuthorized =
+                !config.http.eventSignatureSecret.empty() &&
+                WebhookSignature::isAuthorized(
+                    std::string_view(signature.data(), signature.size()),
+                    request.body(), config.http.eventSignatureSecret);
+            if (authenticationConfigured && !bearerAuthorized && !signatureAuthorized)
             {
                 sendHttpResponse(stream, request.version(), beast::http::status::unauthorized);
                 LOG_WARNING("OneBot HTTP事件认证失败，已拒绝请求");

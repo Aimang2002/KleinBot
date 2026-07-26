@@ -119,3 +119,51 @@ TEST(ConfigLoaderTest, MissingOptionalModelSecretDisablesFeatureWithoutBlockingS
     EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::FeatureDisabled,
                               "models.drawing.api_key"));
 }
+
+TEST(ConfigLoaderTest, DecodesHttpEventSignatureSecret)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["communication"]["active_transport"] = "http";
+    document["communication"]["transports"]["http"] = {
+        {"type", "http"},
+        {"api", {{"base_url", "http://127.0.0.1:3000"}}},
+        {"events", {
+            {"bind", "127.0.0.1"},
+            {"port", 4000},
+            {"path", "/onebot/events"},
+            {"secret", {{"literal", "event-secret"}}}
+        }}
+    };
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    ASSERT_TRUE(result.canStart());
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_EQ(result.config->communication.activeProfile.eventSecret, "event-secret");
+    const RuntimeSettings runtime = buildRuntimeSettings(*result.config);
+    EXPECT_EQ(runtime.transport.http.eventSignatureSecret, "event-secret");
+    EXPECT_TRUE(runtime.transport.http.eventAuthToken.empty());
+}
+
+TEST(ConfigLoaderTest, UsesLegacyEventAccessTokenAsSignatureSecret)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["communication"]["active_transport"] = "http";
+    document["communication"]["transports"]["http"] = {
+        {"type", "http"},
+        {"api", {{"base_url", "http://127.0.0.1:3000"}}},
+        {"events", {
+            {"port", 4000},
+            {"access_token", {{"literal", "legacy-token"}}}
+        }}
+    };
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    ASSERT_TRUE(result.canStart());
+    const RuntimeSettings runtime = buildRuntimeSettings(*result.config);
+    EXPECT_EQ(runtime.transport.http.eventAuthToken, "legacy-token");
+    EXPECT_EQ(runtime.transport.http.eventSignatureSecret, "legacy-token");
+}

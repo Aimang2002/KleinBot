@@ -38,8 +38,11 @@ namespace
             result.http.apiAuthToken = profile.apiAccessToken;
             result.http.eventBindHost = profile.eventBindHost;
             result.http.eventBindPort = profile.eventBindPort;
-            result.http.eventPath = profile.eventPath;
-            result.http.eventAuthToken = profile.eventAccessToken;
+        result.http.eventPath = profile.eventPath;
+        result.http.eventAuthToken = profile.eventAccessToken;
+        result.http.eventSignatureSecret = profile.eventSecret.empty()
+            ? profile.eventAccessToken
+            : profile.eventSecret;
         }
         return result;
     }
