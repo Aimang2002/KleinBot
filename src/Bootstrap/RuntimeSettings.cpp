@@ -1,8 +1,12 @@
 #include "RuntimeSettings.h"
 
+#include <algorithm>
+#include <limits>
+#include <thread>
+
 namespace
 {
-    ModelEndpointOptions mapModel(const ModelEndpointSchema &schema)
+ModelEndpointOptions mapModel(const ModelEndpointSchema &schema)
     {
         return {schema.model, schema.endpoint, schema.apiKey, schema.apiStandard};
     }
@@ -48,6 +52,29 @@ namespace
     }
 }
 
+MessageExecutionOptions mapMessageExecution(const ChatSchema &chat)
+{
+    MessageExecutionOptions result;
+    result.maxPendingMessages = chat.maxPendingMessages;
+    result.workerIdleSeconds = chat.workerIdleSeconds;
+    if (chat.workerThreads.has_value())
+    {
+        result.initialWorkerThreads = *chat.workerThreads;
+        result.maxWorkerThreads = *chat.workerThreads;
+        result.dynamicScaling = false;
+        return result;
+    }
+
+    const std::size_t detected = std::thread::hardware_concurrency();
+    result.initialWorkerThreads = detected == 0 ? 4 : detected;
+    if (result.initialWorkerThreads > std::numeric_limits<std::size_t>::max() / 4U)
+        result.maxWorkerThreads = std::numeric_limits<std::size_t>::max();
+    else
+        result.maxWorkerThreads = result.initialWorkerThreads * 4U;
+    result.dynamicScaling = true;
+    return result;
+}
+
 RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
 {
     RuntimeSettings result;
@@ -60,10 +87,10 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.chat.frequencyPenalty,
         schema.chat.presencePenalty,
         schema.chat.maxMessageTokens,
-        schema.chat.workerThreads,
         schema.chat.messageSurvivalSeconds,
         schema.chat.privateAction,
         schema.chat.groupAction};
+    result.messageExecution = mapMessageExecution(schema.chat);
     result.models.registryPath = schema.models.registryPath;
     result.models.drawing = mapModel(schema.models.drawing);
     result.models.vision = mapModel(schema.models.vision);

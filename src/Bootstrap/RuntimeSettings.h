@@ -2,6 +2,7 @@
 #define RUNTIME_SETTINGS_H
 
 #include "../Application/BotIdentity.h"
+#include "../Application/MessageExecutionOptions.h"
 #include "../ChatService/ChatOptions.h"
 #include "../Configuration/SchemaConfig.h"
 #include "../Memory/MemoryOptions.h"
@@ -44,6 +45,7 @@ struct RuntimeSettings
     VoiceOptions voice;
     MemoryOptions memory;
     MessageOptions message;
+    MessageExecutionOptions messageExecution;
     DockOptions dock;
     StorageRuntimeSettings storage;
     ResourceRuntimeSettings resources;

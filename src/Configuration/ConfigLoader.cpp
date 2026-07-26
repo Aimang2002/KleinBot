@@ -450,6 +450,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         decoder.unknownFields(*chat,
                               {"default_model", "temperature", "top_p", "frequency_penalty",
                                "presence_penalty", "max_message_tokens", "worker_threads",
+                               "max_pending_messages", "worker_idle_seconds",
                                "message_survival_seconds", "private_action", "group_action"},
                               "chat");
         config.chat.defaultModel = decoder.string(*chat, "default_model", "chat.default_model", {}, true);
@@ -459,8 +460,17 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         config.chat.presencePenalty = decoder.number(*chat, "presence_penalty", "chat.presence_penalty", 0.0, -2.0, 2.0);
         config.chat.maxMessageTokens = static_cast<std::size_t>(decoder.integer(
             *chat, "max_message_tokens", "chat.max_message_tokens", 4096, 1, 1000000));
-        config.chat.workerThreads = static_cast<std::size_t>(decoder.integer(
-            *chat, "worker_threads", "chat.worker_threads", 4, 1, 256));
+        if (chat->contains("worker_threads"))
+        {
+            const long workerThreads = decoder.integer(
+                *chat, "worker_threads", "chat.worker_threads", 0, 1, 256);
+            if (workerThreads >= 1)
+                config.chat.workerThreads = static_cast<std::size_t>(workerThreads);
+        }
+        config.chat.maxPendingMessages = static_cast<std::size_t>(decoder.integer(
+            *chat, "max_pending_messages", "chat.max_pending_messages", 1024, 1, 1000000));
+        config.chat.workerIdleSeconds = static_cast<std::size_t>(decoder.integer(
+            *chat, "worker_idle_seconds", "chat.worker_idle_seconds", 30, 1, 3600));
         config.chat.messageSurvivalSeconds = decoder.integer(
             *chat, "message_survival_seconds", "chat.message_survival_seconds", 3600, 1, std::numeric_limits<int>::max());
         config.chat.privateAction = decoder.string(*chat, "private_action", "chat.private_action", "send_private_msg");

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 struct BotSchema
@@ -21,7 +22,9 @@ struct ChatSchema
     double frequencyPenalty = 0.0;
     double presencePenalty = 0.0;
     std::size_t maxMessageTokens = 4096;
-    std::size_t workerThreads = 4;
+    std::optional<std::size_t> workerThreads;
+    std::size_t maxPendingMessages = 1024;
+    std::size_t workerIdleSeconds = 30;
     long messageSurvivalSeconds = 3600;
     std::string privateAction = "send_private_msg";
     std::string groupAction = "send_group_msg";

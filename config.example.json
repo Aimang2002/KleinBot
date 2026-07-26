@@ -13,7 +13,8 @@
         "frequency_penalty": 0.0,
         "presence_penalty": 0.0,
         "max_message_tokens": 4096,
-        "worker_threads": 4,
+        "max_pending_messages": 1024,
+        "worker_idle_seconds": 30,
         "message_survival_seconds": 3600,
         "private_action": "send_private_msg",
         "group_action": "send_group_msg"

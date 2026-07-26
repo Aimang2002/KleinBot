@@ -109,6 +109,10 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
                  "chat.max_message_tokens", rebuild);
     addIfChanged(diff, current.chat.workerThreads, candidate.chat.workerThreads,
                  "chat.worker_threads", ConfigChangeImpact::Restart);
+    addIfChanged(diff, current.chat.maxPendingMessages, candidate.chat.maxPendingMessages,
+                 "chat.max_pending_messages", ConfigChangeImpact::Restart);
+    addIfChanged(diff, current.chat.workerIdleSeconds, candidate.chat.workerIdleSeconds,
+                 "chat.worker_idle_seconds", ConfigChangeImpact::Restart);
     addIfChanged(diff, current.chat.messageSurvivalSeconds, candidate.chat.messageSurvivalSeconds,
                  "chat.message_survival_seconds", rebuild);
     addIfChanged(diff, current.chat.privateAction, candidate.chat.privateAction,

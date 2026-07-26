@@ -5,6 +5,7 @@ add_executable(kleinbot_tests
     NetworkAuthTests.cpp
     OutboundInfrastructureTests.cpp
     StorageIntegrationTests.cpp
+    TaskSchedulerTests.cpp
     TransportConfigTests.cpp
 )
 

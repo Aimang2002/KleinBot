@@ -47,7 +47,7 @@
 #include "Persistence/ConversationStore.h"
 #include "Asset/ImageAssetStore.h"
 #include "Memory/MemoryService.h"
-#include "utils/ThreadPool.h"
+#include "utils/KeyedTaskScheduler.h"
 
 #define __KLEIN_VERSION__ "v2.4.0"
 
@@ -165,7 +165,7 @@ void workingThread(Message &messageClass, InboundMessage data, std::size_t maxMe
 	messageClass.handleMessage(data);
 }
 
-void resourceCleanup(std::atomic<bool> &running, ThreadPool &messageWorkers,
+void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWorkers,
 					 MemoryService &memoryService,
 					 std::thread &timingThread, std::thread &transportThread)
 {
@@ -320,7 +320,28 @@ int main(int argc, char **argv)
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
 		globalVoice, accessibilityChat);
-	ThreadPool messageWorkers(settings.chat.workerThreads);
+	KeyedTaskScheduler messageWorkers(
+		settings.messageExecution,
+		[](std::exception_ptr error)
+		{
+			try
+			{
+				if (error)
+					std::rethrow_exception(error);
+			}
+			catch (const std::exception &exception)
+			{
+				LOG_ERROR("消息处理任务异常：" + std::string(exception.what()));
+			}
+			catch (...)
+			{
+				LOG_ERROR("消息处理任务发生未知异常");
+			}
+		});
+	LOG_INFO("消息执行器线程：初始 " +
+		std::to_string(settings.messageExecution.initialWorkerThreads) +
+		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
+		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
 	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
@@ -363,17 +384,19 @@ int main(int argc, char **argv)
 
 		if (auto msg = inboundQueue.tryPop())
 		{
-			messageWorkers.submit([&messageClass, maxMessageTokens = settings.chat.maxMessageTokens,
-				message = std::move(*msg)]() mutable {
-				try
-				{
-					workingThread(messageClass, std::move(message), maxMessageTokens);
-				}
-				catch (const std::exception &e)
-				{
-					LOG_ERROR("消息处理任务异常：" + std::string(e.what()));
-				}
+			auto message = std::make_shared<InboundMessage>(std::move(*msg));
+			const TaskSubmitResult submitResult = messageWorkers.submit(
+				message->user_id,
+				[&messageClass, maxMessageTokens = settings.chat.maxMessageTokens,
+				 message]() mutable {
+				workingThread(messageClass, std::move(*message), maxMessageTokens);
 			});
+			if (submitResult == TaskSubmitResult::Full)
+			{
+				LOG_WARNING("消息执行队列已满，拒绝新的入站消息");
+				if (messageClass.messageFilter(message->message_type, message->raw_message))
+					messageClass.sendError(*message, "系统繁忙，请稍后重试。");
+			}
 		}
 		else
 		{

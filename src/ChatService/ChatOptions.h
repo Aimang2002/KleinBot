@@ -12,7 +12,6 @@ struct ChatOptions
     double frequencyPenalty = 0.0;
     double presencePenalty = 0.0;
     std::size_t maxMessageTokens = 4096;
-    std::size_t workerThreads = 4;
     long messageSurvivalSeconds = 3600;
     std::string privateAction = "send_private_msg";
     std::string groupAction = "send_group_msg";

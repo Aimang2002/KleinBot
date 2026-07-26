@@ -49,8 +49,13 @@ TEST(ConfigLoaderTest, DecodesTypedConfigurationAndDefaults)
     ASSERT_TRUE(result.canStart());
     ASSERT_NE(result.config, nullptr);
     EXPECT_EQ(result.config->bot.id, 10001U);
-    EXPECT_EQ(result.config->chat.workerThreads, 4U);
     const RuntimeSettings runtime = buildRuntimeSettings(*result.config);
+    EXPECT_FALSE(result.config->chat.workerThreads.has_value());
+    EXPECT_TRUE(runtime.messageExecution.dynamicScaling);
+    EXPECT_GE(runtime.messageExecution.initialWorkerThreads, 1U);
+    EXPECT_EQ(runtime.messageExecution.maxWorkerThreads,
+              runtime.messageExecution.initialWorkerThreads * 4U);
+    EXPECT_EQ(runtime.messageExecution.maxPendingMessages, 1024U);
     EXPECT_EQ(runtime.transport.mode, TransportMode::ReverseWebSocket);
     EXPECT_EQ(runtime.transport.reverseWebSocket.bindPort, 8600);
     EXPECT_EQ(runtime.transport.connectTimeoutMs, 5000);
@@ -67,10 +72,31 @@ TEST(ConfigLoaderTest, UsesSafeDefaultsForInvalidOptionalFields)
 
     EXPECT_TRUE(result.canStart());
     ASSERT_NE(result.config, nullptr);
-    EXPECT_EQ(result.config->chat.workerThreads, 4U);
+    EXPECT_FALSE(result.config->chat.workerThreads.has_value());
     EXPECT_FALSE(result.config->accessibilityChat);
     EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "chat.worker_threads"));
     EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "features.accessibility_chat"));
+}
+
+TEST(ConfigLoaderTest, UsesExplicitWorkerThreadCountAsFixedPool)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["chat"]["worker_threads"] = 6;
+    document["chat"]["max_pending_messages"] = 2048;
+    document["chat"]["worker_idle_seconds"] = 45;
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    ASSERT_TRUE(result.canStart());
+    ASSERT_TRUE(result.config->chat.workerThreads.has_value());
+    EXPECT_EQ(*result.config->chat.workerThreads, 6U);
+    const RuntimeSettings runtime = buildRuntimeSettings(*result.config);
+    EXPECT_FALSE(runtime.messageExecution.dynamicScaling);
+    EXPECT_EQ(runtime.messageExecution.initialWorkerThreads, 6U);
+    EXPECT_EQ(runtime.messageExecution.maxWorkerThreads, 6U);
+    EXPECT_EQ(runtime.messageExecution.maxPendingMessages, 2048U);
+    EXPECT_EQ(runtime.messageExecution.workerIdleSeconds, 45U);
 }
 
 TEST(ConfigLoaderTest, RejectsMissingActiveTransportButIgnoresUnknownFields)
