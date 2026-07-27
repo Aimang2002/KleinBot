@@ -5,6 +5,7 @@
 
 struct ImageResponse
 {
+    bool cancelled = false;
     int code = 0;
     std::string image_base64;      // 生成图片的 base64 编码
 

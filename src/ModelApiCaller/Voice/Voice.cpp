@@ -1,8 +1,10 @@
 #include "Voice.h"
 #include "../../Library/nlohmann/json.hpp"
+#include "../../Network/CurlRequestControl.h"
 #include <filesystem>
 
-Voice::Voice(VoiceOptions config) : config(std::move(config)) {}
+Voice::Voice(VoiceOptions config, const std::atomic<bool> *running)
+    : config(std::move(config)), running(running) {}
 
 // 回调函数，用于处理HTTP响应数据
 size_t so_VIST_WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
@@ -65,6 +67,7 @@ std::string Voice::toAudio(const std::string &text)
         // 设置接收响应数据的回调函数
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, so_VIST_WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &audioFile);
+        CurlRequestControl::configure(curl, running);
 
         // 执行HTTP请求
         res = curl_easy_perform(curl);
@@ -74,6 +77,11 @@ std::string Voice::toAudio(const std::string &text)
         {
             curl_easy_cleanup(curl);
             curl_slist_free_all(headers);
+            if (CurlRequestControl::wasCancelled(res, running))
+            {
+                LOG_INFO("语音请求已因程序停止而取消");
+                return {};
+            }
             LOG_ERROR("请求失败: " + std::string(curl_easy_strerror(res)));
             return "系统提示：请求失败。";
         }

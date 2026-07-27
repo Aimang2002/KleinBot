@@ -2,6 +2,7 @@
 .cursor
 .codex
 build
+logs/
 .claude
 CLAUDE.md
 mermaid.md

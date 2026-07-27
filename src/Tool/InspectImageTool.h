@@ -43,6 +43,8 @@ public:
             requestModel.api_key = model.apiKey;
             requestModel.api_standard = model.apiStandard;
             const VisionResponse response = dock.RequestVision(requestModel, model.model, question, base64);
+            if (response.cancelled)
+                return {{}, {}, {}, false, true};
             if (response.code != 200)
                 return {"错误：视觉模型调用失败。", {}, {}};
 

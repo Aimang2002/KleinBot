@@ -12,6 +12,7 @@ struct ToolResult
     std::vector<OutboundMessage> outbound_messages;
     std::string context_content;
     bool terminal = false;
+    bool cancelled = false;
 };
 
 // 工具抽象：模型可自主调用的能力单元

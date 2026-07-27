@@ -6,12 +6,14 @@
 #include "../../Port/VisionResponse.h"
 #include "../../Port/LLMPort.h"
 #include "../../Port/ChatRequest.h"
+#include <atomic>
 #include <curl/curl.h>
 
 class AnthropicStandard : public LLMPort
 {
 public:
-    explicit AnthropicStandard(std::string proxy = {}) : proxy(std::move(proxy)) {}
+    explicit AnthropicStandard(std::string proxy = {}, const std::atomic<bool> *running = nullptr)
+        : proxy(std::move(proxy)), running(running) {}
     ChatResponse request_chat(const ChatModel &model, const std::string &model_name, const ChatRequest &request) override;
     VisionResponse request_vision(const ChatModel &model, const std::string &model_name, const std::string &prompt, const std::string &base64) override;
     ImageResponse request_image(const ChatModel &model, const std::string &model_name, const std::string &prompt) override;
@@ -29,6 +31,7 @@ private:
 
     void VerifyCertificate(CURL *curl);
     std::string proxy;
+    const std::atomic<bool> *running;
 };
 
 #endif // ANTHROPIC_STANDARD_H

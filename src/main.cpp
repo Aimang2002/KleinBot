@@ -170,9 +170,9 @@ void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWork
 					 std::thread &timingThread, std::thread &transportThread)
 {
 	running.store(false);
-	LOG_INFO("正在等待消息线程池排空...");
+	LOG_INFO("正在停止消息执行器并等待活动任务退出...");
 	messageWorkers.shutdown();
-	LOG_INFO("消息线程池已退出");
+	LOG_INFO("消息执行器已退出");
 	LOG_INFO("正在等待长期记忆服务退出...");
 	memoryService.shutdown();
 	LOG_INFO("长期记忆服务已退出");
@@ -264,7 +264,7 @@ int main(int argc, char **argv)
 	ConversationStore conversationStore(dbPath);
 	ImageAssetStore imageAssetStore(dbPath, settings.storage.imageAssets);
 	UserSessionService userSession(models, conversationStore, settings.bot, settings.chat);
-	Dock dock(settings.dock);
+	Dock dock(settings.dock, &running);
 	MemoryService memoryService(dbPath, conversationStore, dock, models, settings.memory);
 	userSession.setMemoryService(&memoryService);
 	userSession.setImageAssetStore(&imageAssetStore);
@@ -304,7 +304,7 @@ int main(int argc, char **argv)
 	OneBotEventDecoder oneBotEventDecoder;
 	OneBotMessageEncoder oneBotMessageEncoder(
 		settings.chat.privateAction, settings.chat.groupAction);
-	Voice voice(settings.voice);
+	Voice voice(settings.voice, &running);
 	CommandRegistry commandRegistry(settings.bot.managerId);
 	commandRegistry.registryCommand(std::make_unique<HelpCommand>(settings.resources.helpFile));
 	commandRegistry.registryCommand(std::make_unique<ModelListCommand>(models));

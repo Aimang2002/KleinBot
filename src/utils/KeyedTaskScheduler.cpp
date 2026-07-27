@@ -60,6 +60,13 @@ void KeyedTaskScheduler::shutdown()
         if (workers.empty())
             return;
         stopping = true;
+        std::size_t cancelledTasks = 0;
+        for (const auto &entry : lanes)
+            cancelledTasks += entry.second.tasks.size();
+        outstandingTasks -= cancelledTasks;
+        lanes.clear();
+        std::queue<std::uint64_t> emptyReadyKeys;
+        readyKeys.swap(emptyReadyKeys);
         joiningWorkers.swap(workers);
     }
     taskAvailable.notify_all();

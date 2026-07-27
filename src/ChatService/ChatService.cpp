@@ -44,6 +44,8 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
     // 4. 调用 LLM + 工具调用循环
     std::cout << "Send to model..." << std::endl;
     ChatResponse response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
+    if (response.cancelled)
+        return resultReply;
 
     int rounds = 0;
     std::vector<std::string> contextAnnotations;
@@ -94,6 +96,8 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
                     LOG_ERROR("工具 " + call.name + " 执行异常：" + std::string(e.what()));
                 }
             }
+            if (toolResult.cancelled)
+                return resultReply;
             ChatMessage toolMsg;
             toolMsg.role = "tool";
             toolMsg.tool_call_id = call.id;
@@ -116,6 +120,8 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
 
         // 4c. 带着加长的 history 再次请求
         response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
+        if (response.cancelled)
+            return resultReply;
     }
 
     // 5. 错误处理
@@ -181,6 +187,9 @@ std::string ChatService::replyOneShot(const std::string &prompt)
     request.history.push_back({"user", prompt});
 
     ChatResponse response = this->dock.RequestChat(*modelPtr, modelName, request);
+
+    if (response.cancelled)
+        return {};
 
     if (response.code != 200)
     {

@@ -39,6 +39,8 @@ public:
             requestModel.api_key = model.apiKey;
             requestModel.api_standard = model.apiStandard;
             const ImageResponse response = dock.RequestDraw(requestModel, model.model, prompt);
+            if (response.cancelled)
+                return {{}, {}, {}, false, true};
             if (response.code >= 400 || response.image_base64.empty())
                 return {"错误：图片生成失败。", {}, {}};
 

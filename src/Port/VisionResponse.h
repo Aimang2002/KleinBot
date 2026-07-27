@@ -5,6 +5,7 @@
 
 struct VisionResponse
 {
+    bool cancelled = false;
     int code = 0;
     std::string content;           // 图片识别描述
     std::string refusal;           // 拒绝时的理由（content_filter 等场景）

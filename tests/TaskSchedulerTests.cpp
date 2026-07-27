@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <future>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -119,6 +120,43 @@ TEST(KeyedTaskSchedulerTest, RejectsTasksWhenGlobalCapacityIsFull)
     }
     barrierChanged.notify_all();
     scheduler.shutdown();
+}
+
+TEST(KeyedTaskSchedulerTest, CancelsQueuedTasksDuringShutdown)
+{
+    KeyedTaskScheduler scheduler(fixedOptions(1, 4));
+    std::mutex barrierMutex;
+    std::condition_variable barrierChanged;
+    bool started = false;
+    bool release = false;
+    std::atomic<int> queuedExecutions{0};
+
+    ASSERT_EQ(scheduler.submit(1, [&]() {
+        std::unique_lock<std::mutex> lock(barrierMutex);
+        started = true;
+        barrierChanged.notify_all();
+        barrierChanged.wait(lock, [&]() { return release; });
+    }), TaskSubmitResult::Accepted);
+    ASSERT_EQ(scheduler.submit(1, [&]() { ++queuedExecutions; }), TaskSubmitResult::Accepted);
+    ASSERT_EQ(scheduler.submit(2, [&]() { ++queuedExecutions; }), TaskSubmitResult::Accepted);
+
+    {
+        std::unique_lock<std::mutex> lock(barrierMutex);
+        ASSERT_TRUE(barrierChanged.wait_for(
+            lock, std::chrono::seconds(2), [&]() { return started; }));
+    }
+
+    auto shutdown = std::async(std::launch::async, [&]() { scheduler.shutdown(); });
+    {
+        std::lock_guard<std::mutex> lock(barrierMutex);
+        release = true;
+    }
+    barrierChanged.notify_all();
+
+    ASSERT_EQ(shutdown.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    shutdown.get();
+    EXPECT_EQ(queuedExecutions.load(), 0);
+    EXPECT_EQ(scheduler.pendingCount(), 0U);
 }
 
 TEST(KeyedTaskSchedulerTest, ExpandsForIndependentKeysAndShrinksAfterIdleTimeout)

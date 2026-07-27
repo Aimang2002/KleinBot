@@ -5,13 +5,14 @@
 #include <fstream>
 #include <curl/curl.h>
 #include <chrono>
+#include <atomic>
 #include "VoiceOptions.h"
 #include "../../Log/Log.h"
 
 class Voice
 {
 public:
-    explicit Voice(VoiceOptions config);
+    explicit Voice(VoiceOptions config, const std::atomic<bool> *running = nullptr);
     /**
      * @brief 修复图片
      *
@@ -32,6 +33,7 @@ public:
 
 private:
     VoiceOptions config;
+    const std::atomic<bool> *running;
 };
 
 #endif

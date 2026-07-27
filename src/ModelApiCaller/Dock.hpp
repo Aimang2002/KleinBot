@@ -10,6 +10,7 @@
 #include "../Port/LLMPort.h"
 #include "../Log/Log.h"
 #include "DockOptions.h"
+#include <atomic>
 #include <string>
 #include <memory>
 #include <unordered_map>
@@ -18,10 +19,10 @@ class Dock
 {
 public:
     // 构造函数
-    explicit Dock(const DockOptions &network)
+    explicit Dock(const DockOptions &network, const std::atomic<bool> *running = nullptr)
     {
-        this->registryLLM.emplace("OpenAI", std::make_unique<OpenAIStandard>(network.proxy));
-        this->registryLLM.emplace("Anthropic", std::make_unique<AnthropicStandard>(network.proxy));
+        this->registryLLM.emplace("OpenAI", std::make_unique<OpenAIStandard>(network.proxy, running));
+        this->registryLLM.emplace("Anthropic", std::make_unique<AnthropicStandard>(network.proxy, running));
     }
 
     ChatResponse RequestChat(const ChatModel &model, const std::string &model_name, const ChatRequest &request)

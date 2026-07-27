@@ -61,6 +61,8 @@ std::vector<MemoryMutation> MemoryExtractor::extract(uint64_t user_id,
                                            "\n待分析对话：" + conversation.dump()});
 
     ChatResponse response = dock.RequestChat(*model, modelName, request);
+    if (response.cancelled)
+        return {};
     if (response.code != 200 || response.content.empty())
     {
         LOG_WARNING("长期记忆提取失败，模型返回码：" + std::to_string(response.code));
