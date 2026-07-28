@@ -72,6 +72,13 @@ void ModelRegistry::reload()
             cm.api_key = model.value("api_key", "");
             cm.endpoint = model.value("api_endpoint", "");
             cm.api_standard = model.value("APIStandard", "");
+            const nlohmann::json *capabilities = nullptr;
+            if (model.contains("Capabilities") && model["Capabilities"].is_object())
+                capabilities = &model["Capabilities"];
+            else if (model.contains("capabilities") && model["capabilities"].is_object())
+                capabilities = &model["capabilities"];
+            if (capabilities != nullptr)
+                cm.capabilities.vision = capabilities->value("vision", false);
             chatModels.push_back(cm);
         }
     }

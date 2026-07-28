@@ -62,6 +62,7 @@ void Message::handleMessage(const InboundMessage &current_data)
 
 		std::string conversationText = current_data.plain_text;
 		std::string inboundAssetId;
+		std::optional<ChatImageContent> currentImage;
 		if (!current_data.message_data_url.empty())
 		{
 			auto asset = this->imageAssetStore.importFromUrl(current_data.user_id,
@@ -72,11 +73,17 @@ void Message::handleMessage(const InboundMessage &current_data)
 				if (!conversationText.empty())
 					conversationText += "\n";
 				conversationText += "[image asset_id=" + asset->asset_id + " source=inbound]";
+				const std::string base64 = this->imageAssetStore.readBase64(*asset);
+				currentImage = ChatImageContent{
+					asset->asset_id,
+					asset->mime_type.empty() ? "image/jpeg" : asset->mime_type,
+					base64};
 			}
 		}
 
 		const bool useContext = this->accessibility_chat || current_data.user_id == options.bot.managerId;
-		ChatReply chatReply = this->chatService.reply(current_data.user_id, conversationText, useContext);
+		ChatReply chatReply = this->chatService.reply(
+			current_data.user_id, conversationText, useContext, std::move(currentImage));
 		if (!inboundAssetId.empty())
 			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
 				chatReply.user_message_id);

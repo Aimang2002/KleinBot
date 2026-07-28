@@ -1,8 +1,10 @@
 #include "ChatService.h"
+#include "../Application/CurrentImageRouting.h"
 #include "../Memory/MemoryService.h"
 #include "../Tool/ToolContext.h"
 
-ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use_context)
+ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use_context,
+                             std::optional<ChatImageContent> currentImage)
 {
     ChatReply resultReply;
     int64_t userMessageId = 0;
@@ -30,22 +32,48 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
         bundle.request.history.push_back({"user", text});
     }
 
+    const CurrentImageRoute imageRoute = routeCurrentImage(
+        bundle.request, bundle.model, std::move(currentImage));
+
     // 3. 塞入可用工具
     bundle.request.tools = this->tools.allSchemas();
     bundle.request.system_prompt +=
-        "\n\n图片上下文规则：历史中的 [image asset_id=...] 只是资源引用，你当前并未直接看到图片。"
-        "当用户询问图片内容、位置、文字、颜色或细节时，必须调用 inspect_image；"
+        "\n\n图片上下文规则：历史消息中的 [image asset_id=...] 只是资源引用，你当前并未直接看到图片。"
+        "当用户询问历史图片的内容、位置、文字、颜色或细节时，必须调用 inspect_image；"
         "当用户要求重新发送历史图片时调用 send_image；当用户要求生成图片时调用 generate_image。"
         "不得在未调用 inspect_image 时猜测图片细节。"
         "当用户询问当前模型时调用 get_current_model；当用户要求开启或关闭语音时调用 set_voice_mode。"
         "管理员控制操作只能调用 admin_control，系统会在工具执行前校验管理员身份。"
         "不要把重置对话、设置人格或还原人格转换为工具调用。";
+    if (imageRoute == CurrentImageRoute::NativeMultimodal)
+    {
+        bundle.request.system_prompt +=
+            "如果当前请求直接附带用户刚发送的图片，你可以查看它并直接回答，"
+            "不需要为了查看这张当前图片调用 inspect_image。";
+    }
+    else if (imageRoute == CurrentImageRoute::ToolFallback)
+    {
+        bundle.request.system_prompt +=
+            "当前用户消息中的图片没有直接提供给你；涉及其内容时必须调用 inspect_image。";
+    }
 
     // 4. 调用 LLM + 工具调用循环
     std::cout << "Send to model..." << std::endl;
     ChatResponse response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
     if (response.cancelled)
         return resultReply;
+    if (imageRoute == CurrentImageRoute::NativeMultimodal &&
+        response.multimodal_unsupported)
+    {
+        const std::size_t removedImages = removeRequestImages(bundle.request);
+        LOG_WARNING("当前主模型接口明确拒绝多模态内容，已移除 " +
+                    std::to_string(removedImages) + " 张图片并降级到 inspect_image");
+        bundle.request.system_prompt +=
+            "当前用户消息中的图片没有直接提供给你；涉及其内容时必须调用 inspect_image。";
+        response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
+        if (response.cancelled)
+            return resultReply;
+    }
 
     int rounds = 0;
     std::vector<std::string> contextAnnotations;

@@ -343,7 +343,10 @@ Klein 会继续完整保存原始对话，并在后台从多轮对话中提取�
                 ],
                 "api_key": "sk-",
                 "api_endpoint": "https://api.xxx.com/v1/chat/completions",
-                "APIStandard": "OpenAI"
+                "APIStandard": "OpenAI",
+                "Capabilities": {
+                    "vision": true
+                }
             },
             {
                 "name": [
@@ -359,6 +362,8 @@ Klein 会继续完整保存原始对话，并在后台从多轮对话中提取�
         ]
     }
     ~~~
+
+    `Capabilities.vision` 是可选字段，默认 `false`。设为 `true` 后，当前消息中的图片会直接作为多模态内容发送给该主模型；未声明视觉能力的模型继续使用独立视觉模型和 `inspect_image` Tool。请只为实际支持图片输入的模型开启该能力。若接口以明确的 4xx 响应声明只接受文本，程序会移除本次图片并自动降级到 Tool；超时、鉴权和服务不可用不会触发能力降级。
     
     以api_key为一组，在改组内，所有的模型将会使用改组的api_key和endpoint。
     

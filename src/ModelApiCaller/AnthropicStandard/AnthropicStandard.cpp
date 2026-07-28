@@ -1,4 +1,5 @@
 #include "AnthropicStandard.h"
+#include "../ChatPayloadBuilder.h"
 #include "../Log/Log.h"
 #include "../../Network/CurlRequestControl.h"
 #include "../../Library/nlohmann/json.hpp"
@@ -18,31 +19,12 @@ ChatResponse AnthropicStandard::request_chat(const ChatModel &model, const std::
         return deserialize_result;
     }
 
-    // 构建载荷：Anthropic 把 system 提到顶层，messages 里不再放 system 角色
-    nlohmann::json payload_json;
-    payload_json["model"] = model_name;
-    payload_json["temperature"] = request.temperature;
-    payload_json["max_tokens"] = request.max_tokens > 0 ? request.max_tokens : DEFAULT_MAX_TOKENS;
-
-    if (!request.system_prompt.empty())
-    {
-        payload_json["system"] = request.system_prompt;
-    }
-
-    nlohmann::json messages = nlohmann::json::array();
-    for (const auto &msg : request.history)
-    {
-        // Anthropic 只接受 user / assistant；system 已经提到顶层
-        if (msg.role == "system")
-        {
-            continue;
-        }
-        messages.push_back({{"role", msg.role}, {"content", msg.content}});
-    }
-    payload_json["messages"] = messages;
-
+    nlohmann::json payload_json = ChatPayloadBuilder::anthropic(
+        model_name, request, DEFAULT_MAX_TOKENS);
+    const bool multimodalRequest = ChatPayloadBuilder::imageCount(request) > 0;
     std::string payload = payload_json.dump();
-    LOG_DEBUG("发送内容：" + payload);
+    LOG_DEBUG("发送模型请求：消息数 " + std::to_string(request.history.size()) +
+              "，图片数 " + std::to_string(ChatPayloadBuilder::imageCount(request)));
 
     std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
     if (CurlRequestControl::cancellationRequested(running))
@@ -54,6 +36,8 @@ ChatResponse AnthropicStandard::request_chat(const ChatModel &model, const std::
 
     deserialize_result = this->chat_json_parse(p.first);
     deserialize_result.code = p.second;
+    deserialize_result.multimodal_unsupported = multimodalRequest &&
+        ChatPayloadBuilder::explicitlyRejectsMultimodal(p.second, p.first);
     return deserialize_result;
 }
 

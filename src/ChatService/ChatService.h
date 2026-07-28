@@ -7,6 +7,8 @@
 #include "ChatOptions.h"
 #include "../Tool/ToolRegistry.h"
 #include "../Port/OutboundMessage.h"
+#include "../Port/ChatRequest.h"
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,7 +29,8 @@ public:
                 const ChatOptions &chatConfig, uint64_t managerId)
         : dock(dock), userSession(USS), models(models), tools(tools), memoryService(memoryService),
           chatConfig(chatConfig), managerId(managerId) {}
-    ChatReply reply(uint64_t user_id, const std::string &text, bool use_context);
+    ChatReply reply(uint64_t user_id, const std::string &text, bool use_context,
+                    std::optional<ChatImageContent> currentImage = std::nullopt);
     std::string replyOneShot(const std::string &prompt); // 无状态（一次性）对话
 
 private:

@@ -3,6 +3,7 @@
 #include <random>
 #include <thread>
 #include <atomic>
+#include <cstdlib>
 #include <csignal>
 #include "JsonParse/JsonParse.h"
 #include "Bootstrap/ConfigSnapshotStore.h"
@@ -57,6 +58,8 @@ volatile std::sig_atomic_t receivedSignal = 0;
 
 void signalHandler(int signal)
 {
+	if (receivedSignal != 0)
+		std::_Exit(128 + signal);
 	receivedSignal = signal;
 }
 
