@@ -54,9 +54,14 @@ std::vector<MemoryMutation> MemoryExtractor::extract(uint64_t user_id,
         "memory_key 必须稳定且简短，例如 preference.favorite_game、profile.city；同一事实变化时复用相同 key。"
         "事件类 key 应包含日期或唯一短标识，避免不同事件相互覆盖。"
         "search_text 要包含规范事实以及原文可能使用的同义表达和关键词，以空格分隔。"
+        "对于可表示为实体当前属性的资料、偏好、关系状态、项目配置或设备信息，额外输出："
+        "subject_key、subject_type、subject_name、subject_aliases、predicate、value_text。"
+        "subject_key 必须是稳定且可读的实体标识，例如 user:self、project:kleinbot、person:林安；"
+        "predicate 使用稳定的 snake_case 属性名；value_text 保存开放文本值，不要限制为枚举。"
+        "复杂事件、长经历或无法稳定拆成实体属性的记忆可以省略这些结构化字段。"
         "若用户明确撤销或要求遗忘某项事实，action 使用 delete，否则使用 upsert。"
         "只输出 JSON，不要输出 Markdown。格式："
-        R"({"memories":[{"action":"upsert","memory_key":"...","memory_type":"preference","canonical_text":"...","search_text":"...","importance":0.0,"confidence":0.0}]})";
+        R"({"memories":[{"action":"upsert","memory_key":"...","memory_type":"preference","canonical_text":"...","search_text":"...","subject_key":"user:self","subject_type":"user","subject_name":"用户本人","subject_aliases":["我","用户"],"predicate":"favorite_game","value_text":"塞尔达传说","importance":0.0,"confidence":0.0}]})";
     request.history.push_back({"user", "用户ID仅用于隔离，不要写入记忆：" + std::to_string(user_id) +
                                            "\n待分析对话：" + conversation.dump()});
 
@@ -87,11 +92,41 @@ std::vector<MemoryMutation> MemoryExtractor::extract(uint64_t user_id,
             mutation.item.memory_type = entry.value("memory_type", "event");
             mutation.item.canonical_text = entry.value("canonical_text", "");
             mutation.item.search_text = entry.value("search_text", mutation.item.canonical_text);
+            mutation.item.subject_key = entry.value("subject_key", "");
+            mutation.item.subject_type = entry.value("subject_type", "");
+            mutation.item.subject_name = entry.value("subject_name", "");
+            mutation.item.predicate = entry.value("predicate", "");
+            mutation.item.value_text = entry.value("value_text", "");
+            if (entry.contains("subject_aliases") && entry["subject_aliases"].is_array())
+            {
+                for (const auto &alias : entry["subject_aliases"])
+                {
+                    if (alias.is_string() && !alias.get<std::string>().empty())
+                        mutation.item.subject_aliases.push_back(alias.get<std::string>());
+                }
+            }
             mutation.item.importance = clampScore(entry.value("importance", 0.5));
             mutation.item.confidence = clampScore(entry.value("confidence", 0.5));
             mutation.item.source_start_id = sourceStartId;
             mutation.item.source_end_id = sourceEndId;
 
+            const bool hasStructuredField = !mutation.item.subject_key.empty() ||
+                                            !mutation.item.predicate.empty() ||
+                                            !mutation.item.value_text.empty();
+            const bool hasCompleteStructuredFact = !mutation.item.subject_key.empty() &&
+                                                   !mutation.item.predicate.empty() &&
+                                                   !mutation.item.value_text.empty();
+            if (hasStructuredField && !hasCompleteStructuredFact)
+            {
+                mutation.item.subject_key.clear();
+                mutation.item.subject_type.clear();
+                mutation.item.subject_name.clear();
+                mutation.item.subject_aliases.clear();
+                mutation.item.predicate.clear();
+                mutation.item.value_text.clear();
+            }
+            if (mutation.item.memory_key.empty() && hasCompleteStructuredFact)
+                mutation.item.memory_key = mutation.item.subject_key + "." + mutation.item.predicate;
             if (mutation.item.memory_key.empty())
                 continue;
             if (mutation.action != "delete" && mutation.item.canonical_text.empty())

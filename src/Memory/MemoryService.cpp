@@ -1,9 +1,59 @@
 #include "MemoryService.h"
 #include "../Log/Log.h"
+#include "MemoryQueryPlanner.h"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
 
+namespace
+{
+enum class RecallKind
+{
+    StructuredFact,
+    Memory,
+    RawConversation
+};
+
+struct RankedRecall
+{
+    RecallKind kind = RecallKind::RawConversation;
+    std::size_t index = 0;
+    double relevance = 0.0;
+    int64_t recency = 0;
+};
+
+bool coveredByMemory(const TimestampedMessage &message,
+                     const std::vector<MemoryItem> &memories,
+                     double minimumRelevance)
+{
+    if (message.id <= 0)
+        return false;
+    for (const auto &memory : memories)
+    {
+        if (memory.relevance < minimumRelevance)
+            continue;
+        if (message.id >= memory.source_start_id && message.id <= memory.source_end_id)
+            return true;
+    }
+    return false;
+}
+
+bool coveredByStructuredFact(const TimestampedMessage &message,
+                             const std::vector<StructuredFactResult> &facts,
+                             double minimumRelevance)
+{
+    if (message.id <= 0)
+        return false;
+    for (const auto &fact : facts)
+    {
+        if (fact.relevance + 40.0 < minimumRelevance)
+            continue;
+        if (message.id >= fact.source_start_id && message.id <= fact.source_end_id)
+            return true;
+    }
+    return false;
+}
+}
 
 MemoryService::MemoryService(const std::string &dbPath, ConversationStore &conversationStore,
                              Dock &dock, const ModelRegistry &models, const MemoryOptions &config)
@@ -47,51 +97,148 @@ void MemoryService::enqueueTurn(uint64_t user_id, const std::string &userText,
 }
 
 std::string MemoryService::recall(uint64_t user_id, const std::vector<std::string> &queries,
-                                  std::size_t limit)
+                                  std::size_t limit,
+                                  const std::vector<StructuredFactQuery> &factQueries,
+                                  int64_t excludeConversationId)
 {
     const std::size_t effectiveLimit = limit == 0 ? recallLimit : std::min(limit, recallLimit);
-    std::ostringstream output;
+    const std::size_t candidateLimit = effectiveLimit * 3;
+    std::vector<MemoryItem> memories;
+    std::vector<StructuredFactResult> facts;
     if (enabled)
     {
-        auto memories = store.search(user_id, queries, effectiveLimit);
-        if (!memories.empty())
+        facts = store.searchFacts(user_id, factQueries, candidateLimit);
+        memories = store.search(user_id, queries, candidateLimit);
+    }
+    auto rawMessages = conversationStore.searchMany(
+        user_id, queries, candidateLimit, excludeConversationId);
+
+    std::vector<RankedRecall> ranked;
+    ranked.reserve(facts.size() + memories.size() + rawMessages.size());
+    for (std::size_t index = 0; index < facts.size(); ++index)
+        ranked.push_back({RecallKind::StructuredFact, index, facts[index].relevance + 40.0,
+                          facts[index].source_start_id});
+    for (std::size_t index = 0; index < memories.size(); ++index)
+    {
+        bool duplicatesFact = false;
+        for (const auto &fact : facts)
         {
-            output << "长期记忆命中：\n";
-            for (const auto &memory : memories)
+            if (memories[index].source_start_id == fact.source_start_id &&
+                memories[index].source_end_id == fact.source_end_id &&
+                memories[index].canonical_text == fact.canonical_text)
             {
-                output << "- [" << memory.memory_type << "] " << memory.canonical_text << "\n";
-                auto evidence = conversationStore.loadByIdRange(
-                    user_id, memory.source_start_id, memory.source_end_id, 1);
-                if (!evidence.empty())
-                {
-                    output << "  原始对话证据：\n";
-                    for (const auto &message : evidence)
-                        output << "  [" << message.role << "] " << message.content << "\n";
-                }
+                duplicatesFact = true;
+                break;
             }
-            return output.str();
         }
+        if (!duplicatesFact)
+            ranked.push_back({RecallKind::Memory, index, memories[index].relevance,
+                              memories[index].updated_at});
+    }
+    for (std::size_t index = 0; index < rawMessages.size(); ++index)
+    {
+        if (coveredByStructuredFact(rawMessages[index], facts, rawMessages[index].relevance))
+            continue;
+        if (coveredByMemory(rawMessages[index], memories, rawMessages[index].relevance))
+            continue;
+        ranked.push_back({RecallKind::RawConversation, index, rawMessages[index].relevance,
+                          static_cast<int64_t>(rawMessages[index].timestamp)});
     }
 
-    bool foundRawConversation = false;
-    output << "长期记忆未命中，原始历史检索结果：\n";
-    std::size_t remaining = effectiveLimit;
-    for (const auto &query : queries)
+    std::sort(ranked.begin(), ranked.end(), [](const RankedRecall &left,
+                                                const RankedRecall &right) {
+        if (left.relevance != right.relevance)
+            return left.relevance > right.relevance;
+        if (left.kind != right.kind)
+            return static_cast<int>(left.kind) < static_cast<int>(right.kind);
+        return left.recency > right.recency;
+    });
+    if (ranked.size() > effectiveLimit)
+        ranked.resize(effectiveLimit);
+
+    if (ranked.empty())
+        return "没有找到与这些检索词相关的长期记忆或原始对话。";
+
+    std::ostringstream output;
+    output << "按相关性排序的记忆与原始历史：\n";
+    for (const auto &entry : ranked)
     {
-        if (query.empty() || remaining == 0)
-            continue;
-        auto messages = conversationStore.search(user_id, query);
-        for (const auto &message : messages)
+        if (entry.kind == RecallKind::RawConversation)
         {
-            output << "[" << message.role << "] " << message.content << "\n";
-            foundRawConversation = true;
-            if (--remaining == 0)
-                break;
+            const auto &message = rawMessages[entry.index];
+            output << "- [原始对话/" << message.role << "] " << message.content << "\n";
+            continue;
+        }
+
+        if (entry.kind == RecallKind::StructuredFact)
+        {
+            const auto &fact = facts[entry.index];
+            output << "- [结构化事实/" << fact.temporal << "] "
+                   << fact.subject_name << " (" << fact.subject_key << ")."
+                   << fact.predicate << " = " << fact.value_text;
+            if (fact.temporal != "current")
+            {
+                output << " [来源区间 " << fact.valid_from_source_id;
+                if (fact.valid_to_source_id > 0)
+                    output << " - " << fact.valid_to_source_id;
+                output << "]";
+            }
+            output << "\n";
+            auto evidence = conversationStore.loadByIdRange(
+                user_id, fact.source_start_id, fact.source_end_id, 1);
+            if (!evidence.empty())
+            {
+                output << "  原始对话证据：\n";
+                for (const auto &message : evidence)
+                {
+                    if (message.id == excludeConversationId)
+                        continue;
+                    output << "  [" << message.role << "] " << message.content << "\n";
+                }
+            }
+            continue;
+        }
+
+        const auto &memory = memories[entry.index];
+        output << "- [长期记忆/" << memory.memory_type << "] "
+               << memory.canonical_text << "\n";
+        auto evidence = conversationStore.loadByIdRange(
+            user_id, memory.source_start_id, memory.source_end_id, 1);
+        if (!evidence.empty())
+        {
+            output << "  原始对话证据：\n";
+            for (const auto &message : evidence)
+            {
+                if (message.id == excludeConversationId)
+                    continue;
+                output << "  [" << message.role << "] " << message.content << "\n";
+            }
         }
     }
-    if (!foundRawConversation)
-        return "没有找到与这些检索词相关的长期记忆或原始对话。";
     return output.str();
+}
+
+std::string MemoryService::recallForMessage(uint64_t user_id, const std::string &text,
+                                            int64_t currentMessageId)
+{
+    if (text.empty())
+        return {};
+    const bool explicitRecall = hasExplicitRecallIntent(text);
+    const bool factQuestion = looksLikeFactQuestion(text);
+    if (!explicitRecall && !factQuestion)
+        return {};
+
+    std::vector<StructuredFactQuery> factQueries;
+    if (enabled)
+        factQueries = store.planFactQueries(user_id, text, 5);
+    if (!explicitRecall && factQueries.empty())
+        return {};
+
+    const std::string result = recall(
+        user_id, {text}, recallLimit, factQueries, currentMessageId);
+    if (result == "没有找到与这些检索词相关的长期记忆或原始对话。")
+        return {};
+    return result;
 }
 
 void MemoryService::clearUser(uint64_t user_id)

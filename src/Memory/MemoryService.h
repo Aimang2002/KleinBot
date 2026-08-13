@@ -28,7 +28,11 @@ public:
                      const std::string &assistantText, int64_t sourceStartId,
                      int64_t sourceEndId);
     std::string recall(uint64_t user_id, const std::vector<std::string> &queries,
-                       std::size_t limit);
+                       std::size_t limit,
+                       const std::vector<StructuredFactQuery> &factQueries = {},
+                       int64_t excludeConversationId = 0);
+    std::string recallForMessage(uint64_t user_id, const std::string &text,
+                                 int64_t currentMessageId = 0);
     void clearUser(uint64_t user_id);
     void removeBySourceFrom(uint64_t user_id, int64_t firstSourceId);
     void shutdown();

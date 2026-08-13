@@ -29,8 +29,14 @@ public:
     // 读回某用户全部历史，按 id 升序（= 插入顺序）
     std::vector<TimestampedMessage> loadAll(uint64_t user_id);
 
-    // 关键词字面检索（LIKE '%kw%'），按 id 升序
+    // 单关键词兼容接口，内部使用多查询检索，结果按 id 升序。
     std::vector<TimestampedMessage> search(uint64_t user_id, const std::string &keyword);
+
+    // 多查询混合检索：拆分中文短语、去重并按文本相关性排序。
+    std::vector<TimestampedMessage> searchMany(uint64_t user_id,
+                                               const std::vector<std::string> &queries,
+                                               std::size_t limit,
+                                               int64_t excludeMessageId = 0);
 
     std::vector<TimestampedMessage> loadByIdRange(uint64_t user_id, int64_t start_id,
                                                   int64_t end_id, int padding = 1);

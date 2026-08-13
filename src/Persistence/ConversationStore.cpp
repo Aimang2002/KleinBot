@@ -1,6 +1,8 @@
 #include "ConversationStore.h"
 #include "../Log/Log.h"
+#include "../Memory/TextRecall.h"
 #include <algorithm>
+#include <unordered_map>
 
 namespace
 {
@@ -93,7 +95,7 @@ std::vector<TimestampedMessage> ConversationStore::loadAll(uint64_t user_id)
     if (!db)
         return out;
     const char *sql =
-        "SELECT role, content, timestamp FROM conversations "
+        "SELECT id, role, content, timestamp FROM conversations "
         "WHERE user_id=? ORDER BY id ASC;";
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
@@ -105,9 +107,10 @@ std::vector<TimestampedMessage> ConversationStore::loadAll(uint64_t user_id)
     while (sqlite3_step(stmt) == SQLITE_ROW)
     {
         TimestampedMessage m;
-        m.role = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
-        m.content = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
-        m.timestamp = static_cast<time_t>(sqlite3_column_int64(stmt, 2));
+        m.id = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+        m.role = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+        m.content = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
+        m.timestamp = static_cast<time_t>(sqlite3_column_int64(stmt, 3));
         out.push_back(std::move(m));
     }
     sqlite3_finalize(stmt);
@@ -116,34 +119,74 @@ std::vector<TimestampedMessage> ConversationStore::loadAll(uint64_t user_id)
 
 std::vector<TimestampedMessage> ConversationStore::search(uint64_t user_id, const std::string &keyword)
 {
+    auto result = searchMany(user_id, {keyword}, 30);
+    std::sort(result.begin(), result.end(), [](const TimestampedMessage &left,
+                                               const TimestampedMessage &right) {
+        return left.id < right.id;
+    });
+    return result;
+}
+
+std::vector<TimestampedMessage> ConversationStore::searchMany(
+    uint64_t user_id, const std::vector<std::string> &queries, std::size_t limit,
+    int64_t excludeMessageId)
+{
     std::lock_guard<std::mutex> lock(dbMutex);
-    std::vector<TimestampedMessage> out;
-    if (!db)
-        return out;
+    if (!db || queries.empty() || limit == 0)
+        return {};
+
+    const RecallQueryPlan plan = buildRecallQueryPlan(queries);
+    if (plan.terms.empty())
+        return {};
+
+    std::unordered_map<int64_t, TimestampedMessage> candidates;
+    const int candidateLimit = static_cast<int>(std::max<std::size_t>(30, limit * 8));
     const char *sql =
-        "SELECT role, content, timestamp FROM "
-        "(SELECT id, role, content, timestamp FROM conversations "
-        " WHERE user_id=? AND content LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT 30) "
-        "ORDER BY id ASC;";
-    sqlite3_stmt *stmt = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        "SELECT id, role, content, timestamp FROM conversations "
+        "WHERE user_id=? AND (?=0 OR id<>?) AND content LIKE ? ESCAPE '\\' "
+        "ORDER BY id DESC LIMIT ?;";
+    for (const auto &term : plan.terms)
     {
-        LOG_ERROR("search prepare 失败：" + std::string(sqlite3_errmsg(db)));
-        return out;
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        {
+            LOG_ERROR("searchMany prepare 失败：" + std::string(sqlite3_errmsg(db)));
+            break;
+        }
+        const std::string pattern = "%" + escapeLikePattern(term.text) + "%";
+        sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(user_id));
+        sqlite3_bind_int64(stmt, 2, static_cast<sqlite3_int64>(excludeMessageId));
+        sqlite3_bind_int64(stmt, 3, static_cast<sqlite3_int64>(excludeMessageId));
+        sqlite3_bind_text(stmt, 4, pattern.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 5, candidateLimit);
+        while (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            TimestampedMessage message;
+            message.id = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+            message.role = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+            message.content = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
+            message.timestamp = static_cast<time_t>(sqlite3_column_int64(stmt, 3));
+            message.relevance = scoreRecallText(plan, message.content);
+            auto iterator = candidates.find(message.id);
+            if (iterator == candidates.end() || iterator->second.relevance < message.relevance)
+                candidates[message.id] = std::move(message);
+        }
+        sqlite3_finalize(stmt);
     }
-    std::string pattern = "%" + escapeLikePattern(keyword) + "%";
-    sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(user_id));
-    sqlite3_bind_text(stmt, 2, pattern.c_str(), -1, SQLITE_TRANSIENT);
-    while (sqlite3_step(stmt) == SQLITE_ROW)
-    {
-        TimestampedMessage m;
-        m.role = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
-        m.content = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
-        m.timestamp = static_cast<time_t>(sqlite3_column_int64(stmt, 2));
-        out.push_back(std::move(m));
-    }
-    sqlite3_finalize(stmt);
-    return out;
+
+    std::vector<TimestampedMessage> result;
+    result.reserve(candidates.size());
+    for (auto &entry : candidates)
+        result.push_back(std::move(entry.second));
+    std::sort(result.begin(), result.end(), [](const TimestampedMessage &left,
+                                               const TimestampedMessage &right) {
+        if (left.relevance != right.relevance)
+            return left.relevance > right.relevance;
+        return left.id > right.id;
+    });
+    if (result.size() > limit)
+        result.resize(limit);
+    return result;
 }
 
 std::vector<TimestampedMessage> ConversationStore::loadByIdRange(
@@ -160,7 +203,7 @@ std::vector<TimestampedMessage> ConversationStore::loadByIdRange(
     const int64_t upperBound = end_id + std::max(0, padding);
 
     const char *sql =
-        "SELECT role, content, timestamp FROM conversations "
+        "SELECT id, role, content, timestamp FROM conversations "
         "WHERE user_id=? AND id BETWEEN ? AND ? ORDER BY id ASC;";
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
@@ -174,9 +217,10 @@ std::vector<TimestampedMessage> ConversationStore::loadByIdRange(
     while (sqlite3_step(stmt) == SQLITE_ROW)
     {
         TimestampedMessage message;
-        message.role = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
-        message.content = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
-        message.timestamp = static_cast<time_t>(sqlite3_column_int64(stmt, 2));
+        message.id = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+        message.role = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+        message.content = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
+        message.timestamp = static_cast<time_t>(sqlite3_column_int64(stmt, 3));
         out.push_back(std::move(message));
     }
     sqlite3_finalize(stmt);
