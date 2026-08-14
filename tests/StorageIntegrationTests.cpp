@@ -2,9 +2,12 @@
 
 #include "Asset/ImageAssetStore.h"
 #include "Persistence/ConversationStore.h"
+#include "Tool/SendImageTool.h"
 
 #include <cstdlib>
 #include <filesystem>
+#include <regex>
+#include <sqlite3.h>
 #include <string>
 
 namespace
@@ -76,6 +79,8 @@ TEST(ImageAssetStoreIntegrationTest, SavesFindsAndClearsAssetsWithFiles)
     ImageAssetStore store(databasePath, assetDirectory);
     const auto asset = store.saveBase64(10, "aGVsbG8=", "generated", "prompt", 30);
     ASSERT_TRUE(asset.has_value());
+    EXPECT_TRUE(std::regex_match(asset->asset_id, std::regex(R"(^img_[0-9a-f]{32}$)")));
+    EXPECT_EQ(asset->asset_id.find("_10_"), std::string::npos);
     EXPECT_TRUE(std::filesystem::exists(asset->local_path));
     EXPECT_EQ(store.readBase64(*asset), "aGVsbG8=");
 
@@ -117,4 +122,37 @@ TEST(ImageAssetStoreIntegrationTest, RemovesOnlyAssetsAfterConversationBoundary)
     EXPECT_TRUE(std::filesystem::exists(retained->local_path));
     EXPECT_FALSE(std::filesystem::exists(removed->local_path));
     EXPECT_TRUE(std::filesystem::exists(otherUser->local_path));
+}
+
+TEST(SendImageToolIntegrationTest, SendsLatestImageAsTerminalResultWithoutExposingAssetId)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    ImageAssetStore store(temporaryDirectory.path() + "/assets.db",
+                          temporaryDirectory.path() + "/images");
+    const auto firstAsset = store.saveBase64(10, "Zmlyc3Q=", "generated", "first", 30);
+    const auto latestAsset = store.saveBase64(10, "bGF0ZXN0", "generated", "latest", 31);
+    ASSERT_TRUE(firstAsset.has_value());
+    ASSERT_TRUE(latestAsset.has_value());
+    EXPECT_NE(firstAsset->asset_id, latestAsset->asset_id);
+
+    sqlite3 *database = nullptr;
+    ASSERT_EQ(sqlite3_open((temporaryDirectory.path() + "/assets.db").c_str(), &database), SQLITE_OK);
+    ASSERT_EQ(sqlite3_exec(database,
+                           "UPDATE image_assets SET created_at=1000 WHERE user_id=10;",
+                           nullptr, nullptr, nullptr),
+              SQLITE_OK);
+    sqlite3_close(database);
+
+    SendImageTool tool(store);
+    const auto result = tool.execute(R"({"source":"generated"})", {10, 31});
+
+    EXPECT_TRUE(result.terminal);
+    EXPECT_TRUE(result.suppress_text_reply);
+    EXPECT_EQ(result.model_content, "图片已发送。");
+    EXPECT_EQ(result.model_content.find(latestAsset->asset_id), std::string::npos);
+    ASSERT_EQ(result.outbound_messages.size(), 1U);
+    const auto &image = std::get<ImageMessage>(result.outbound_messages.front());
+    EXPECT_EQ(image.source, ImageMessage::Source::LocalPath);
+    EXPECT_EQ(image.data, latestAsset->local_path);
 }

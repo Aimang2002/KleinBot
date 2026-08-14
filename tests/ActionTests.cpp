@@ -94,3 +94,10 @@ TEST(ActionToolTest, ConvertsInvalidJsonIntoTerminalError)
     EXPECT_TRUE(result.outbound_messages.empty());
     EXPECT_TRUE(result.terminal);
 }
+
+TEST(ToolResultTest, OutboundMessagesAlwaysTerminateToolRound)
+{
+    const ToolResult result{"sent", {ImageMessage{ImageMessage::Source::LocalPath, "/tmp/image.png"}}, {}, false};
+
+    EXPECT_TRUE(terminatesToolRound(result));
+}

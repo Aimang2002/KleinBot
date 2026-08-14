@@ -2,18 +2,16 @@
 #include "../Log/Log.h"
 #include <curl/curl.h>
 #include <sqlite3.h>
-#include <atomic>
 #include <cctype>
-#include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <random>
 #include <sstream>
 
 namespace
 {
-std::atomic<uint64_t> assetSequence{0};
-
 size_t writeBytes(void *ptr, size_t size, size_t count, void *userdata)
 {
     auto *data = static_cast<std::string *>(userdata);
@@ -57,14 +55,27 @@ std::string extensionForMime(const std::string &mime)
     return ".jpg";
 }
 
-std::string makeAssetId(uint64_t user_id)
+std::string makeAssetId()
 {
-    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::system_clock::now().time_since_epoch())
-                          .count();
+    std::random_device randomSource;
+    std::uniform_int_distribution<uint32_t> distribution;
     std::ostringstream stream;
-    stream << "img_" << now << "_" << user_id << "_" << assetSequence.fetch_add(1);
+    stream << "img_" << std::hex << std::setfill('0');
+    for (int index = 0; index < 4; ++index)
+        stream << std::setw(8) << distribution(randomSource);
     return stream.str();
+}
+
+bool assetIdExists(sqlite3 *db, const std::string &assetId)
+{
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM image_assets WHERE asset_id=? LIMIT 1;",
+                           -1, &statement, nullptr) != SQLITE_OK)
+        return true;
+    sqlite3_bind_text(statement, 1, assetId.c_str(), -1, SQLITE_TRANSIENT);
+    const bool exists = sqlite3_step(statement) == SQLITE_ROW;
+    sqlite3_finalize(statement);
+    return exists;
 }
 
 std::string columnText(sqlite3_stmt *statement, int column)
@@ -209,17 +220,31 @@ std::optional<ImageAsset> ImageAssetStore::saveBytes(uint64_t user_id, const std
         return std::nullopt;
 
     ImageAsset asset;
-    asset.asset_id = makeAssetId(user_id);
     asset.user_id = user_id;
     asset.source = source;
     asset.mime_type = mime_type;
     asset.prompt = prompt;
     asset.source_message_id = source_message_id;
     asset.created_at = static_cast<int64_t>(std::time(nullptr));
-    asset.local_path = std::filesystem::absolute(
-                           std::filesystem::path(assetDirectory) /
-                           (asset.asset_id + extensionForMime(mime_type)))
-                           .string();
+
+    constexpr int maxIdAttempts = 16;
+    for (int attempt = 0; attempt < maxIdAttempts; ++attempt)
+    {
+        asset.asset_id = makeAssetId();
+        asset.local_path = std::filesystem::absolute(
+                               std::filesystem::path(assetDirectory) /
+                               (asset.asset_id + extensionForMime(mime_type)))
+                               .string();
+        if (!assetIdExists(db, asset.asset_id) && !std::filesystem::exists(asset.local_path))
+            break;
+        asset.asset_id.clear();
+        asset.local_path.clear();
+    }
+    if (asset.asset_id.empty())
+    {
+        LOG_ERROR("图片资源 ID 连续碰撞，拒绝保存");
+        return std::nullopt;
+    }
 
     std::ofstream file(asset.local_path, std::ios::binary);
     if (!file.is_open())
@@ -293,7 +318,8 @@ std::optional<ImageAsset> ImageAssetStore::find(uint64_t user_id, const std::str
 std::optional<ImageAsset> ImageAssetStore::findLatest(uint64_t user_id, const std::string &source) const
 {
     auto assets = query("SELECT asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at "
-                        "FROM image_assets WHERE user_id=? AND source=? ORDER BY created_at DESC LIMIT 1;",
+                        "FROM image_assets WHERE user_id=? AND source=? "
+                        "ORDER BY created_at DESC, rowid DESC LIMIT 1;",
                         user_id, "", source, 1);
     return assets.empty() ? std::nullopt : std::optional<ImageAsset>(assets.front());
 }
@@ -301,7 +327,8 @@ std::optional<ImageAsset> ImageAssetStore::findLatest(uint64_t user_id, const st
 std::vector<ImageAsset> ImageAssetStore::list(uint64_t user_id, const std::string &source, int limit) const
 {
     return query("SELECT asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at "
-                 "FROM image_assets WHERE user_id=? AND source=? ORDER BY created_at DESC LIMIT ?;",
+                 "FROM image_assets WHERE user_id=? AND source=? "
+                 "ORDER BY created_at DESC, rowid DESC LIMIT ?;",
                  user_id, "", source, limit);
 }
 

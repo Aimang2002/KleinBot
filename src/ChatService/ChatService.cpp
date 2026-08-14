@@ -42,6 +42,9 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
         "\n\n图片上下文规则：历史消息中的 [image asset_id=...] 只是资源引用，你当前并未直接看到图片。"
         "当用户询问历史图片的内容、位置、文字、颜色或细节时，必须调用 inspect_image；"
         "当用户要求重新发送历史图片时调用 send_image；当用户要求生成图片时调用 generate_image。"
+        "generate_image 和 send_image 会直接发送图片，调用成功后不要再次调用任何图片工具，也不要把 asset_id 占位符展示给用户。"
+        "历史中的图片占位符只代表过去已经发送的图片，不能当作本轮新生成结果。"
+        "用户表示不满意、要求修改、换一版或重新生成时，必须调用 generate_image 生成新图片，不能只引用或重发旧图片。"
         "不得在未调用 inspect_image 时猜测图片细节。"
         "当用户询问以前说过的资料、偏好、经历、决定或长期状态时，若本轮用户消息中已有"
         "type=retrieved_memory 的历史资料且证据足够，则直接依据证据回答；"
@@ -92,6 +95,7 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
     int rounds = 0;
     std::vector<std::string> contextAnnotations;
     bool terminalToolResult = false;
+    bool suppressTerminalTextReply = false;
     std::string terminalToolContent;
     while (response.code == 200 && response.finish_reason == "tool_calls" && !response.tool_calls.empty())
     {
@@ -150,10 +154,15 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
                                                   toolResult.outbound_messages.end());
             if (!toolResult.context_content.empty())
                 contextAnnotations.push_back(toolResult.context_content);
-            if (toolResult.terminal)
+            const bool effectiveTerminal = terminatesToolRound(toolResult);
+            if (!toolResult.terminal && !toolResult.outbound_messages.empty())
+                LOG_WARNING("工具 " + call.name + " 产生了出站消息但未声明 terminal，已自动终止本轮工具循环");
+            if (effectiveTerminal)
             {
                 terminalToolResult = true;
                 terminalToolContent = toolResult.model_content;
+                suppressTerminalTextReply = toolResult.suppress_text_reply;
+                break;
             }
         }
 
@@ -206,7 +215,7 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
     }
 
     std::cout << "\033[32m" << "Model response: " << "\033[0m" << LLM_content << std::endl;
-    resultReply.text = LLM_content;
+    resultReply.text = suppressTerminalTextReply ? std::string() : LLM_content;
     return resultReply;
 }
 

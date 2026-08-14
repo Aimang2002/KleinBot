@@ -28,8 +28,9 @@ public:
             const auto asset = resolveImageAsset(assetStore, ctx.user_id, nlohmann::json::parse(args));
             if (!asset)
                 return {"错误：没有找到要发送的图片。", {}, {}};
-            return {"图片已发送：" + asset->asset_id,
-                    {ImageMessage{ImageMessage::Source::LocalPath, asset->local_path}}, {}};
+            return {"图片已发送。",
+                    {ImageMessage{ImageMessage::Source::LocalPath, asset->local_path}}, {},
+                    true, false, true};
         }
         catch (const std::exception &error)
         {

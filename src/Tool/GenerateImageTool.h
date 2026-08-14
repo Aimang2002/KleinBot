@@ -50,8 +50,9 @@ public:
                 return {"错误：图片已生成，但保存失败。", {}, {}};
 
             const std::string placeholder = "[image asset_id=" + asset->asset_id + " source=generated]";
-            return {"图片已生成 " + placeholder + "，可以继续询问它的内容，或要求重新发送。",
-                    {ImageMessage{ImageMessage::Source::LocalPath, asset->local_path}}, placeholder};
+            return {"图片已生成，可以继续询问它的内容，或要求重新发送。",
+                    {ImageMessage{ImageMessage::Source::LocalPath, asset->local_path}}, placeholder,
+                    true, false, true};
         }
         catch (const std::exception &error)
         {

@@ -48,7 +48,7 @@ public:
             if (response.code != 200)
                 return {"错误：视觉模型调用失败。", {}, {}};
 
-            return {"图片 " + asset->asset_id + " 的视觉分析结果：\n" + response.content, {}, {}};
+            return {"图片视觉分析结果：\n" + response.content, {}, {}};
         }
         catch (const std::exception &error)
         {

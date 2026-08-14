@@ -13,7 +13,13 @@ struct ToolResult
     std::string context_content;
     bool terminal = false;
     bool cancelled = false;
+    bool suppress_text_reply = false;
 };
+
+inline bool terminatesToolRound(const ToolResult &result)
+{
+    return result.terminal || !result.outbound_messages.empty();
+}
 
 // 工具抽象：模型可自主调用的能力单元
 // 与 Command（用户关键词触发）并存，互不知道对方
