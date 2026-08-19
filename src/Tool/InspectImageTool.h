@@ -3,6 +3,7 @@
 
 #include "Tool.h"
 #include "ImageToolHelpers.h"
+#include "ToolArgumentParser.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
 #include "../ModelApiCaller/Dock.hpp"
 
@@ -28,7 +29,7 @@ public:
     {
         try
         {
-            const auto arguments = nlohmann::json::parse(args);
+            const auto arguments = parseToolArguments(args);
             const std::string question = arguments.value("question", "请详细分析这张图片");
             const auto asset = resolveImageAsset(assetStore, ctx.user_id, arguments);
             if (!asset)

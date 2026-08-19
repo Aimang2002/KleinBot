@@ -154,6 +154,42 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.memory.recallLimit, candidate.memory.recallLimit,
                  "memory.recall_limit", rebuild);
 
+    addIfChanged(diff, current.webSearch.enabled, candidate.webSearch.enabled,
+                 "web_search.enabled", rebuild);
+    addIfChanged(diff, current.webSearch.provider, candidate.webSearch.provider,
+                 "web_search.provider", rebuild);
+    addIfChanged(diff, current.webSearch.endpoint, candidate.webSearch.endpoint,
+                 "web_search.endpoint", rebuild);
+    addIfChanged(diff, current.webSearch.apiKey, candidate.webSearch.apiKey,
+                 "web_search.api_key", rebuild);
+    addIfChanged(diff, current.webSearch.searchDepth, candidate.webSearch.searchDepth,
+                 "web_search.search_depth", rebuild);
+    addIfChanged(diff, current.webSearch.maxResults, candidate.webSearch.maxResults,
+                 "web_search.max_results", rebuild);
+    addIfChanged(diff, current.webSearch.maxContentChars, candidate.webSearch.maxContentChars,
+                 "web_search.max_content_chars", rebuild);
+    addIfChanged(diff, current.webSearch.maxResponseBytes, candidate.webSearch.maxResponseBytes,
+                 "web_search.max_response_bytes", rebuild);
+    addIfChanged(diff, current.webSearch.connectTimeoutMs, candidate.webSearch.connectTimeoutMs,
+                 "web_search.connect_timeout_ms", rebuild);
+    addIfChanged(diff, current.webSearch.requestTimeoutMs, candidate.webSearch.requestTimeoutMs,
+                 "web_search.request_timeout_ms", rebuild);
+
+    addIfChanged(diff, current.webFetch.enabled, candidate.webFetch.enabled,
+                 "web_fetch.enabled", rebuild);
+    addIfChanged(diff, current.webFetch.maxContentChars, candidate.webFetch.maxContentChars,
+                 "web_fetch.max_content_chars", rebuild);
+    addIfChanged(diff, current.webFetch.maxResponseBytes, candidate.webFetch.maxResponseBytes,
+                 "web_fetch.max_response_bytes", rebuild);
+    addIfChanged(diff, current.webFetch.connectTimeoutMs, candidate.webFetch.connectTimeoutMs,
+                 "web_fetch.connect_timeout_ms", rebuild);
+    addIfChanged(diff, current.webFetch.requestTimeoutMs, candidate.webFetch.requestTimeoutMs,
+                 "web_fetch.request_timeout_ms", rebuild);
+    addIfChanged(diff, current.webFetch.cacheTtlSeconds, candidate.webFetch.cacheTtlSeconds,
+                 "web_fetch.cache_ttl_seconds", rebuild);
+    addIfChanged(diff, current.webFetch.cacheMaxEntries, candidate.webFetch.cacheMaxEntries,
+                 "web_fetch.cache_max_entries", rebuild);
+
     addIfChanged(diff, current.storage.conversationDatabase,
                  candidate.storage.conversationDatabase,
                  "storage.conversation_database", ConfigChangeImpact::Restart);

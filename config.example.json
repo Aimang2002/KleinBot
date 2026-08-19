@@ -56,6 +56,27 @@
         "idle_seconds": 20,
         "recall_limit": 8
     },
+    "web_search": {
+        "enabled": false,
+        "provider": "tavily",
+        "endpoint": "https://api.tavily.com/search",
+        "api_key": {"from_env": "KLEIN_TAVILY_API_KEY"},
+        "search_depth": "basic",
+        "max_results": 5,
+        "max_content_chars": 2000,
+        "max_response_bytes": 2097152,
+        "connect_timeout_ms": 5000,
+        "request_timeout_ms": 15000
+    },
+    "web_fetch": {
+        "enabled": false,
+        "max_content_chars": 12000,
+        "max_response_bytes": 2097152,
+        "connect_timeout_ms": 5000,
+        "request_timeout_ms": 20000,
+        "cache_ttl_seconds": 900,
+        "cache_max_entries": 32
+    },
     "storage": {
         "conversation_database": "source/conversations.db",
         "image_assets": "source/image_assets"

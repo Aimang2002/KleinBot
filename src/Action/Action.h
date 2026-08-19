@@ -20,6 +20,7 @@ struct ActionContext
 {
     uint64_t user_id = 0;
     int64_t user_message_id = 0;
+    std::string user_text;
 };
 
 struct ActionResult

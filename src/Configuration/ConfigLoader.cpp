@@ -427,7 +427,8 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     Decoder decoder(result.diagnostics);
     decoder.unknownFields(document,
                           {"schema_version", "bot", "chat", "models", "voice", "features",
-                           "memory", "storage", "resources", "network", "communication"},
+                           "memory", "web_search", "web_fetch", "storage", "resources",
+                           "network", "communication"},
                           "$" );
 
     SchemaConfig config;
@@ -532,6 +533,93 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     else
     {
         config.memory.model = config.chat.defaultModel;
+    }
+
+    const json *webSearch = decoder.object(document, "web_search", "web_search");
+    if (webSearch != nullptr)
+    {
+        decoder.unknownFields(
+            *webSearch,
+            {"enabled", "provider", "endpoint", "api_key", "search_depth",
+             "max_results", "max_content_chars", "max_response_bytes",
+             "connect_timeout_ms", "request_timeout_ms"},
+            "web_search");
+        config.webSearch.enabled = decoder.boolean(
+            *webSearch, "enabled", "web_search.enabled", false);
+        config.webSearch.provider = decoder.string(
+            *webSearch, "provider", "web_search.provider", "tavily");
+        config.webSearch.endpoint = decoder.string(
+            *webSearch, "endpoint", "web_search.endpoint", "https://api.tavily.com/search");
+        if (config.webSearch.enabled)
+        {
+            config.webSearch.apiKey = decoder.secret(
+                *webSearch, "api_key", "web_search.api_key", ConfigSeverity::FeatureDisabled);
+        }
+        config.webSearch.searchDepth = decoder.string(
+            *webSearch, "search_depth", "web_search.search_depth", "basic");
+        config.webSearch.maxResults = static_cast<std::size_t>(decoder.integer(
+            *webSearch, "max_results", "web_search.max_results", 5, 1, 10));
+        config.webSearch.maxContentChars = static_cast<std::size_t>(decoder.integer(
+            *webSearch, "max_content_chars", "web_search.max_content_chars", 2000, 100, 20000));
+        config.webSearch.maxResponseBytes = static_cast<std::size_t>(decoder.integer(
+            *webSearch, "max_response_bytes", "web_search.max_response_bytes",
+            2097152, 1024, 16777216));
+        config.webSearch.connectTimeoutMs = decoder.integer(
+            *webSearch, "connect_timeout_ms", "web_search.connect_timeout_ms",
+            5000, 100, 300000);
+        config.webSearch.requestTimeoutMs = decoder.integer(
+            *webSearch, "request_timeout_ms", "web_search.request_timeout_ms",
+            15000, 100, 300000);
+        if (config.webSearch.provider != "tavily")
+        {
+            config.webSearch.enabled = false;
+            decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Dependency,
+                               "web_search.provider", "当前版本仅支持 tavily，联网搜索已关闭");
+        }
+        if (config.webSearch.searchDepth != "basic" &&
+            config.webSearch.searchDepth != "advanced")
+        {
+            config.webSearch.searchDepth = "basic";
+            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Range,
+                               "web_search.search_depth", "仅支持 basic/advanced，已使用 basic");
+        }
+        if (config.webSearch.enabled && config.webSearch.apiKey.empty())
+        {
+            config.webSearch.enabled = false;
+            decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Security,
+                               "web_search.api_key", "API Key 缺失，联网搜索已关闭");
+        }
+    }
+
+    const json *webFetch = decoder.object(document, "web_fetch", "web_fetch");
+    if (webFetch != nullptr)
+    {
+        decoder.unknownFields(
+            *webFetch,
+            {"enabled", "max_content_chars", "max_response_bytes",
+             "connect_timeout_ms", "request_timeout_ms", "cache_ttl_seconds",
+             "cache_max_entries"},
+            "web_fetch");
+        config.webFetch.enabled = decoder.boolean(
+            *webFetch, "enabled", "web_fetch.enabled", false);
+        config.webFetch.maxContentChars = static_cast<std::size_t>(decoder.integer(
+            *webFetch, "max_content_chars", "web_fetch.max_content_chars",
+            12000, 500, 60000));
+        config.webFetch.maxResponseBytes = static_cast<std::size_t>(decoder.integer(
+            *webFetch, "max_response_bytes", "web_fetch.max_response_bytes",
+            2097152, 1024, 16777216));
+        config.webFetch.connectTimeoutMs = decoder.integer(
+            *webFetch, "connect_timeout_ms", "web_fetch.connect_timeout_ms",
+            5000, 100, 300000);
+        config.webFetch.requestTimeoutMs = decoder.integer(
+            *webFetch, "request_timeout_ms", "web_fetch.request_timeout_ms",
+            20000, 100, 300000);
+        config.webFetch.cacheTtlSeconds = decoder.integer(
+            *webFetch, "cache_ttl_seconds", "web_fetch.cache_ttl_seconds",
+            900, 0, 86400);
+        config.webFetch.cacheMaxEntries = static_cast<std::size_t>(decoder.integer(
+            *webFetch, "cache_max_entries", "web_fetch.cache_max_entries",
+            32, 1, 1024));
     }
 
     const json *storage = decoder.object(document, "storage", "storage");

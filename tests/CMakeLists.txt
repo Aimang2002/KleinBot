@@ -10,6 +10,8 @@ add_executable(kleinbot_tests
     StorageIntegrationTests.cpp
     TaskSchedulerTests.cpp
     TransportConfigTests.cpp
+    WebFetchTests.cpp
+    WebSearchTests.cpp
 )
 
 add_executable(transport_contract_driver TransportContractDriver.cpp)

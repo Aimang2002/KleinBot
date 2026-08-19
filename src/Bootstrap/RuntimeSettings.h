@@ -11,6 +11,8 @@
 #include "../ModelApiCaller/ModelEndpointOptions.h"
 #include "../ModelApiCaller/Voice/VoiceOptions.h"
 #include "../Network/TransportConfig.h"
+#include "../WebFetch/WebFetchOptions.h"
+#include "../WebSearch/WebSearchOptions.h"
 
 #include <string>
 
@@ -44,6 +46,8 @@ struct RuntimeSettings
     ModelRuntimeSettings models;
     VoiceOptions voice;
     MemoryOptions memory;
+    WebSearchOptions webSearch;
+    WebFetchOptions webFetch;
     MessageOptions message;
     MessageExecutionOptions messageExecution;
     DockOptions dock;

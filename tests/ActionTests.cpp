@@ -2,6 +2,8 @@
 
 #include "Action/GetCurrentModelAction.h"
 #include "Tool/ActionTool.h"
+#include "Tool/ToolArgumentParser.h"
+#include "Tool/ToolRegistry.h"
 
 namespace
 {
@@ -95,9 +97,54 @@ TEST(ActionToolTest, ConvertsInvalidJsonIntoTerminalError)
     EXPECT_TRUE(result.terminal);
 }
 
+TEST(ToolArgumentParserTest, AcceptsStandardJsonObject)
+{
+    const nlohmann::json arguments = parseToolArguments(R"({"enabled":true})");
+
+    EXPECT_TRUE(arguments.at("enabled").get<bool>());
+}
+
+TEST(ToolArgumentParserTest, MergesConcatenatedGatewayObjects)
+{
+    const nlohmann::json arguments = parseToolArguments(
+        R"({}{"query":"中东局势最新动态 2026","max_results":8})");
+
+    EXPECT_EQ(arguments.at("query"), "中东局势最新动态 2026");
+    EXPECT_EQ(arguments.at("max_results"), 8);
+}
+
+TEST(ToolArgumentParserTest, RejectsTrailingNonJsonContent)
+{
+    EXPECT_THROW(parseToolArguments(R"({"enabled":true}garbage)"), std::exception);
+}
+
+TEST(ToolArgumentParserTest, NormalizesGatewayArgumentsForEchoBack)
+{
+    // 网关返回的畸形参数必须在回灌前修复，否则网关无法重建 tool_use 块
+    const std::string normalized = normalizeToolArguments(
+        R"({}{"query":"GLM 最新版本","topic":"general"})");
+    const nlohmann::json parsed = nlohmann::json::parse(normalized);
+
+    EXPECT_EQ(parsed.at("query"), "GLM 最新版本");
+    EXPECT_EQ(parsed.at("topic"), "general");
+
+    EXPECT_EQ(normalizeToolArguments(R"({"a":1})"), R"({"a":1})");
+    // 无法解析的内容原样透传，不制造新的失败
+    EXPECT_EQ(normalizeToolArguments("not json"), "not json");
+}
+
 TEST(ToolResultTest, OutboundMessagesAlwaysTerminateToolRound)
 {
     const ToolResult result{"sent", {ImageMessage{ImageMessage::Source::LocalPath, "/tmp/image.png"}}, {}, false};
 
     EXPECT_TRUE(terminatesToolRound(result));
+}
+
+TEST(ToolRegistryTest, ListsRegisteredToolNames)
+{
+    RecordingAction action;
+    ToolRegistry registry;
+    registry.registerTool(std::make_unique<ActionTool>(action));
+
+    EXPECT_EQ(registry.names(), std::vector<std::string>{"record_action"});
 }

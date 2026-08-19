@@ -41,6 +41,9 @@
 #include "Command/SwitchModelCommand.h"
 #include "Command/VoiceSwitchCommand.h"
 #include "Tool/RecallConversationTool.h"
+#include "Action/WebSearchAction.h"
+#include "Action/WebFetchAction.h"
+#include "WebSearch/TavilySearchProvider.h"
 #include "Tool/GenerateImageTool.h"
 #include "Tool/InspectImageTool.h"
 #include "Tool/SendImageTool.h"
@@ -273,6 +276,9 @@ int main(int argc, char **argv)
 	userSession.setImageAssetStore(&imageAssetStore);
 	if (settings.bot.managerId != 0)
 		userSession.ensureUserExists(settings.bot.managerId);
+	std::unique_ptr<SearchProvider> webSearchProvider;
+	std::unique_ptr<WebSearchAction> webSearchAction;
+	std::unique_ptr<WebFetchAction> webFetchAction;
 	ToolRegistry tools;
 	bool globalVoice = settings.voice.enabled;
 	bool accessibilityChat = startupSnapshot->schema->accessibilityChat;
@@ -292,6 +298,36 @@ int main(int argc, char **argv)
 			}
 			return summarizeReload(result);
 		});
+	if (settings.webSearch.enabled)
+	{
+		webSearchProvider = std::make_unique<TavilySearchProvider>(settings.webSearch, &running);
+		webSearchAction = std::make_unique<WebSearchAction>(*webSearchProvider, settings.webSearch);
+		tools.registerTool(std::make_unique<ActionTool>(*webSearchAction));
+		LOG_INFO("联网搜索工具已启用，Provider：" + settings.webSearch.provider);
+	}
+	if (settings.webFetch.enabled)
+	{
+		// 超长正文走默认小模型做"按问题摘录"，失败时 Action 自动降级为截断
+		const std::string distillModel = settings.chat.defaultModel;
+		webFetchAction = std::make_unique<WebFetchAction>(
+			settings.webFetch, &running, WebFetchAction::HttpGet{},
+			[&dock, &models, distillModel](const std::string &prompt)
+			{
+				const ChatModel *modelPtr = models.find(distillModel);
+				if (modelPtr == nullptr)
+					return std::string{};
+				ChatRequest request;
+				request.system_prompt = "你是网页内容提取器，只输出与问题相关的原文摘录。";
+				request.history.push_back({"user", prompt});
+				const ChatResponse response =
+					dock.RequestChat(*modelPtr, distillModel, request);
+				if (response.cancelled || response.code != 200)
+					return std::string{};
+				return response.content;
+			});
+		tools.registerTool(std::make_unique<ActionTool>(*webFetchAction));
+		LOG_INFO("网页抓取工具已启用");
+	}
 	tools.registerTool(std::make_unique<GetTimeTool>());
 	tools.registerTool(std::make_unique<ActionTool>(getCurrentModelAction));
 	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
@@ -300,6 +336,14 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore));
 	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
 	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
+	std::string registeredTools;
+	for (const std::string &toolName : tools.names())
+	{
+		if (!registeredTools.empty())
+			registeredTools += ", ";
+		registeredTools += toolName;
+	}
+	LOG_INFO("已注册模型工具：" + registeredTools);
 	ChatService chatService(dock, userSession, models, tools, memoryService, settings.chat, settings.bot.managerId);
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;

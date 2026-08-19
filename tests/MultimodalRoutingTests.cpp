@@ -129,6 +129,23 @@ TEST(ChatPayloadBuilderTest, DetectsExplicitTextOnlyApiRejection)
         401, R"({"error":{"message":"invalid api key"}})"));
 }
 
+TEST(ChatPayloadBuilderTest, EncodesEmptyToolCallPreambleAsNull)
+{
+    ChatRequest request;
+    ChatMessage assistant;
+    assistant.role = "assistant";
+    assistant.tool_calls.push_back({"call-1", "web_search", R"({"query":"news"})"});
+    request.history.push_back(std::move(assistant));
+
+    const nlohmann::json payload = ChatPayloadBuilder::openAI("test-model", request);
+
+    ASSERT_EQ(payload.at("messages").size(), 1U);
+    EXPECT_TRUE(payload.at("messages").at(0).at("content").is_null());
+    EXPECT_EQ(payload.at("messages").at(0).at("tool_calls").at(0)
+                  .at("function").at("name"),
+              "web_search");
+}
+
 TEST(ModelRegistryTest, ReadsOptionalVisionCapabilityWithoutBreakingLegacyEntries)
 {
     const std::filesystem::path path =

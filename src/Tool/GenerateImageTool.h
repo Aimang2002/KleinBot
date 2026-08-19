@@ -2,6 +2,7 @@
 #define GENERATE_IMAGE_TOOL_H
 
 #include "Tool.h"
+#include "ToolArgumentParser.h"
 #include "../Asset/ImageAssetStore.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
 #include "../ModelApiCaller/Dock.hpp"
@@ -29,7 +30,7 @@ public:
     {
         try
         {
-            const auto arguments = nlohmann::json::parse(args);
+            const auto arguments = parseToolArguments(args);
             const std::string prompt = arguments.value("prompt", "");
             if (prompt.empty())
                 return {"错误：图片提示词不能为空。", {}, {}};

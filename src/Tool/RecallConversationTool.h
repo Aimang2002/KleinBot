@@ -2,6 +2,7 @@
 #define RECALL_CONVERSATION_TOOL_H
 
 #include "Tool.h"
+#include "ToolArgumentParser.h"
 #include "../Memory/MemoryService.h"
 #include "../../Library/nlohmann/json.hpp"
 #include <string>
@@ -38,7 +39,7 @@ public:
         std::size_t limit = 8;
         try
         {
-            auto j = nlohmann::json::parse(args);
+            auto j = parseToolArguments(args);
             if (j.contains("queries") && j["queries"].is_array())
             {
                 for (const auto &query : j["queries"])

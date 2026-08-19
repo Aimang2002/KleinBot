@@ -109,6 +109,27 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.memory.batchTurns,
         schema.memory.idleSeconds,
         schema.memory.recallLimit};
+    result.webSearch = {
+        schema.webSearch.enabled,
+        schema.webSearch.provider,
+        schema.webSearch.endpoint,
+        schema.webSearch.apiKey,
+        schema.proxy,
+        schema.webSearch.searchDepth,
+        schema.webSearch.maxResults,
+        schema.webSearch.maxContentChars,
+        schema.webSearch.maxResponseBytes,
+        schema.webSearch.connectTimeoutMs,
+        schema.webSearch.requestTimeoutMs};
+    result.webFetch = {
+        schema.webFetch.enabled,
+        schema.webFetch.maxContentChars,
+        schema.webFetch.maxResponseBytes,
+        schema.webFetch.connectTimeoutMs,
+        schema.webFetch.requestTimeoutMs,
+        schema.webFetch.cacheTtlSeconds,
+        schema.webFetch.cacheMaxEntries,
+        schema.proxy};
     result.message = {
         result.bot,
         schema.bot.groupChatEnabled};

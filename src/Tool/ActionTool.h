@@ -2,6 +2,7 @@
 #define ACTION_TOOL_H
 
 #include "Tool.h"
+#include "ToolArgumentParser.h"
 #include "../Action/Action.h"
 
 class ActionTool : public Tool
@@ -21,9 +22,11 @@ public:
     {
         try
         {
-            const auto result = action.execute(nlohmann::json::parse(args),
-                                               {context.user_id, context.user_message_id});
-            return {result.content, result.outbound_messages, result.context_content, result.terminal};
+            const auto result = action.execute(parseToolArguments(args),
+                                               {context.user_id, context.user_message_id,
+                                                context.user_text});
+            return {result.content, result.outbound_messages, result.context_content,
+                    result.terminal, false, false};
         }
         catch (const std::exception &error)
         {

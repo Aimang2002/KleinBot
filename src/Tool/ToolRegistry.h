@@ -44,6 +44,15 @@ public:
         return nullptr;
     }
 
+    std::vector<std::string> names() const
+    {
+        std::vector<std::string> result;
+        result.reserve(tools.size());
+        for (const auto &tool : tools)
+            result.push_back(tool->name());
+        return result;
+    }
+
 private:
     std::vector<std::unique_ptr<Tool>> tools;
 };

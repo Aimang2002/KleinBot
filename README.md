@@ -249,10 +249,45 @@ KleinBot 使用 Schema 化 JSON 配置。运行时读取当前工作目录的 `c
 | `voice` | TTS 开关、服务地址、输出目录和参考音频 |
 | `features` | 可选业务功能开关 |
 | `memory` | 长期记忆模型、批次和召回限制 |
+| `web_search` | Tavily 联网搜索、超时和单次结果裁剪配置 |
+| `web_fetch` | 网页抓取工具的正文上限、超时和缓存配置 |
 | `storage` | SQLite 与图片资源目录 |
 | `resources` | 人格、帮助文件和下载目录 |
 | `network` | 公共代理配置 |
 | `communication` | 协议、活动传输 Profile 和网络默认值 |
+
+联网搜索默认关闭。启用时通过环境变量提供 Tavily Key，搜索结果只注入当前工具调用轮次，不写入长期记忆：
+
+```bash
+export KLEIN_TAVILY_API_KEY="tvly-..."
+```
+
+```json
+"web_search": {
+    "enabled": true,
+    "provider": "tavily",
+    "api_key": {"from_env": "KLEIN_TAVILY_API_KEY"},
+    "search_depth": "basic",
+    "max_results": 5,
+    "max_content_chars": 2000
+}
+```
+
+联网搜索完全由模型自主决策：不做关键词强制路由，也不在结果回灌后进入特殊阶段。系统提示会注入运行机器的本地日期作为时间锚点，并要求模型对新闻、价格等时效性问题调用 `klein_web_search`。时间策略由模型通过工具参数表达：查新闻时传 `topic=news` 并可用 `days` 限定最近天数，一般时效查询可用 `time_range`。Tavily 请求开启 `include_answer`，Provider 返回的综合摘要作为参考证据附在结果前。所有结果连同 `published_at` 原样返回，不在本地按发布日期过滤——时效判断交给模型，提示词要求只引用时间上可信的结果。搜索证据只注入当前工具调用轮次，不写入对话历史和长期记忆。模型侧函数名为 `klein_web_search`（避免部分网关抢占保留名 `web_search`），配置段仍使用 `web_search`。
+
+工具循环是普通的 agent loop：模型请求工具 → 执行 → 结果作为 `role=tool` 消息回灌 → 模型继续，直到给出文本回答或达到轮次上限。搜索和抓取的返回都是模型内部证据：提示词要求模型用用户的语言归纳核心事实、只保留少量来源 URL、不复述搜索过程，但这些约束只存在于提示层，没有代码级的泄漏检测或综合纠偏机制。
+
+网页抓取工具 `klein_web_fetch` 默认关闭，启用后模型可以在用户给出具体链接或要求阅读网页时抓取页面正文，无需第三方 API Key：
+
+```json
+"web_fetch": {
+    "enabled": true,
+    "max_content_chars": 12000,
+    "cache_ttl_seconds": 900
+}
+```
+
+抓取流程：本机 curl 下载（含大小上限、超时与取消保护）→ 提取标题与正文文本（丢弃 script/style/nav 等噪声，保留标题层级）→ 正文超过 `max_content_chars` 时先把"用户问题 + 正文"交给默认模型做原文摘录，蒸馏失败再退回 UTF-8 安全截断。返回给模型的证据带有 `method`（direct/distilled/truncated）、`truncated`、`charset` 等元数据。结果按 URL 缓存（默认 15 分钟），同一链接短时间重复抓取不再发起网络请求。工具只允许公网 http/https 地址，本地回环、内网段和重定向到内网的目标会被拒绝；非 UTF-8 页面会带 `charset` 标记透传，不做转码。
 
 通信配置使用命名 Profile，并通过 `active_transport` 互斥选择一个传输：
 

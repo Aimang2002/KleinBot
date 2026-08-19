@@ -71,6 +71,31 @@ struct MemorySchema
     std::size_t recallLimit = 8;
 };
 
+struct WebSearchSchema
+{
+    bool enabled = false;
+    std::string provider = "tavily";
+    std::string endpoint = "https://api.tavily.com/search";
+    std::string apiKey;
+    std::string searchDepth = "basic";
+    std::size_t maxResults = 5;
+    std::size_t maxContentChars = 2000;
+    std::size_t maxResponseBytes = 2097152;
+    long connectTimeoutMs = 5000;
+    long requestTimeoutMs = 15000;
+};
+
+struct WebFetchSchema
+{
+    bool enabled = false;
+    std::size_t maxContentChars = 12000;
+    std::size_t maxResponseBytes = 2097152;
+    long connectTimeoutMs = 5000;
+    long requestTimeoutMs = 20000;
+    long cacheTtlSeconds = 900;
+    std::size_t cacheMaxEntries = 32;
+};
+
 struct StorageSchema
 {
     std::string conversationDatabase = "source/conversations.db";
@@ -119,6 +144,8 @@ struct SchemaConfig
     VoiceSchema voice;
     bool accessibilityChat = false;
     MemorySchema memory;
+    WebSearchSchema webSearch;
+    WebFetchSchema webFetch;
     StorageSchema storage;
     ResourceSchema resources;
     std::string proxy;
