@@ -1,34 +1,53 @@
-cmake_minimum_required(VERSION 3.11)
-project("Qbot2.4.0")
+cmake_minimum_required(VERSION 3.21)
+project("Qbot2.4.0" LANGUAGES C CXX)
 
 option(DEBUG "Build the debug version" ON)
-if(DEBUG)
-  add_compile_definitions(DEBUG)
-  set(EXECUTABLE_NAME KleinQBot2.4.0_DEBUG)
-  set(CMAKE_BUILD_TYPE Debug)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0")
-else()
-  set(EXECUTABLE_NAME KleinQBot2.4.0)
-  set(CMAKE_BUILD_TYPE Release)
-endif()
-
-# 只在 Windows 上设置这些 Boost 选项
 if(WIN32)
-    if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-        set(Boost_USE_DEBUG_LIBS ON)
-        set(Boost_USE_RELEASE_LIBS OFF)
-    elseif(${CMAKE_BUILD_TYPE} STREQUAL "Release")
-        set(Boost_USE_DEBUG_LIBS OFF)
-        set(Boost_USE_RELEASE_LIBS ON)
+    set(KLEINBOT_BUNDLED_DEPS_DEFAULT ON)
+else()
+    set(KLEINBOT_BUNDLED_DEPS_DEFAULT OFF)
+endif()
+option(KLEINBOT_USE_BUNDLED_DEPS
+       "Download and build pinned third-party dependencies"
+       ${KLEINBOT_BUNDLED_DEPS_DEFAULT})
+unset(KLEINBOT_BUNDLED_DEPS_DEFAULT)
+option(KLEINBOT_STATIC_MINGW_RUNTIME
+       "Statically link the MinGW GCC, C++ and pthread runtimes"
+       ON)
+
+if(MINGW)
+    include(CheckCXXSourceCompiles)
+    check_cxx_source_compiles(
+        "#include <thread>
+         int main()
+         {
+             std::thread worker([] {});
+             worker.join();
+             return 0;
+         }"
+        KLEINBOT_MINGW_STD_THREAD_AVAILABLE
+    )
+    if(NOT KLEINBOT_MINGW_STD_THREAD_AVAILABLE)
+        message(FATAL_ERROR
+            "KleinBot requires a MinGW-w64 toolchain with POSIX thread support")
     endif()
 endif()
 
-file(GLOB_RECURSE SRC 
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/submodules/CloudMusicID/*.cpp
-)
+if(DEBUG)
+    add_compile_definitions(DEBUG)
+    set(EXECUTABLE_NAME KleinQBot2.4.0_DEBUG)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
+else()
+    set(EXECUTABLE_NAME KleinQBot2.4.0)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+endif()
 
-# 添加头文件搜索路径
+file(GLOB_RECURSE CORE_SRC
+    CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
+)
+list(REMOVE_ITEM CORE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
+
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/Library/rapidjson
@@ -49,27 +68,41 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ModelRegistry
 )
 
-# 只在 Windows 上设置 CURL 和 Boost 的特定路径
-if(WIN32)
-    set(CURL_INCLUDE_DIR "D:/develop/curl/include")
-    set(CURL_LIBRARY "D:/develop/curl/lib/libcurl.dll.a")
-    set(BOOST_ROOT "D:/develop/boost_1_86_0")
-    set(BOOST_LIBRARYDIR "D:/develop/boost_1_86_0/stage/lib") 
+include(cmake/Dependencies.cmake)
+kleinbot_configure_dependencies()
 
-    set(Boost_USE_STATIC_LIBS ON)
-    set(Boost_USE_MULTITHREADED ON)
-    set(Boost_COMPILER "-mgw11")
-    set(Boost_ARCHITECTURE "-x64")
-    set(Boost_DEBUG ON)
+add_library(kleinbot_core STATIC ${CORE_SRC})
+target_compile_features(kleinbot_core PUBLIC cxx_std_17)
+target_link_libraries(kleinbot_core
+    PUBLIC
+        kleinbot_boost
+        kleinbot_curl
+        kleinbot_sqlite
+)
+if(WIN32)
+    target_compile_definitions(kleinbot_core PUBLIC
+        _WIN32_WINNT=0x0A00
+        WINVER=0x0A00
+    )
+    target_link_libraries(kleinbot_core PUBLIC ws2_32 iphlpapi mswsock)
 endif()
 
-find_package(Boost REQUIRED COMPONENTS system) 
+add_executable(${EXECUTABLE_NAME} src/main.cpp)
+target_link_libraries(${EXECUTABLE_NAME} PRIVATE kleinbot_core)
+if(MINGW AND KLEINBOT_STATIC_MINGW_RUNTIME)
+    target_link_options(${EXECUTABLE_NAME} PRIVATE
+        -static
+        -static-libgcc
+        -static-libstdc++
+    )
+endif()
 
-add_executable(${EXECUTABLE_NAME} ${SRC})
-if(WIN32)
-    target_include_directories(${EXECUTABLE_NAME} PRIVATE ${CURL_INCLUDE_DIR})
-    target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${CURL_LIBRARY} ${Boost_LIBRARIES} ws2_32 iphlpapi)
-else()
-    find_package(CURL REQUIRED)
-    target_link_libraries(${EXECUTABLE_NAME} PRIVATE CURL::libcurl Boost::system sqlite3)
+include(CTest)
+if(BUILD_TESTING)
+    kleinbot_configure_test_dependencies()
+    if(TARGET GTest::gtest_main)
+        add_subdirectory(tests)
+    else()
+        message(WARNING "GoogleTest not found; tests will not be built")
+    endif()
 endif()

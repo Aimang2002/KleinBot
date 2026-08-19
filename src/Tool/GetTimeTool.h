@@ -21,13 +21,13 @@ public:
         return R"({"type":"object","properties":{}})";
     }
 
-    std::string execute(const std::string & /*args*/, const ToolContext & /*ctx*/) override
+    ToolResult execute(const std::string & /*args*/, const ToolContext & /*ctx*/) override
     {
         std::time_t now = std::time(nullptr);
         std::tm *local = std::localtime(&now);
         char buf[32];
         std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", local);
-        return std::string(buf);
+        return {std::string(buf), {}, {}};
     }
 };
 

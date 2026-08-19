@@ -12,6 +12,7 @@
 #endif
 #if defined(__WIN32) || defined(__WIN64)
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <iphlpapi.h>
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")

@@ -9,9 +9,13 @@
 #include "../Message/Person.hpp"
 #include "../ModelRegistry/ModelRegistry.h"
 #include "../ModelRegistry/ChatModel.h"
+#include "../Application/BotIdentity.h"
+#include "../ChatService/ChatOptions.h"
 #include "../Port/ChatRequest.h"
 
 class ConversationStore;
+class MemoryService;
+class ImageAssetStore;
 
 struct ChatCallBundle
 {
@@ -23,7 +27,9 @@ struct ChatCallBundle
 class UserSessionService
 {
 public:
-    UserSessionService(const ModelRegistry &mr, ConversationStore &store);
+    UserSessionService(const ModelRegistry &mr, ConversationStore &store, const BotIdentity &bot, const ChatOptions &chat);
+    void setMemoryService(MemoryService *service);
+    void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
     void resetChat(const uint64_t user_id);
     std::string getModelName(uint64_t user_id);
@@ -35,7 +41,7 @@ public:
     std::string removePreviousContext(const uint64_t user_id);
     std::vector<TimestampedMessage> getChatHistory(const uint64_t user_id);
     void updateChatHistory(const uint64_t user_id, const std::vector<TimestampedMessage> &history);
-    void appendMessage(const uint64_t user_id, const std::string &role, const std::string &content);
+    int64_t appendMessage(const uint64_t user_id, const std::string &role, const std::string &content);
     Person getUserConfig(const uint64_t user_id);
     std::optional<ChatCallBundle> buildChatRequest(const uint64_t &user_id);
 
@@ -48,7 +54,11 @@ private:
     void ensureUserExistsUnlock(const uint64_t user_id);
     Person createDefaultPerson(const uint64_t user_id);
     const ModelRegistry &registry;
+    BotIdentity botIdentity;
+    ChatOptions chatOptions;
     ConversationStore &store;
+    MemoryService *memoryService = nullptr;
+    ImageAssetStore *imageAssetStore = nullptr;
 };
 
 #endif // USERSESSIONSERVICE_H

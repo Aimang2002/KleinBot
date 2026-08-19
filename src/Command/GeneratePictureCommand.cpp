@@ -1,6 +1,5 @@
 #include "GeneratePictureCommand.h"
 #include "../utils/Utils.hpp"
-#include "../ConfigManager/ConfigManager.h"
 
 bool GeneratePictureCommand::canHandle(const std::string &message)
 {
@@ -23,12 +22,11 @@ CommandResult GeneratePictureCommand::execute(const CommandContext &ctx)
         return {TextMessage{"提示词为空！"}};
     }
 
-    ChatModel model;
-    model.endpoint = ConfigManager::getInstance().configVariable("DRAW_MODEL_ENDPOINT");
-    model.api_key = ConfigManager::getInstance().configVariable("DRAW_MODEL_API_KEY");
-    model.api_standard = ConfigManager::getInstance().configVariable("DRAW_MODEL_APISTANDARD");
-    std::string modelName = ConfigManager::getInstance().configVariable("DRAW_MODEL");
-    auto response = dock.RequestDraw(model, modelName, prompt);
+    ChatModel requestModel;
+    requestModel.endpoint = model.endpoint;
+    requestModel.api_key = model.apiKey;
+    requestModel.api_standard = model.apiStandard;
+    auto response = dock.RequestDraw(requestModel, model.model, prompt);
 
     if (response.code >= 400)
     {

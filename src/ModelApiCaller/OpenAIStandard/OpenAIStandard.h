@@ -7,12 +7,15 @@
 #include "../../Port/VisionResponse.h"
 #include "../../Port/LLMPort.h"
 #include "../../Port/ChatRequest.h"
+#include <atomic>
 #include <curl/curl.h>
 
 // OpenAIStandard类
 class OpenAIStandard : public LLMPort
 {
 public:
+    explicit OpenAIStandard(std::string proxy = {}, const std::atomic<bool> *running = nullptr)
+        : proxy(std::move(proxy)), running(running) {}
     ChatResponse request_chat(const ChatModel &model, const std::string &model_name, const ChatRequest &request) override;
 
     VisionResponse request_vision(const ChatModel &model, const std::string &model_name, const std::string &prompt, const std::string &base64) override;
@@ -41,6 +44,8 @@ private:
     void VerifyCertificate(CURL *curl);
 
 private:
+    std::string proxy;
+    const std::atomic<bool> *running;
 };
 
 #endif // OPENAI_STANDARD_H

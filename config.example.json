@@ -1,0 +1,126 @@
+{
+    "schema_version": 1,
+    "bot": {
+        "id": 123456789,
+        "manager_id": 987654321,
+        "name": "Klein",
+        "group_chat_enabled": true
+    },
+    "chat": {
+        "default_model": "your-chat-model",
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "frequency_penalty": 0.0,
+        "presence_penalty": 0.0,
+        "max_message_tokens": 4096,
+        "max_pending_messages": 1024,
+        "worker_idle_seconds": 30,
+        "message_survival_seconds": 3600,
+        "private_action": "send_private_msg",
+        "group_action": "send_group_msg"
+    },
+    "models": {
+        "registry_path": "source/ModelsName.json",
+        "drawing": {
+            "model": "",
+            "endpoint": "",
+            "api_key": {"from_env": "KLEIN_DRAW_API_KEY"},
+            "api_standard": "OpenAI"
+        },
+        "vision": {
+            "model": "",
+            "endpoint": "",
+            "api_key": {"from_env": "KLEIN_VISION_API_KEY"},
+            "api_standard": "OpenAI"
+        },
+        "stable_diffusion": {
+            "endpoint": "",
+            "model": ""
+        }
+    },
+    "voice": {
+        "enabled": false,
+        "host": "http://127.0.0.1",
+        "port": "9880",
+        "output_directory": "source/voice",
+        "reference_audio": "",
+        "reference_text": ""
+    },
+    "features": {
+        "accessibility_chat": false
+    },
+    "memory": {
+        "enabled": true,
+        "model": "your-chat-model",
+        "batch_turns": 3,
+        "idle_seconds": 20,
+        "recall_limit": 8
+    },
+    "web_search": {
+        "enabled": false,
+        "provider": "tavily",
+        "endpoint": "https://api.tavily.com/search",
+        "api_key": {"from_env": "KLEIN_TAVILY_API_KEY"},
+        "search_depth": "basic",
+        "max_results": 5,
+        "max_content_chars": 2000,
+        "max_response_bytes": 2097152,
+        "connect_timeout_ms": 5000,
+        "request_timeout_ms": 15000
+    },
+    "web_fetch": {
+        "enabled": false,
+        "max_content_chars": 12000,
+        "max_response_bytes": 2097152,
+        "connect_timeout_ms": 5000,
+        "request_timeout_ms": 20000,
+        "cache_ttl_seconds": 900,
+        "cache_max_entries": 32
+    },
+    "storage": {
+        "conversation_database": "source/conversations.db",
+        "image_assets": "source/image_assets"
+    },
+    "resources": {
+        "personality_directory": "source/personality/",
+        "help_file": "source/help.txt",
+        "image_download_directory": "source/images"
+    },
+    "network": {
+        "proxy": ""
+    },
+    "communication": {
+        "protocol": {
+            "type": "onebot",
+            "options": {}
+        },
+        "active_transport": "onebot-reverse",
+        "transports": {
+            "onebot-reverse": {
+                "type": "reverse_websocket",
+                "bind": "127.0.0.1",
+                "port": 8600,
+                "path": "/onebot",
+                "access_token": {"literal": ""}
+            },
+            "onebot-http": {
+                "type": "http",
+                "api": {
+                    "base_url": "http://127.0.0.1:3000",
+                    "access_token": {"from_env": "KLEIN_ONEBOT_API_TOKEN"}
+                },
+                "events": {
+                    "bind": "127.0.0.1",
+                    "port": 8080,
+                    "path": "/onebot/events",
+                    "secret": {"from_env": "KLEIN_ONEBOT_EVENT_SECRET"}
+                }
+            }
+        },
+        "defaults": {
+            "connect_timeout_ms": 5000,
+            "request_timeout_ms": 15000,
+            "max_event_body_bytes": 1048576
+        }
+    }
+}

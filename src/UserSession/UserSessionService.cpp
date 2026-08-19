@@ -1,26 +1,40 @@
 #include "UserSessionService.h"
-#include "../ConfigManager/ConfigManager.h"
 #include "../JsonParse/JsonParse.h"
 #include "../Log/Log.h"
 #include "../Persistence/ConversationStore.h"
+#include "../Memory/MemoryService.h"
+#include "../Asset/ImageAssetStore.h"
 
-UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store)
-    : registry(mr),
-      default_personality("You are my assistant, your name is " + ConfigManager::getInstance().configVariable("QBOT_NAME")),
+UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store,
+                                       const BotIdentity &bot, const ChatOptions &chat)
+    : registry(mr), botIdentity(bot), chatOptions(chat),
+      default_personality("You are my assistant, your name is " + bot.name),
       user_messages(std::make_unique<std::unordered_map<uint64_t, Person>>()),
       store(store)
 {
+}
+
+void UserSessionService::setMemoryService(MemoryService *service)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_message);
+    this->memoryService = service;
+}
+
+void UserSessionService::setImageAssetStore(ImageAssetStore *store)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_message);
+    this->imageAssetStore = store;
 }
 
 Person UserSessionService::createDefaultPerson(const uint64_t user_id)
 {
     Person person;
     person.system_prompt = this->default_personality;
-    person.current_model = ConfigManager::getInstance().configVariable("DEFAULT_MODEL"); // 默认模型
+    person.current_model = chatOptions.defaultModel;
     person.isOpenVoiceMode = false;
-    person.temperature = std::stod(ConfigManager::getInstance().configVariable("temperature"));
-    person.frequency_penalty = std::stod(ConfigManager::getInstance().configVariable("frequency_penalty"));
-    person.presence_penalty = std::stod(ConfigManager::getInstance().configVariable("presence_penalty"));
+    person.temperature = chatOptions.temperature;
+    person.frequency_penalty = chatOptions.frequencyPenalty;
+    person.presence_penalty = chatOptions.presencePenalty;
 
     return person;
 }
@@ -50,7 +64,10 @@ void UserSessionService::resetChat(const uint64_t user_id)
     // 重置对话会删除之前的所有信息，但不包括人格信息
     user->second.user_chatHistory.clear();
     this->store.clearUser(user_id); // 同步清库
-    // 注：功能2 引入图片存储后，此处须连图片元数据 + 磁盘文件一起清
+    if (this->memoryService != nullptr)
+        this->memoryService->clearUser(user_id);
+    if (this->imageAssetStore != nullptr)
+        this->imageAssetStore->clearUser(user_id);
 }
 
 std::string UserSessionService::getModelName(uint64_t user_id)
@@ -112,7 +129,11 @@ std::string UserSessionService::removePreviousContext(const uint64_t user_id)
             // erase 区间 [it.base()-1, end) 的条数 = 要从库里删除的末尾行数
             const int removed = static_cast<int>(user_context.end() - (it.base() - 1));
             user_context.erase(it.base() - 1, user_context.end());
-            this->store.removeLast(user_id, removed); // 同步删库末尾 removed 条
+            const int64_t firstRemovedId = this->store.removeLast(user_id, removed);
+            if (this->memoryService != nullptr && firstRemovedId > 0)
+                this->memoryService->removeBySourceFrom(user_id, firstRemovedId);
+            if (this->imageAssetStore != nullptr && firstRemovedId > 0)
+                this->imageAssetStore->removeByConversationFrom(user_id, firstRemovedId);
             return "上条对话已被删除！";
         }
     }
@@ -133,14 +154,14 @@ void UserSessionService::updateChatHistory(const uint64_t user_id, const std::ve
     this->user_messages->find(user_id)->second.user_chatHistory = history;
 }
 
-void UserSessionService::appendMessage(const uint64_t user_id, const std::string &role, const std::string &content)
+int64_t UserSessionService::appendMessage(const uint64_t user_id, const std::string &role, const std::string &content)
 {
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     const time_t ts = std::time(nullptr);
     // 锁内：先改内存，再写库，保证两者一致
     this->user_messages->find(user_id)->second.user_chatHistory.push_back({role, content, ts});
-    this->store.append(user_id, role, content, ts);
+    return this->store.append(user_id, role, content, ts);
 }
 
 Person UserSessionService::getUserConfig(const uint64_t user_id)
@@ -180,8 +201,7 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     //   2. 若剩余条数超过 MAX_TURNS，只保留末尾若干条
     // 注意：本函数只读，不回写 user_chatHistory，原始历史保持完整
     const time_t now = std::time(nullptr);
-    const time_t survival = std::stoll(
-        ConfigManager::getInstance().configVariable("MESSAGE_SURVIVAL_TIME"));
+    const time_t survival = chatOptions.messageSurvivalSeconds;
     const size_t MAX_TURNS = 20;
 
     std::vector<ChatMessage> filtered;

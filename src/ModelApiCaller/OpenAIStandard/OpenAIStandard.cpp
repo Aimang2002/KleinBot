@@ -1,6 +1,7 @@
 #include "OpenAIStandard.h"
+#include "../ChatPayloadBuilder.h"
 #include "../Log/Log.h"
-#include "../../ConfigManager/ConfigManager.h"
+#include "../../Network/CurlRequestControl.h"
 #include "../../Library/nlohmann/json.hpp"
 #include <chrono>
 #include <thread>
@@ -10,71 +11,37 @@
 
 ChatResponse OpenAIStandard::request_chat(const ChatModel &model, const std::string &model_name, const ChatRequest &request)
 {
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        ChatResponse response;
+        response.cancelled = true;
+        return response;
+    }
     LOG_DEBUG("使用模型:" + model_name);
 
     ChatResponse deserialize_result; // 反序列化response
 
-    // 创建载荷
-    nlohmann::json payload_json;
-    payload_json["model"] = model_name;
-    payload_json["temperature"] = request.temperature;
-    payload_json["frequency_penalty"] = request.frequency_penalty;
-    payload_json["presence_penalty"] = request.presence_penalty;
-    nlohmann::json messages = nlohmann::json::array();
-
-    if (!request.system_prompt.empty())
-    {
-        messages.push_back({{"role", "system"}, {"content", request.system_prompt}});
-    }
-    for (const auto &msg : request.history)
-    {
-        nlohmann::json m;
-        m["role"] = msg.role;
-
-        if (msg.role == "assistant" && !msg.tool_calls.empty())
-        {
-            // assistant 决定调工具：content 可为 null，附 tool_calls 数组
-            m["content"] = msg.content.empty() ? nlohmann::json(nullptr) : nlohmann::json(msg.content);
-            nlohmann::json calls = nlohmann::json::array();
-            for (const auto &tc : msg.tool_calls)
-            {
-                calls.push_back({{"id", tc.id},
-                                 {"type", "function"},
-                                 {"function", {{"name", tc.name}, {"arguments", tc.arguments}}}});
-            }
-            m["tool_calls"] = calls;
-        }
-        else if (msg.role == "tool")
-        {
-            // 工具结果回传：必须带 tool_call_id 与对应的 assistant.tool_calls 配对
-            m["content"] = msg.content;
-            m["tool_call_id"] = msg.tool_call_id;
-        }
-        else
-        {
-            m["content"] = msg.content;
-        }
-        messages.push_back(m);
-    }
-    payload_json["messages"] = messages;
-
-    // 携带可用工具（非空时）
-    if (!request.tools.empty())
-    {
-        nlohmann::json tools_arr = nlohmann::json::array();
-        for (const auto &schema : request.tools)
-        {
-            tools_arr.push_back(nlohmann::json::parse(schema));
-        }
-        payload_json["tools"] = tools_arr;
-    }
-
+    nlohmann::json payload_json = ChatPayloadBuilder::openAI(model_name, request);
+    const bool multimodalRequest = ChatPayloadBuilder::imageCount(request) > 0;
     std::string payload = payload_json.dump();
-
-    LOG_DEBUG("发送内容：" + payload);
+    LOG_DEBUG("发送模型请求：消息数 " + std::to_string(request.history.size()) +
+              "，图片数 " + std::to_string(ChatPayloadBuilder::imageCount(request)));
 
     // 发送请求
     std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        deserialize_result.cancelled = true;
+        return deserialize_result;
+    }
+    if (p.second == 400 && multimodalRequest &&
+        ChatPayloadBuilder::explicitlyRejectsMultimodal(p.second, p.first))
+    {
+        deserialize_result = this->chat_json_parse(p.first);
+        deserialize_result.code = p.second;
+        deserialize_result.multimodal_unsupported = true;
+        return deserialize_result;
+    }
     if (p.second == 400)
     {
         // 可能是有不支持的参数，改为不带参数的请求方式
@@ -84,17 +51,30 @@ ChatResponse OpenAIStandard::request_chat(const ChatModel &model, const std::str
         payload_json.erase("presence_penalty");
         payload = payload_json.dump();
         p = this->http_post(model.endpoint, model.api_key, payload);
+        if (CurlRequestControl::cancellationRequested(running))
+        {
+            deserialize_result.cancelled = true;
+            return deserialize_result;
+        }
     }
 
     LOG_DEBUG("返回的原始消息：" + p.first);
     deserialize_result = this->chat_json_parse(p.first);
     deserialize_result.code = p.second;
+    deserialize_result.multimodal_unsupported = multimodalRequest &&
+        ChatPayloadBuilder::explicitlyRejectsMultimodal(p.second, p.first);
 
     return deserialize_result;
 }
 
 VisionResponse OpenAIStandard::request_vision(const ChatModel &model, const std::string &model_name, const std::string &prompt, const std::string &base64)
 {
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        VisionResponse response;
+        response.cancelled = true;
+        return response;
+    }
     nlohmann::json content = nlohmann::json::array();
     content.push_back({{"type", "text"}, {"text", prompt}});
     content.push_back({{"type", "image_url"}, {"image_url", {{"url", "data:image/jpeg;base64," + base64}}}});
@@ -109,6 +89,12 @@ VisionResponse OpenAIStandard::request_vision(const ChatModel &model, const std:
 
     // 发送请求
     std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        VisionResponse response;
+        response.cancelled = true;
+        return response;
+    }
     LOG_DEBUG("返回的原始消息：" + p.first);
     VisionResponse deserialize_result = this->vision_json_parse(p.first);
     deserialize_result.code = p.second;
@@ -117,6 +103,12 @@ VisionResponse OpenAIStandard::request_vision(const ChatModel &model, const std:
 
 ImageResponse OpenAIStandard::request_image(const ChatModel &model, const std::string &model_name, const std::string &prompt)
 {
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        ImageResponse response;
+        response.cancelled = true;
+        return response;
+    }
     // 构建请求体
     nlohmann::json payload_json;
     payload_json["model"] = model_name;
@@ -128,6 +120,12 @@ ImageResponse OpenAIStandard::request_image(const ChatModel &model, const std::s
 
     // 发送请求
     std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        ImageResponse response;
+        response.cancelled = true;
+        return response;
+    }
     ImageResponse deserialize_result = this->draw_json_parse(p.first);
     deserialize_result.code = p.second;
     return deserialize_result;
@@ -138,7 +136,7 @@ std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, c
     if (url.empty() || api_key.empty())
     {
         LOG_ERROR("endpoint 或 api_key 为空，无法发送请求");
-        return {"", 0};
+        return {nlohmann::json{{"error", {{"message", "模型服务配置不完整，请联系管理员。"}}}}.dump(), 500};
     }
     std::string endpoint = this->filterNonNormalChars(url);
     std::string key = this->filterNonNormalChars(api_key);
@@ -163,9 +161,9 @@ std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, c
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload.length());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_chat);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+        CurlRequestControl::configure(curl, running);
 
         // 可选 HTTP 代理：config.json 配置 "proxy" 非空时生效
-        std::string proxy = ConfigManager::getInstance().configVariableOpt("proxy");
         if (!proxy.empty())
         {
             curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
@@ -178,13 +176,28 @@ std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, c
         {
             res = curl_easy_perform(curl);
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+            if (CurlRequestControl::wasCancelled(res, running))
+            {
+                LOG_INFO("模型请求已因程序停止而取消");
+                break;
+            }
             if (res != CURLE_OK)
             {
-                fprintf(stderr, "curl_easy_perform() failed: %s\n剩余请求次数：%d", curl_easy_strerror(res), attempts);
+                LOG_WARNING("模型请求失败：" + std::string(curl_easy_strerror(res)));
+                if (res == CURLE_OPERATION_TIMEDOUT)
+                    break;
                 std::this_thread::sleep_for(std::chrono::seconds(1));
                 continue;
             }
             break;
+        }
+
+        if (res != CURLE_OK && !CurlRequestControl::wasCancelled(res, running))
+        {
+            http_code = CurlRequestControl::failureStatusCode(res);
+            response = nlohmann::json{
+                {"error", {{"message", CurlRequestControl::failureMessage(res)}}}
+            }.dump();
         }
 
         // 清理资源提前：防止多路径未清理
@@ -195,7 +208,7 @@ std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, c
     }
 
     LOG_ERROR("无法创建http请求...");
-    return {"", 0};
+    return {nlohmann::json{{"error", {{"message", "无法初始化模型网络请求。"}}}}.dump(), 503};
 }
 
 ChatResponse OpenAIStandard::chat_json_parse(const std::string &response)

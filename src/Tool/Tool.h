@@ -2,7 +2,24 @@
 #define TOOL_H
 
 #include <string>
+#include <vector>
 #include "ToolContext.h"
+#include "../Port/OutboundMessage.h"
+
+struct ToolResult
+{
+    std::string model_content;
+    std::vector<OutboundMessage> outbound_messages;
+    std::string context_content;
+    bool terminal = false;
+    bool cancelled = false;
+    bool suppress_text_reply = false;
+};
+
+inline bool terminatesToolRound(const ToolResult &result)
+{
+    return result.terminal || !result.outbound_messages.empty();
+}
 
 // 工具抽象：模型可自主调用的能力单元
 // 与 Command（用户关键词触发）并存，互不知道对方
@@ -21,8 +38,10 @@ public:
     // 无参数的工具返回空对象 schema
     virtual std::string parametersSchema() const = 0;
 
-    // 执行工具。args 是模型给的 JSON 字符串参数，返回结果文本（回传给模型）
-    virtual std::string execute(const std::string &args, const ToolContext &ctx) = 0;
+    virtual bool requiresAdmin() const { return false; }
+
+    // 执行工具。文本回灌模型，出站消息交给消息适配器发送。
+    virtual ToolResult execute(const std::string &args, const ToolContext &ctx) = 0;
 };
 
 #endif // TOOL_H

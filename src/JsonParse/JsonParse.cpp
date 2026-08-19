@@ -1,25 +1,6 @@
 #include "JsonParse.h"
 #include "../Log/Log.h"
 
-// 重载流式运算符
-std::ostream &operator<<(std::ostream &os, const JsonData &data)
-{
-	os << "JsonData {\n";
-	os << "  user_id: " << data.user_id << "\n";
-	os << "  nickname: \"" << data.nickname << "\"\n";
-	os << "  card: \"" << data.card << "\"\n";
-	os << "  group_id: " << data.group_id << "\n";
-	os << "  message_type: \"" << data.message_type << "\"\n";
-	os << "  post_type: \"" << data.post_type << "\"\n";
-	os << "  raw_message: \"" << data.raw_message << "\"\n";
-	os << "  plain_text: \"" << data.plain_text << "\"\n";
-	os << "  message_data_url: \"" << data.message_data_url << "\"\n";
-	os << "  message_id: " << data.message_id << "\n";
-	os << "  message_timestamp: " << data.message_timestamp << "\n";
-	os << "}";
-	return os;
-}
-
 std::string JsonParse::getJsonKeyValue(const nlohmann::json &data, const std::string &key)
 {
 	if (data.is_null())
@@ -73,63 +54,6 @@ JsonParse &JsonParse::getInstance()
 {
 	static JsonParse instance;
 	return instance;
-}
-
-JsonData JsonParse::jsonReader(std::string &json_str)
-{
-	JsonData data;
-	nlohmann::json doc = nlohmann::json::parse(json_str);
-
-	if (!doc.is_object())
-	{
-		LOG_ERROR("The JSON string does not contain an object.");
-		return {};
-	}
-
-	// 发送者身份
-	data.user_id = doc.value("user_id", 0ULL);
-	if (doc.contains("sender") && doc["sender"].is_object())
-	{
-		const auto &sender = doc["sender"];
-		data.nickname = sender.value("nickname", "");
-		data.card = sender.value("card", "");
-	}
-
-	// 消息归属
-	data.group_id = doc.value("group_id", 0ULL);
-	data.message_type = doc.value("message_type", "");
-	data.post_type = doc.value("post_type", "");
-
-	// 消息内容
-	data.raw_message = doc.value("raw_message", "");
-
-	// 遍历 message[] 数组：提取纯文本 + 图片URL
-	if (doc.contains("message") && doc["message"].is_array())
-	{
-		for (const auto &msg : doc["message"])
-		{
-			std::string t = msg.value("type", "");
-			if (t == "text" && msg.contains("data"))
-			{
-				data.plain_text += msg["data"].value("text", "");
-			}
-			else if (t == "image" && msg.contains("data"))
-			{
-				data.message_data_url = msg["data"].value("url", "");
-			}
-		}
-	}
-
-	// 消息元数据
-	data.message_id = doc.value("message_id", 0LL);
-	data.message_timestamp = doc.value("time", 0LL);
-
-#ifdef DEBUG
-	std::ostringstream oss;
-	oss << data;
-	LOG_DEBUG(oss.str());
-#endif
-	return data;
 }
 
 std::string JsonParse::getAttributeFromChoices(std::string &json_str, std::string Attribute_type)

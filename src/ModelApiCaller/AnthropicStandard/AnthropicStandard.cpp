@@ -1,6 +1,7 @@
 #include "AnthropicStandard.h"
+#include "../ChatPayloadBuilder.h"
 #include "../Log/Log.h"
-#include "../../ConfigManager/ConfigManager.h"
+#include "../../Network/CurlRequestControl.h"
 #include "../../Library/nlohmann/json.hpp"
 #include <chrono>
 #include <thread>
@@ -12,43 +13,42 @@ static constexpr int DEFAULT_MAX_TOKENS = 4096;
 ChatResponse AnthropicStandard::request_chat(const ChatModel &model, const std::string &model_name, const ChatRequest &request)
 {
     ChatResponse deserialize_result;
-
-    // 构建载荷：Anthropic 把 system 提到顶层，messages 里不再放 system 角色
-    nlohmann::json payload_json;
-    payload_json["model"] = model_name;
-    payload_json["temperature"] = request.temperature;
-    payload_json["max_tokens"] = request.max_tokens > 0 ? request.max_tokens : DEFAULT_MAX_TOKENS;
-
-    if (!request.system_prompt.empty())
+    if (CurlRequestControl::cancellationRequested(running))
     {
-        payload_json["system"] = request.system_prompt;
+        deserialize_result.cancelled = true;
+        return deserialize_result;
     }
 
-    nlohmann::json messages = nlohmann::json::array();
-    for (const auto &msg : request.history)
-    {
-        // Anthropic 只接受 user / assistant；system 已经提到顶层
-        if (msg.role == "system")
-        {
-            continue;
-        }
-        messages.push_back({{"role", msg.role}, {"content", msg.content}});
-    }
-    payload_json["messages"] = messages;
-
+    nlohmann::json payload_json = ChatPayloadBuilder::anthropic(
+        model_name, request, DEFAULT_MAX_TOKENS);
+    const bool multimodalRequest = ChatPayloadBuilder::imageCount(request) > 0;
     std::string payload = payload_json.dump();
-    LOG_DEBUG("发送内容：" + payload);
+    LOG_DEBUG("发送模型请求：消息数 " + std::to_string(request.history.size()) +
+              "，图片数 " + std::to_string(ChatPayloadBuilder::imageCount(request)));
 
     std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        deserialize_result.cancelled = true;
+        return deserialize_result;
+    }
     LOG_DEBUG("返回的原始消息：" + p.first);
 
     deserialize_result = this->chat_json_parse(p.first);
     deserialize_result.code = p.second;
+    deserialize_result.multimodal_unsupported = multimodalRequest &&
+        ChatPayloadBuilder::explicitlyRejectsMultimodal(p.second, p.first);
     return deserialize_result;
 }
 
 VisionResponse AnthropicStandard::request_vision(const ChatModel &model, const std::string &model_name, const std::string &prompt, const std::string &base64)
 {
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        VisionResponse response;
+        response.cancelled = true;
+        return response;
+    }
     nlohmann::json image_source;
     image_source["type"] = "base64";
     image_source["media_type"] = "image/jpeg";
@@ -68,6 +68,12 @@ VisionResponse AnthropicStandard::request_vision(const ChatModel &model, const s
     std::string payload = payload_json.dump();
 
     std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        VisionResponse response;
+        response.cancelled = true;
+        return response;
+    }
     LOG_DEBUG("返回的原始消息：" + p.first);
 
     VisionResponse deserialize_result = this->vision_json_parse(p.first);
@@ -77,6 +83,12 @@ VisionResponse AnthropicStandard::request_vision(const ChatModel &model, const s
 
 ImageResponse AnthropicStandard::request_image(const ChatModel &model, const std::string &model_name, const std::string &prompt)
 {
+    if (CurlRequestControl::cancellationRequested(running))
+    {
+        ImageResponse response;
+        response.cancelled = true;
+        return response;
+    }
     // Anthropic 原生 API 不支持图像生成
     ImageResponse response;
     response.code = -1;
@@ -91,7 +103,7 @@ std::pair<std::string, long> AnthropicStandard::http_post(const std::string &url
     if (url.empty() || api_key.empty())
     {
         LOG_ERROR("endpoint 或 api_key 为空，无法发送请求");
-        return {"", 0};
+        return {nlohmann::json{{"error", {{"message", "模型服务配置不完整，请联系管理员。"}}}}.dump(), 500};
     }
 
     std::string endpoint = this->filterNonNormalChars(url);
@@ -120,9 +132,9 @@ std::pair<std::string, long> AnthropicStandard::http_post(const std::string &url
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload.length());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_chat);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+        CurlRequestControl::configure(curl, running);
 
         // 可选 HTTP 代理：config.json 配置 "proxy" 非空时生效
-        std::string proxy = ConfigManager::getInstance().configVariableOpt("proxy");
         if (!proxy.empty())
         {
             curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
@@ -134,13 +146,28 @@ std::pair<std::string, long> AnthropicStandard::http_post(const std::string &url
         {
             res = curl_easy_perform(curl);
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+            if (CurlRequestControl::wasCancelled(res, running))
+            {
+                LOG_INFO("模型请求已因程序停止而取消");
+                break;
+            }
             if (res != CURLE_OK)
             {
-                fprintf(stderr, "curl_easy_perform() failed: %s\n剩余请求次数：%d", curl_easy_strerror(res), attempts);
+                LOG_WARNING("模型请求失败：" + std::string(curl_easy_strerror(res)));
+                if (res == CURLE_OPERATION_TIMEDOUT)
+                    break;
                 std::this_thread::sleep_for(std::chrono::seconds(1));
                 continue;
             }
             break;
+        }
+
+        if (res != CURLE_OK && !CurlRequestControl::wasCancelled(res, running))
+        {
+            http_code = CurlRequestControl::failureStatusCode(res);
+            response = nlohmann::json{
+                {"error", {{"message", CurlRequestControl::failureMessage(res)}}}
+            }.dump();
         }
 
         curl_slist_free_all(headers);
@@ -150,7 +177,7 @@ std::pair<std::string, long> AnthropicStandard::http_post(const std::string &url
     }
 
     LOG_ERROR("无法创建http请求...");
-    return {"", 0};
+    return {nlohmann::json{{"error", {{"message", "无法初始化模型网络请求。"}}}}.dump(), 503};
 }
 
 ChatResponse AnthropicStandard::chat_json_parse(const std::string &response)

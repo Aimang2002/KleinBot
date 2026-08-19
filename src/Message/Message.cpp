@@ -2,18 +2,8 @@
 #include "../ModelApiCaller/Realesrgan/Realesrgan.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../submodules/CloudMusicID/CloudMusicID.h"
-#include "../Command/HelpCommand.h"
-#include "../Command/ModelListCommand.h"
 #include "../utils/Utils.hpp"
-#include "../Command/SearchSongsCommand.h"
-#include "../Command/QueryModelCommand.h"
-#include "../Command/GeneratePictureCommand.h"
-#include "../Command/ResetChatCommand.h"
-#include "../Command/SetSoulCommand.h"
-#include "../Command/SwitchModelCommand.h"
-#include "../Command/VoiceSwitchCommand.h"
-#include "../Command/RemoveContextCommand.h"
-#include "../Command/AdminCommand.h"
+#include "../Asset/ImageAssetStore.h"
 #include "Message.h"
 #include <iomanip>
 #include <thread>
@@ -21,90 +11,28 @@
 
 std::mt19937 mt_rand(1000);
 
-Message::Message(ModelRegistry &models, Dock &dock, UserSessionService &userSession, ChatService &chatService, MessageSenderPort &sender)
-	: models(models), dock(dock), userSession(userSession), chatService(chatService), sender(sender)
+Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
+                 MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
+                 CommandRegistry &registry, Voice &voice, MessageOptions options,
+                 ModelEndpointOptions visionModel, bool &globalVoice,
+                 bool &accessibilityChat)
+    : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
+      imageAssetStore(imageAssetStore), registry(registry), voice(voice),
+      options(std::move(options)), visionModel(std::move(visionModel)),
+      global_Voice(globalVoice), accessibility_chat(accessibilityChat)
 {
-	// 服务器状态类初始化
-#ifdef DEBUG
-	LOG_DEBUG("服务器状态初始化...");
-#endif
-	this->PCStatus = std::make_unique<ComputerStatus>();
-	this->voice = std::make_unique<Voice>();
-
-	// 内置成员属性初始化
-	this->accessibility_chat = ConfigManager::getInstance().configVariable("ACCESSIBLITY_CHAT") == "true" ? true : false;
-	this->global_Voice = ConfigManager::getInstance().configVariable("GLOBAL_VOICE") == "true" ? true : false;
-
-	// 注册所有命令事件
-	this->registry.registryCommand(std::make_unique<HelpCommand>());
-	this->registry.registryCommand(std::make_unique<ModelListCommand>(this->models));
-	this->registry.registryCommand(std::make_unique<SearchSongsCommand>());
-	this->registry.registryCommand(std::make_unique<QueryModelCommand>([&](uint64_t uid)
-																	   { return this->userSession.getModelName(uid); }));
-	this->registry.registryCommand(std::make_unique<GeneratePictureCommand>(this->dock));
-	this->registry.registryCommand(std::make_unique<ResetChatCommand>(this->userSession));
-	this->registry.registryCommand(std::make_unique<SetSoulCommand>(this->userSession));
-	this->registry.registryCommand(std::make_unique<SwitchModelCommand>(this->userSession, this->models));
-	this->registry.registryCommand(std::make_unique<VoiceSwitchCommand>(this->userSession, this->global_Voice));
-	this->registry.registryCommand(std::make_unique<RemoveContextCommand>(this->userSession));
-	this->registry.registryCommand(std::make_unique<AdminCommand>(*this->PCStatus, this->accessibility_chat, this->global_Voice, [this]()
-																  {		ConfigManager::getInstance().refreshConfiguation();
-																		this->models.reload(); }));
-
-	srand((unsigned int)time(NULL));
-
-	// 轻量型人格初始化
-#ifdef DEBUG
-	LOG_DEBUG("轻量型人格初始化...");
-#endif
-	std::string path = ConfigManager::getInstance().configVariable("PERSONALITY_PATH") + "personality.txt";
-	std::ifstream ifs(path);
-	if (!ifs.is_open())
-	{
-		perror("轻量型人格初始化失败");
-		LOG_FATAL("失败！");
-	}
-	else
-	{
-		std::string line;
-		while (!ifs.eof())
-		{
-			std::getline(ifs, line);
-			size_t pos = line.find("|");
-			if (pos != line.npos)
-			{
-				std::string key = line.substr(0, pos);
-				std::string value = line.substr(pos + 1);
-				this->LightweightPersonalityList.push_back(make_pair(key, value));
-			}
-			else
-			{
-				perror("中断读取，原始数据有误！");
-				break;
-			}
-		}
-		ifs.close();
-	}
-
-	// 初始化管理员
-	uint64_t manager_qq = std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
-	this->userSession.ensureUserExists(manager_qq);
 }
 
-Message::Intent Message::classify(const JsonData &data)
+Message::Intent Message::classify(const InboundMessage &data)
 {
 	if (data.post_type != "message") // 明确为心跳包
 	{
 		return Intent::SystemEvent;
 	}
-	else if (!data.message_data_url.empty()) // 如果该上报有数据，就表示用户上传了图片，使用视觉识别
-	{
-		return Intent::Vision;
-	}
 	return Intent::Chat; // 正常聊天
 }
 
-void Message::handleMessage(const JsonData &current_data)
+void Message::handleMessage(const InboundMessage &current_data)
 {
 	Intent intent = classify(current_data);
 
@@ -132,16 +60,36 @@ void Message::handleMessage(const JsonData &current_data)
 	{
 		std::cout << "[" << current_data.message_type << "]" << current_data.user_id << ":" << current_data.plain_text << std::endl;
 
-		std::string llm_text;
-		if (intent == Intent::Vision)
+		std::string conversationText = current_data.plain_text;
+		std::string inboundAssetId;
+		std::optional<ChatImageContent> currentImage;
+		if (!current_data.message_data_url.empty())
 		{
-			llm_text = provideImageRecognition(current_data.user_id, current_data.plain_text, current_data.message_data_url);
+			auto asset = this->imageAssetStore.importFromUrl(current_data.user_id,
+				current_data.message_data_url, 0);
+			if (asset)
+			{
+				inboundAssetId = asset->asset_id;
+				if (!conversationText.empty())
+					conversationText += "\n";
+				conversationText += "[image asset_id=" + asset->asset_id + " source=inbound]";
+				const std::string base64 = this->imageAssetStore.readBase64(*asset);
+				currentImage = ChatImageContent{
+					asset->asset_id,
+					asset->mime_type.empty() ? "image/jpeg" : asset->mime_type,
+					base64};
+			}
 		}
-		else
-		{
-			const bool useContext = this->accessibility_chat || current_data.user_id == std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
-			llm_text = this->chatService.reply(current_data.user_id, current_data.plain_text, useContext);
-		}
+
+		const bool useContext = this->accessibility_chat || current_data.user_id == options.bot.managerId;
+		ChatReply chatReply = this->chatService.reply(
+			current_data.user_id, conversationText, useContext, std::move(currentImage));
+		if (!inboundAssetId.empty())
+			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
+				chatReply.user_message_id);
+		for (const auto &outbound : chatReply.outbound_messages)
+			dispatch(current_data, outbound);
+		std::string llm_text = chatReply.text;
 
 		if (llm_text.empty())
 		{
@@ -172,7 +120,7 @@ void Message::handleMessage(const JsonData &current_data)
 	}
 }
 
-void Message::dispatch(const JsonData &data, const OutboundMessage &msg)
+void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 {
 	if (data.message_type == "group")
 	{
@@ -184,7 +132,7 @@ void Message::dispatch(const JsonData &data, const OutboundMessage &msg)
 	}
 }
 
-void Message::dispatchText(const JsonData &data, const std::string &text)
+void Message::dispatchText(const InboundMessage &data, const std::string &text)
 {
 	// 群消息上限 5000 字节，私聊 4096 字符。本函数按 UTF-8 字符切分以避免截断到半个汉字
 	const bool is_group = (data.message_type == "group");
@@ -236,7 +184,7 @@ void Message::dispatchText(const JsonData &data, const std::string &text)
 	}
 }
 
-void Message::sendError(const JsonData &current_data, const std::string &text)
+void Message::sendError(const InboundMessage &current_data, const std::string &text)
 {
 	dispatch(current_data, TextMessage{text});
 }
@@ -251,12 +199,12 @@ bool Message::messageFilter(std::string message_type, std::string message)
 
 	if (!strcmp(message_type.c_str(), "group"))
 	{
-		if (ConfigManager::getInstance().configVariable("OPEN_GROUPCHAT_MESSAGE") == "false")
+		if (!options.groupChatEnabled)
 		{
 			return false; // 群消息是否开启
 		}
 
-		if (message.find("CQ:at") == message.npos || message.find(ConfigManager::getInstance().configVariable("BOT_QQ")) == message.npos)
+		if (message.find("CQ:at") == message.npos || message.find(std::to_string(options.bot.id)) == message.npos)
 		{
 			return false; // 过滤非AT消息
 		}
@@ -390,10 +338,10 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 
 
 	ChatModel model;
-	model.endpoint = ConfigManager::getInstance().configVariable("VISION_MODEL_ENDPOINT");
-	model.api_key = ConfigManager::getInstance().configVariable("VISION_MODEL_API_KEY");
-	model.api_standard = ConfigManager::getInstance().configVariable("VISION_MODEL_APISTANDARD");
-	std::string modelName = ConfigManager::getInstance().configVariable("VISION_MODEL");
+	model.endpoint = visionModel.endpoint;
+	model.api_key = visionModel.apiKey;
+	model.api_standard = visionModel.apiStandard;
+	const std::string &modelName = visionModel.model;
 
 	auto response = this->dock.RequestVision(model, modelName, conversation, base64);
 	std::string answer = response.content;
@@ -432,7 +380,7 @@ size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
 }
 std::string Message::textToVoice(const std::string &text)
 {
-	std::string audioPath = this->voice->toAudio(text);
+	std::string audioPath = this->voice.toAudio(text);
 	if (audioPath.find(".wav") == std::string::npos)
 	{
 		LOG_ERROR("TTS 失败：" + audioPath);

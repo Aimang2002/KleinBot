@@ -12,6 +12,13 @@ struct ToolCallRequest
     std::string arguments; // JSON 字符串形式的参数
 };
 
+struct ChatImageContent
+{
+    std::string asset_id;
+    std::string mime_type = "image/jpeg";
+    std::string base64_data;
+};
+
 struct ChatMessage
 {
     std::string role; // "system"/"user"/"assistant"/"tool"
@@ -22,6 +29,9 @@ struct ChatMessage
 
     // role=="assistant" 且模型要调工具时填：本条消息携带的工具调用
     std::vector<ToolCallRequest> tool_calls;
+
+    // 仅存在于当前请求，不写入会话历史或数据库
+    std::vector<ChatImageContent> images;
 };
 
 struct ChatRequest

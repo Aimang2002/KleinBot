@@ -1,5 +1,4 @@
 #include "CommandRegistry.h"
-#include "../ConfigManager/ConfigManager.h"
 
 // 生命周期转移
 void CommandRegistry::registryCommand(std::unique_ptr<Command> cmd)
@@ -16,8 +15,7 @@ std::optional<CommandResult> CommandRegistry::execute(const std::string &message
         {
             if (c->requiresAdmin())
             {
-                uint64_t admin_id = std::stoll(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
-                if (ctx.user_id != admin_id)
+                if (ctx.user_id != managerId)
                     return CommandResult{TextMessage{"权限不足！"}};
             }
             return c->execute(ctx);

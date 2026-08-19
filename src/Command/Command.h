@@ -1,7 +1,7 @@
 #ifndef COMMAND_H
 #define COMMAND_H
 
-#include "../JsonParse/JsonParse.h"
+#include "../Port/InboundMessage.h"
 #include "../Port/OutboundMessage.h"
 #include <string>
 
@@ -10,10 +10,10 @@ struct CommandContext
     uint64_t user_id;
     uint64_t group_id;
     std::string message_type; // 群消息或私有消息
-    const JsonData &data;     // 存储原始消息数据
+    const InboundMessage &data;
 };
 
-// 命令返回语义化消息，由 QQMessageSender 翻译为协议格式
+// 命令返回语义化消息，由活动协议适配器翻译为协议格式
 // 不再有 MessageType 枚举——variant 的类型本身就承载了这层信息
 struct CommandResult
 {

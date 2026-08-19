@@ -5,12 +5,15 @@
 #include <vector>
 #include <string>
 #include <ctime>
+#include <cstdint>
 
 struct TimestampedMessage
 {
     std::string role;
     std::string content;
     time_t timestamp = 0;
+    int64_t id = 0;
+    double relevance = 0.0;
 };
 
 // 用户类

@@ -1,6 +1,5 @@
 #include "ModelRegistry.h"
 #include "../JsonParse/JsonParse.h"
-#include "../ConfigManager/ConfigManager.h"
 #include "../Log/Log.h"
 #include <fstream>
 
@@ -25,7 +24,7 @@ const std::vector<ChatModel> &ModelRegistry::all() const
 void ModelRegistry::reload()
 {
     // 载入模型名称
-    std::ifstream ifsJson(ConfigManager::getInstance().configVariable("CHATMODELS_PATH"));
+    std::ifstream ifsJson(registryPath);
     if (!ifsJson.is_open())
     {
         LOG_ERROR("模型配置文件打开失败！请检查该文件是否存在。");
@@ -73,6 +72,13 @@ void ModelRegistry::reload()
             cm.api_key = model.value("api_key", "");
             cm.endpoint = model.value("api_endpoint", "");
             cm.api_standard = model.value("APIStandard", "");
+            const nlohmann::json *capabilities = nullptr;
+            if (model.contains("Capabilities") && model["Capabilities"].is_object())
+                capabilities = &model["Capabilities"];
+            else if (model.contains("capabilities") && model["capabilities"].is_object())
+                capabilities = &model["capabilities"];
+            if (capabilities != nullptr)
+                cm.capabilities.vision = capabilities->value("vision", false);
             chatModels.push_back(cm);
         }
     }

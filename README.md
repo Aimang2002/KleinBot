@@ -44,9 +44,13 @@
 
 [Boost](https://github.com/boostorg/boost)
 
+[SQLite](https://www.sqlite.org/)
+
 [nlohmann/json](https://github.com/nlohmann/json)
 
-> nlohmann/json源码已经嵌入到项目中
+[GoogleTest](https://github.com/google/googletest)（仅测试构建）
+
+> nlohmann/json 与最小 Boost.Asio/Beast 头文件随仓库提供；Windows 构建会自动获取固定版本的 curl 和 SQLite。
 
 
 
@@ -62,17 +66,24 @@
 
 ## 1.Windows平台
 
+Windows 当前正式支持带 POSIX 线程模型的 MinGW-w64。安装 Git、CMake 和 MinGW-w64，并确保 `gcc`、`g++`、`mingw32-make` 在 `PATH` 中。
+
 ~~~bash
 git clone https://github.com/Aimang2002/KleinBot.git
-cd KLineBot
-mkdir build && cd build
-cmake .. -G "MinGW Makefiles"
-make
+cd KleinBot
+cmake --preset windows-mingw-release
+cmake --build --preset windows-mingw-release
 ~~~
 
-> 在Windows平台下，我们建议使用minGW进行编译，CMakeLists文件中链接的boost库和curl库改成自己的位置。
->
-> Windows平台下需要准备证书，点击[此处](https://curl.se/docs/caextract.html)下载证书，并存放到可执行文件的目录下。
+生成文件位于：
+
+~~~text
+build/windows-mingw-release/KleinQBot2.4.0.exe
+~~~
+
+CMake 会使用仓库内的最小 Boost.Asio/Beast 头文件，并自动下载固定版本的 SQLite 和 curl。Windows 下 curl 使用系统 Schannel，因此不需要额外准备 OpenSSL 或 CA 证书文件。
+
+如果 CMake 提示 `POSIX thread support`，说明当前 MinGW 使用 `win32` 线程模型，请改用 MSYS2 UCRT64/MINGW64 或其他带 POSIX 线程支持的 MinGW-w64 工具链。Release 默认静态链接 MinGW 的 GCC、C++ 和 pthread 运行时，生成的 EXE 只依赖 Windows 系统 DLL。
 
 
 
@@ -80,10 +91,9 @@ make
 
 ~~~bash
 git clone https://github.com/Aimang2002/KleinBot.git
-cd KLineBot
-mkdir build && cd build
-cmake ..
-make
+cd KleinBot
+cmake --preset linux-release
+cmake --build --preset linux-release
 ~~~
 
 
@@ -121,8 +131,10 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 | :-----------: | :-----------------------------: |
 | 正向WebSocket | <font color="gree">可用</font>  |
 | 反向WebSocket | <font color="gree">可用</font>  |
-|   HTTP API    | <font color="red">不可用</font> |
-| 反向HTTP POST | <font color="red">不可用</font> |
+|   HTTP API    | <font color="gree">可用</font>  |
+|  HTTP事件上报 | <font color="gree">可用</font>  |
+
+一次运行只启用一种完整通信模式：`forward_websocket`、`reverse_websocket` 或 `http`。两种 WebSocket 模式都使用单条 Universal 连接同时接收事件和发送动作；`http` 模式组合 OneBot HTTP API 与 HTTP 事件上报。
 
 
 
@@ -200,10 +212,11 @@ Klein没有实现协议端，本身并不会直接对接QQ，而是对接第三�
 |  平台  |          是否支持           |
 | :----: | :-------------------------: |
 | OpenAI | <font color="gree">√</font> |
+| Anthropic | <font color="gree">√</font> |
 | Google | <font color="red">×</font>  |
 | Azure  | <font color="red">×</font>  |
 
-PS:以上只是列举一些大模型平台，有一些本地模型推理软件(LM Studio、RWKV-Running)它的接口规范采用的时OpenAI SDK，所以这些API也是能连接的，这些没有指定平台的模型其中的API参数在配置文件中填到“OtherChatModel”中。
+说明：Anthropic 当前支持文本聊天和视觉调用，暂不支持本项目的 Function Calling 工具调用；Google 和 Azure 暂不实现。其他兼容 OpenAI API 规范的本地或第三方服务，可以在模型配置中使用 `OpenAI` APIStandard 接入。
 
 
 
@@ -223,50 +236,124 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
 
 # 配置文件
 
-下面是对配置文件的参数进行解释：
+KleinBot 使用 Schema 化 JSON 配置。运行时读取当前工作目录的 `config.json`；仓库中的 `config.example.json` 是不含密钥的完整模板。
 
-| 参数名                        | 参数描述                                            |
-| ----------------------------- | --------------------------------------------------- |
-| CONTEXT_MAX                   | 上下文最大token数，取值范围建议在1000~99999         |
-| MODEL_SIGLE_TOKEN_MAX         | 单次发送给模型的最大token数，取值范围建议在100~4999 |
-| GLOBAL_VOICE                  | 是否开启语音推理（true/false）                      |
-| ACCESSIBLITY_CHAT             | 是否开启无障碍聊天（true/false）                    |
-| CONFIG_VERSION                | 配置文件版本                                        |
-| GROUP_API                     | 通常来说不建议对其更改                              |
-| PRIVATE_API                   | 通常来说不建议对其更改                              |
-| QBOT_NAME                     | 机器人名称，可自定义                                |
-| OPEN_GROUPCHAT_MESSAGE        | 是否开启群聊（true/false）                          |
-| MANAGER_QQ                    | 管理员QQ                                            |
-| BOT_QQ                        | 机器人QQ                                            |
-| WEBSOCKET_MESSAGE_IP          | 正向WS IP地址                                       |
-| WEBSOCKET_MESSAGE_PORT        | 正向WS 端口                                         |
-| REVERSEWEBSOCKET_MESSAGE_IP   | 反向WS IP地址                                       |
-| REVERSEWEBSOCKET_MESSAGE_PORT | 反向WS 端口                                         |
-| WYY_SONGID_PATH               | 网易云音乐ID文件路径                                |
-| HELP_PATH                     | #帮助 文本文件路径                                  |
-| HELP_PERSONALITY_PATH         | #人格帮助 文本文件路径                              |
-| PERSONALITY_PATH              | 人格目录路径                                        |
-| CHATMODELS_PATH               | 模型名称注册路径                                    |
-| temperature                   | ”温度“超参数，默认为1                               |
-| top_p                         | 核抽样,默认为1                                      |
-| frequency_penalty             | 频率惩罚，默认为0                                   |
-| presence_penalty              | 存在惩罚，默认为0                                   |
-| MESSAGE_SURVIVAL_TIME         | 上下文存活时间，单位是秒                            |
-| IMAGE_DOWNLOAD_PATH           | 图片下载存放路径，图片分析时需要用到                |
-| XXX_MODEL_API_KEY             | 请求模型的API KEY                                   |
-| XXX_MODEL_ENDPOINT            | 请求模型的请求端点                                  |
-| XXX_DEFAULT_MODEL             | 请求的模型                                          |
-| XXX_MODEL_APISTANDARD         | 模型使用的API规范                                   |
-| STABLEDIFFUSION_ENDPOINT      | Stable Diffusion 的请求端点                         |
-| DEFAULT_MODEL                 | Stable Diffusion 的默认模型，目前不填               |
-| VIST_API_URL                  | GPT-SoVIST API的IP                                  |
-| VIST_API_PORT                 | GPT-SoVIST API的端口                                |
-| VIST_REFERVOICE_PATH          | GPT-SoVIST 的参考音频                               |
-| VIST_REFERVOICE_TEXT          | GPT-SoVIST 的参考音频文本                           |
-| VIST_FILE_SAVE_PATH           | GPT-SoVIST 推理后音频文件存放的位置                 |
-| REALESGAN_PATH                | REALESGAN项目的路径                                 |
-| REALESGAN_MODEL               | REALESGAN使用的修复模型                             |
-| IMAGE_DOWNLOAD_PATH           | 图片下载后的位置(供REALESGAN使用)                   |
+配置根节点按职责划分：
+
+| 节点 | 作用 |
+| --- | --- |
+| `schema_version` | 配置结构版本，当前必须为 `1` |
+| `bot` | Bot ID、管理员、名称和群聊策略 |
+| `chat` | 默认模型、采样参数、消息限制和 OneBot action 名称 |
+| `models` | 模型注册文件、绘图、视觉和 Stable Diffusion 配置 |
+| `voice` | TTS 开关、服务地址、输出目录和参考音频 |
+| `features` | 可选业务功能开关 |
+| `memory` | 长期记忆模型、批次和召回限制 |
+| `web_search` | Tavily 联网搜索、超时和单次结果裁剪配置 |
+| `web_fetch` | 网页抓取工具的正文上限、超时和缓存配置 |
+| `storage` | SQLite 与图片资源目录 |
+| `resources` | 人格、帮助文件和下载目录 |
+| `network` | 公共代理配置 |
+| `communication` | 协议、活动传输 Profile 和网络默认值 |
+
+联网搜索默认关闭。启用时通过环境变量提供 Tavily Key，搜索结果只注入当前工具调用轮次，不写入长期记忆：
+
+```bash
+export KLEIN_TAVILY_API_KEY="tvly-..."
+```
+
+```json
+"web_search": {
+    "enabled": true,
+    "provider": "tavily",
+    "api_key": {"from_env": "KLEIN_TAVILY_API_KEY"},
+    "search_depth": "basic",
+    "max_results": 5,
+    "max_content_chars": 2000
+}
+```
+
+联网搜索完全由模型自主决策：不做关键词强制路由，也不在结果回灌后进入特殊阶段。系统提示会注入运行机器的本地日期作为时间锚点，并要求模型对新闻、价格等时效性问题调用 `klein_web_search`。时间策略由模型通过工具参数表达：查新闻时传 `topic=news` 并可用 `days` 限定最近天数，一般时效查询可用 `time_range`。Tavily 请求开启 `include_answer`，Provider 返回的综合摘要作为参考证据附在结果前。所有结果连同 `published_at` 原样返回，不在本地按发布日期过滤——时效判断交给模型，提示词要求只引用时间上可信的结果。搜索证据只注入当前工具调用轮次，不写入对话历史和长期记忆。模型侧函数名为 `klein_web_search`（避免部分网关抢占保留名 `web_search`），配置段仍使用 `web_search`。
+
+工具循环是普通的 agent loop：模型请求工具 → 执行 → 结果作为 `role=tool` 消息回灌 → 模型继续，直到给出文本回答或达到轮次上限。搜索和抓取的返回都是模型内部证据：提示词要求模型用用户的语言归纳核心事实、只保留少量来源 URL、不复述搜索过程，但这些约束只存在于提示层，没有代码级的泄漏检测或综合纠偏机制。
+
+网页抓取工具 `klein_web_fetch` 默认关闭，启用后模型可以在用户给出具体链接或要求阅读网页时抓取页面正文，无需第三方 API Key：
+
+```json
+"web_fetch": {
+    "enabled": true,
+    "max_content_chars": 12000,
+    "cache_ttl_seconds": 900
+}
+```
+
+抓取流程：本机 curl 下载（含大小上限、超时与取消保护）→ 提取标题与正文文本（丢弃 script/style/nav 等噪声，保留标题层级）→ 正文超过 `max_content_chars` 时先把"用户问题 + 正文"交给默认模型做原文摘录，蒸馏失败再退回 UTF-8 安全截断。返回给模型的证据带有 `method`（direct/distilled/truncated）、`truncated`、`charset` 等元数据。结果按 URL 缓存（默认 15 分钟），同一链接短时间重复抓取不再发起网络请求。工具只允许公网 http/https 地址，本地回环、内网段和重定向到内网的目标会被拒绝；非 UTF-8 页面会带 `charset` 标记透传，不做转码。
+
+通信配置使用命名 Profile，并通过 `active_transport` 互斥选择一个传输：
+
+```json
+"communication": {
+    "protocol": {"type": "onebot", "options": {}},
+    "active_transport": "onebot-http",
+    "transports": {
+        "onebot-http": {
+            "type": "http",
+            "api": {
+                "base_url": "http://127.0.0.1:3000",
+                "access_token": {"from_env": "KLEIN_ONEBOT_API_TOKEN"}
+            },
+            "events": {
+                "bind": "127.0.0.1",
+                "port": 8080,
+                "path": "/onebot/events",
+                "secret": {"from_env": "KLEIN_ONEBOT_EVENT_SECRET"}
+            }
+        }
+    }
+}
+```
+
+HTTP 的两个方向使用不同认证语义：KleinBot 调用 OneBot API 时通过 `api.access_token` 发送 `Authorization: Bearer`；LLOneBot 上报事件时通过 `events.secret` 对原始请求体计算 HMAC-SHA1，并发送 `X-Signature: sha1=<hex>`。旧版 `events.access_token` 仍兼容 Bearer，也会作为签名 Secret 使用，但新配置应使用 `events.secret`。
+
+Secret 字段支持本地字面量或环境变量：
+
+```json
+{"literal": "local-token"}
+```
+
+```json
+{"from_env": "KLEIN_ONEBOT_TOKEN"}
+```
+
+配置加载会统一完成类型转换、默认值填充和语义校验。可选字段损坏时使用安全默认值或关闭对应功能；核心身份、活动协议和活动传输无效时拒绝启动。额外字段会产生警告但不会直接终止程序。加载结果先形成只属于 `Configuration` 的不可变 Schema DTO，再由 Bootstrap 映射为各模块自己拥有的 Options；业务模块不读取配置文件，也不依赖全局配置对象。
+
+`#刷新配置文件` 会重新读取同一路径、完整校验候选配置、生成动态/需重建/需重启差异，并原子发布新的内存快照；候选无效时继续保留旧快照。当前版本不会自动改写已经构造好的模块参数，因此命令会明确提示变化分类，需重建和静态配置仍要在后续显式应用或重启进程。
+
+本地 `build/config.json`、API key、Token、QQ ID、数据库和生成媒体不得提交。
+
+
+# 长期记忆
+
+Klein 会继续完整保存原始对话，并在后台从多轮对话中提取用户资料、偏好、关系、事件、状态、决定、任务和技术事实。长期记忆使用稳定的 `memory_key` 更新同一事实，并生成包含同义表达的 `search_text`。
+
+召回不依赖 Embedding：系统会对当前问题或模型提供的 1 到 5 个检索短语进行 ASCII 归一化、中文二元/三元短语扩展，同时检索长期记忆和原始历史，按文本相关性、重要程度、置信度和更新时间统一排序。长期记忆命中后不再阻止原始历史参与召回，重复的来源消息会被过滤，并保留原始对话作为证据。
+
+对于用户偏好、人物资料、项目配置和设备状态等明确属性，提取器还会写入开放的实体—属性—值事实层。该层不限制值枚举，保留当前值和历史版本，并支持 `current`、`earliest`、`previous`、`timeline` 四种时间查询；删除最近上下文时会恢复仍有有效来源的上一版本。
+
+在主模型回答前，系统会用规则识别“以前说过”“最早”“上一版”等召回和时间意图，再根据当前用户已有的实体与属性规划结构化查询，不额外调用一次模型。匹配到多个同名或同别名实体时会保留全部候选，让主模型向用户澄清；自动注入的历史证据按不可信数据处理，且不会把当前用户消息误当成历史结果。
+
+长期记忆提取不会阻塞当前聊天回复。`#重置对话` 会同时清除该用户的原始历史和长期记忆，删除最近上下文时也会失效来源位于删除区间内的记忆。详细的数据结构、配置和验证方式见 `docs/long-term-memory.md`。
+
+聊天中的图片会保存为用户隔离的资源，并在上下文中使用 `asset_id` 占位符。模型可通过工具查看历史图片、生成图片或重新发送图片。`#重置对话` 和删除最近上下文会同步清理关联的图片文件；未关联到上下文的临时资源会保留到用户重置。
+
+
+# 运行时架构
+
+- 消息处理使用按 `user_id` 分片的 `KeyedTaskScheduler`：同一用户严格串行，不同用户并行。未配置 `chat.worker_threads` 时，初始线程数为 CPU 逻辑核心数、最大为核心数的 4 倍，并在空闲后自动缩减；显式配置正整数时使用固定线程数。
+- 待处理消息默认最多 `1024` 条，可通过 `chat.max_pending_messages` 调整；达到上限时拒绝新消息并返回繁忙提示。`chat.worker_idle_seconds` 控制自动扩容线程的空闲回收时间。
+- 正向 WebSocket、反向 WebSocket 和定时任务线程共享统一的运行状态，收到 `SIGINT` 或 `SIGTERM` 后会停止重连、等待任务结束并依次回收资源。
+- 日志后台线程在程序退出前排空日志队列并关闭日志文件。
+- 长期记忆提取使用独立后台线程；程序退出时不会阻塞等待尚未触发的记忆批次。
 
 
 
@@ -297,7 +384,10 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
                 ],
                 "api_key": "sk-",
                 "api_endpoint": "https://api.xxx.com/v1/chat/completions",
-                "APIStandard": "OpenAI"
+                "APIStandard": "OpenAI",
+                "Capabilities": {
+                    "vision": true
+                }
             },
             {
                 "name": [
@@ -313,6 +403,8 @@ PS:以上只是列举一些大模型平台，有一些本地模型推理软件(L
         ]
     }
     ~~~
+
+    `Capabilities.vision` 是可选字段，默认 `false`。设为 `true` 后，当前消息中的图片会直接作为多模态内容发送给该主模型；未声明视觉能力的模型继续使用独立视觉模型和 `inspect_image` Tool。请只为实际支持图片输入的模型开启该能力。若接口以明确的 4xx 响应声明只接受文本，程序会移除本次图片并自动降级到 Tool；超时、鉴权和服务不可用不会触发能力降级。
     
     以api_key为一组，在改组内，所有的模型将会使用改组的api_key和endpoint。
     

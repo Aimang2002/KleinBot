@@ -2,9 +2,12 @@
 .cursor
 .codex
 build
+logs/
 .claude
 CLAUDE.md
 mermaid.md
 重构任务.md
 AGENTS.md
-docs
+docs/
+
+CMakeUserPresets.json

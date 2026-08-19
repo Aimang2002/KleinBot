@@ -7,24 +7,26 @@
 #include <condition_variable>
 #include <thread>
 #include <fstream>
+#include <mutex>
 
 class Log
 {
 public:
     static Log &getInstance();
+    ~Log();
+
     void info(std::string message);
     void debug(std::string message);
     void warning(std::string message);
     void error(std::string message);
     void fatal(std::string message);
+    void shutdown();
 
 private:
     Log();
     Log(const Log &) = delete;
     Log &operator=(const Log &) = delete;
     bool initThread();
-
-    bool shutdownThread(); // 废弃
 
     /**
      * @brief 获取格式化的当前时间
@@ -47,6 +49,8 @@ private:
     std::mutex mutex_;                    // 消息队列静态锁
     std::thread logThread;                // 负责日志写入的线程实例
     std::condition_variable cv;           // 条件变量
+    std::once_flag initFlag;
+    bool initialized = false;
 };
 
 #ifdef DEBUG

@@ -5,15 +5,14 @@
 #include <fstream>
 #include <curl/curl.h>
 #include <chrono>
-#include "../../ConfigManager/ConfigManager.h"
+#include <atomic>
+#include "VoiceOptions.h"
 #include "../../Log/Log.h"
-
-// extern ConfigManager &ConfigManager::getInstance();
 
 class Voice
 {
 public:
-    Voice();
+    explicit Voice(VoiceOptions config, const std::atomic<bool> *running = nullptr);
     /**
      * @brief 修复图片
      *
@@ -33,6 +32,8 @@ public:
     ~Voice();
 
 private:
+    VoiceOptions config;
+    const std::atomic<bool> *running;
 };
 
 #endif

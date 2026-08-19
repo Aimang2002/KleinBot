@@ -6,18 +6,18 @@
 #include "Command.h"
 #include "../utils/Utils.hpp"
 #include "../UserSession/UserSessionService.h"
+#include "../Action/Action.h"
 
 class VoiceSwitchCommand : public Command
 {
 public:
-    VoiceSwitchCommand(UserSessionService &USS, bool &tag) : userSession(USS), global_voice(tag) {}
+    explicit VoiceSwitchCommand(Action &action) : action(action) {}
     bool canHandle(const std::string &message) override;
     CommandResult execute(const CommandContext &ctx) override;
     std::string help() const override { return "根据命令，关闭或者开启Agent的语音回答。"; }
 
 private:
-    UserSessionService &userSession;
-    bool &global_voice;
+    Action &action;
 };
 
 #endif // VOICESWITCHCOMMAND_H

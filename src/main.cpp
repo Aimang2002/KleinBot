@@ -2,40 +2,130 @@
 #include <sstream>
 #include <random>
 #include <thread>
+#include <atomic>
+#include <cstdlib>
+#include <csignal>
 #include "JsonParse/JsonParse.h"
-#include "ConfigManager/ConfigManager.h"
-#include "Network/Network.h"
+#include "Bootstrap/ConfigSnapshotStore.h"
+#include "Bootstrap/RuntimeSettings.h"
+#include "Configuration/ConfigLoader.h"
 #include "Message/Message.h"
 #include "Log/Log.h"
-#include "MessageQueue.h"
+#include "MessageQueue/InboundMessageQueue.h"
 #include "src/Network/MyReverseWebSocket.h"
 #include "src/Network/MyWebSocket.h"
+#include "Network/OneBotHttpTransport.h"
+#include "Network/TransportConfig.h"
 #include "TimingTast/TimingTast.h"
-#include "MessageSender/QQMessageSender.h"
+#include "MessageSender/QueuedMessageSender.h"
+#include "MessageQueue/OutboundMessageQueue.h"
 #include "Port/OutboundMessage.h"
+#include "Protocol/OneBot/OneBotMessageEncoder.h"
+#include "Protocol/OneBot/OneBotEventDecoder.h"
 #include "ChatService/ChatService.h"
 #include "Tool/ToolRegistry.h"
 #include "Tool/GetTimeTool.h"
+#include "Tool/ActionTool.h"
+#include "Action/GetCurrentModelAction.h"
+#include "Action/VoiceModeAction.h"
+#include "Action/AdminControlAction.h"
+#include "Command/AdminCommand.h"
+#include "Command/GeneratePictureCommand.h"
+#include "Command/HelpCommand.h"
+#include "Command/ModelListCommand.h"
+#include "Command/QueryModelCommand.h"
+#include "Command/RemoveContextCommand.h"
+#include "Command/ResetChatCommand.h"
+#include "Command/SearchSongsCommand.h"
+#include "Command/SetSoulCommand.h"
+#include "Command/SwitchModelCommand.h"
+#include "Command/VoiceSwitchCommand.h"
 #include "Tool/RecallConversationTool.h"
+#include "Action/WebSearchAction.h"
+#include "Action/WebFetchAction.h"
+#include "WebSearch/TavilySearchProvider.h"
+#include "Tool/GenerateImageTool.h"
+#include "Tool/InspectImageTool.h"
+#include "Tool/SendImageTool.h"
+#include "ModelApiCaller/Voice/Voice.h"
 #include "Persistence/ConversationStore.h"
+#include "Asset/ImageAssetStore.h"
+#include "Memory/MemoryService.h"
+#include "utils/KeyedTaskScheduler.h"
 
 #define __KLEIN_VERSION__ "v2.4.0"
 
+namespace
+{
+volatile std::sig_atomic_t receivedSignal = 0;
+
+void signalHandler(int signal)
+{
+	if (receivedSignal != 0)
+		std::_Exit(128 + signal);
+	receivedSignal = signal;
+}
+
+
+void logConfigDiagnostics(const std::vector<ConfigDiagnostic> &diagnostics)
+{
+	for (const ConfigDiagnostic &diagnostic : diagnostics)
+	{
+		const std::string message = configSeverityName(diagnostic.severity) + ": " +
+			diagnostic.path + " - " + diagnostic.message;
+		if (diagnostic.severity == ConfigSeverity::Fatal || diagnostic.severity == ConfigSeverity::Error)
+			LOG_ERROR(message);
+		else if (diagnostic.severity == ConfigSeverity::Warning || diagnostic.severity == ConfigSeverity::FeatureDisabled)
+			LOG_WARNING(message);
+		else
+			LOG_INFO(message);
+	}
+}
+
+std::string summarizeReload(const ConfigReloadResult &result)
+{
+	if (!result.success)
+		return "配置刷新失败，继续使用当前内存快照。";
+	if (result.diff.empty())
+		return "配置校验通过，内存快照无变化。";
+
+	return "配置内存快照已更新：" + std::to_string(result.diff.size()) +
+		" 项变化（动态 " +
+		std::to_string(result.diff.count(ConfigChangeImpact::Dynamic)) +
+		"、需重建 " +
+		std::to_string(result.diff.count(ConfigChangeImpact::Rebuild)) +
+		"、需重启 " +
+		std::to_string(result.diff.count(ConfigChangeImpact::Restart)) +
+		"）。当前运行模块尚未重新应用这些参数。";
+}
+
+bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::milliseconds duration)
+{
+	const auto deadline = std::chrono::steady_clock::now() + duration;
+	while (running.load() && std::chrono::steady_clock::now() < deadline)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+	return running.load();
+}
+
+}
+
 // 子线程
-void pollingThread(ChatService &chatService, MessageSenderPort &sender)
+void pollingThread(ChatService &chatService, MessageSenderPort &sender, uint64_t managerId, const std::atomic<bool> &running)
 {
 	std::string message;
 	uint64_t user_id;
 	bool tag = false;
 
-	while (true)
+	while (running.load())
 	{
 		std::time_t now = std::time(nullptr);
 		std::tm *local_time = std::localtime(&now);
-		if (local_time->tm_hour == 8 && local_time->tm_min == 0 && local_time->tm_sec < 4)
+		if (managerId != 0 && local_time->tm_hour == 8 && local_time->tm_min == 0 && local_time->tm_sec < 4)
 		{
 			message = "早上好，请跟我打招呼的同时来一句元气满满的句子，让我一整天都有活力（直接说就好，不要在前面加上语气词例如“好的”）";
-			user_id = stoi(ConfigManager::getInstance().configVariable("MANAGER_QQ"));
+			user_id = managerId;
 			LOG_INFO("每日早安即将发送，亲爱的管理员，早上好。");
 			tag = true;
 		}
@@ -52,17 +142,17 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender)
 			sender.send_private(static_cast<long long>(user_id), TextMessage{response});
 			tag = false;
 		}
-		std::this_thread::sleep_for(std::chrono::seconds(3));
+		sleepWhileRunning(running, std::chrono::seconds(3));
 	}
+	LOG_INFO("定时任务线程已退出");
 }
 
 // 子线程
-void workingThread(Message &messageClass, std::string originalJsonData)
+void workingThread(Message &messageClass, InboundMessage data, std::size_t maxMessageTokens)
 {
-	JsonData data = JsonParse::getInstance().jsonReader(originalJsonData);
-
 	// UTF-8 下 1 汉字 ≈ 3 字节；OpenAI 分词器以汉字数计 token，这里按 3 倍粗略放宽上限
-	if (originalJsonData.size() > (stoi(ConfigManager::getInstance().configVariable("MODEL_SIGLE_TOKEN_MAX")) * 3))
+	if (data.payload_size_bytes >
+		(maxMessageTokens * 3))
 	{
 		if (data.message_type == "group" && !messageClass.messageFilter(data.message_type, data.raw_message))
 		{
@@ -81,18 +171,32 @@ void workingThread(Message &messageClass, std::string originalJsonData)
 	messageClass.handleMessage(data);
 }
 
-void createTimingTastThread(ChatService &chatService, MessageSenderPort &sender)
+void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWorkers,
+					 MemoryService &memoryService,
+					 std::thread &timingThread, std::thread &transportThread)
 {
-	std::thread t(pollingThread, std::ref(chatService), std::ref(sender));
-	t.detach();
+	running.store(false);
+	LOG_INFO("正在停止消息执行器并等待活动任务退出...");
+	messageWorkers.shutdown();
+	LOG_INFO("消息执行器已退出");
+	LOG_INFO("正在等待长期记忆服务退出...");
+	memoryService.shutdown();
+	LOG_INFO("长期记忆服务已退出");
+
+	if (timingThread.joinable())
+	{
+		LOG_INFO("正在等待定时任务线程退出...");
+		timingThread.join();
+	}
+	if (transportThread.joinable())
+	{
+		LOG_INFO("正在等待通信线程退出...");
+		transportThread.join();
+	}
+	LOG_INFO("资源回收完成，Klein 已安全退出");
 }
 
-// 资源释放
-void resourceCleanup()
-{
-}
-
-void init()
+void init(int schemaVersion)
 {
 
 #if defined(__WIN32) || defined(__WIN64)
@@ -113,69 +217,243 @@ void init()
 			  << Klein_logo << "\n"
 			  << "\033[0m" << std::endl; // 显示logo
 
-	// 版本
 	LOG_INFO("当前Klein版本：" + std::string(__KLEIN_VERSION__));
-	LOG_INFO("当前配置文件版本：" + ConfigManager::getInstance().configVariable("CONFIG_VERSION"));
-
-	// 配置文件版本检查
-	if (ConfigManager::getInstance().configVariable("CONFIG_VERSION") == __KLEIN_VERSION__)
-	{
-		LOG_INFO("配置文件符合版本。");
-	}
-	else
-	{
-		LOG_WARNING("配置文件不符合当前版本，程序可能会不稳定，建议使用适合版本的配置文件！");
-	}
+	LOG_INFO("当前配置Schema版本：" + std::to_string(schemaVersion));
 }
 
-int main()
+int main(int argc, char **argv)
 {
-	init();
-	ModelRegistry models;
-	std::string dbPath = ConfigManager::getInstance().configVariableOpt(
-		"CONVERSATION_DB_PATH", "source/conversations.db");
-	ConversationStore conversationStore(dbPath);
-	UserSessionService userSession(models, conversationStore);
-	Dock dock;
-	ToolRegistry tools;
-	tools.registerTool(std::make_unique<GetTimeTool>());
-	tools.registerTool(std::make_unique<RecallConversationTool>(conversationStore));
-	ChatService chatService(dock, userSession, models, tools);
-	QQMessageSender qqSender;
-	Message messageClass(models, dock, userSession, chatService, qqSender);
-	createTimingTastThread(chatService, qqSender);
+	std::signal(SIGINT, signalHandler);
+	std::signal(SIGTERM, signalHandler);
+	std::atomic<bool> running{true};
 
-	// 正向WebSocket连接
-	std::thread t1(MyWebSocket::connectWebSocket, "/");
-	t1.detach();
-
-	std::this_thread::sleep_for(std::chrono::seconds(1));
-	LOG_INFO("3秒后连接反向WebSocket...");
-	std::this_thread::sleep_for(std::chrono::seconds(3));
-
-	// 反向WebSocket连接
-	std::thread t2(MyReverseWebSocket::connectReverseWebSocket);
-	t2.detach();
-
-	// 轮询originalMessageQueue  这里可以使用线程池管理
-	while (true)
+	std::string configPath = "config.json";
+	bool checkConfigOnly = false;
+	for (int index = 1; index < argc; ++index)
 	{
-		if (auto msg = MessageQueue::original_try_pop())
+		const std::string argument = argv[index];
+		if (argument == "--check-config")
+			checkConfigOnly = true;
+		else if (argument == "--config" && index + 1 < argc)
+			configPath = argv[++index];
+		else
 		{
-			std::thread t(workingThread, std::ref(messageClass), std::move(*msg));
-			t.detach();
+			std::cerr << "未知参数或缺少参数值：" << argument << std::endl;
+			return -1;
+		}
+	}
+
+	ConfigLoader configLoader;
+	ConfigLoadResult loadResult = configLoader.loadFile(configPath);
+	logConfigDiagnostics(loadResult.diagnostics);
+	if (!loadResult.canStart())
+	{
+		LOG_FATAL("配置加载失败，程序无法安全启动");
+		Log::getInstance().shutdown();
+		return -1;
+	}
+	const std::shared_ptr<const SchemaConfig> schema = loadResult.config;
+	if (checkConfigOnly)
+	{
+		LOG_INFO("配置校验通过：" + configPath);
+		Log::getInstance().shutdown();
+		return 0;
+	}
+	ConfigSnapshotStore configStore(configPath, schema);
+	const std::shared_ptr<const ConfigSnapshot> startupSnapshot = configStore.current();
+	const RuntimeSettings &settings = startupSnapshot->runtime;
+	init(settings.schemaVersion);
+	const TransportConfig &transportConfig = settings.transport;
+	LOG_INFO("当前通信模式：" + transportModeName(transportConfig.mode));
+	ModelRegistry models(settings.models.registryPath);
+	const std::string &dbPath = settings.storage.conversationDatabase;
+	ConversationStore conversationStore(dbPath);
+	ImageAssetStore imageAssetStore(dbPath, settings.storage.imageAssets);
+	UserSessionService userSession(models, conversationStore, settings.bot, settings.chat);
+	Dock dock(settings.dock, &running);
+	MemoryService memoryService(dbPath, conversationStore, dock, models, settings.memory);
+	userSession.setMemoryService(&memoryService);
+	userSession.setImageAssetStore(&imageAssetStore);
+	if (settings.bot.managerId != 0)
+		userSession.ensureUserExists(settings.bot.managerId);
+	std::unique_ptr<SearchProvider> webSearchProvider;
+	std::unique_ptr<WebSearchAction> webSearchAction;
+	std::unique_ptr<WebFetchAction> webFetchAction;
+	ToolRegistry tools;
+	bool globalVoice = settings.voice.enabled;
+	bool accessibilityChat = startupSnapshot->schema->accessibilityChat;
+	ComputerStatus adminComputerStatus;
+	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
+		{ return userSession.getModelName(userId); });
+	VoiceModeAction voiceModeAction(userSession, globalVoice);
+	AdminControlAction adminControlAction(adminComputerStatus, accessibilityChat,
+		globalVoice, [&configStore]()
+		{
+			ConfigReloadResult result = configStore.reload();
+			logConfigDiagnostics(result.diagnostics);
+			for (const ConfigChange &change : result.diff.changes())
+			{
+				LOG_INFO("配置变化：" + change.path + " [" +
+					configChangeImpactName(change.impact) + "]");
+			}
+			return summarizeReload(result);
+		});
+	if (settings.webSearch.enabled)
+	{
+		webSearchProvider = std::make_unique<TavilySearchProvider>(settings.webSearch, &running);
+		webSearchAction = std::make_unique<WebSearchAction>(*webSearchProvider, settings.webSearch);
+		tools.registerTool(std::make_unique<ActionTool>(*webSearchAction));
+		LOG_INFO("联网搜索工具已启用，Provider：" + settings.webSearch.provider);
+	}
+	if (settings.webFetch.enabled)
+	{
+		// 超长正文走默认小模型做"按问题摘录"，失败时 Action 自动降级为截断
+		const std::string distillModel = settings.chat.defaultModel;
+		webFetchAction = std::make_unique<WebFetchAction>(
+			settings.webFetch, &running, WebFetchAction::HttpGet{},
+			[&dock, &models, distillModel](const std::string &prompt)
+			{
+				const ChatModel *modelPtr = models.find(distillModel);
+				if (modelPtr == nullptr)
+					return std::string{};
+				ChatRequest request;
+				request.system_prompt = "你是网页内容提取器，只输出与问题相关的原文摘录。";
+				request.history.push_back({"user", prompt});
+				const ChatResponse response =
+					dock.RequestChat(*modelPtr, distillModel, request);
+				if (response.cancelled || response.code != 200)
+					return std::string{};
+				return response.content;
+			});
+		tools.registerTool(std::make_unique<ActionTool>(*webFetchAction));
+		LOG_INFO("网页抓取工具已启用");
+	}
+	tools.registerTool(std::make_unique<GetTimeTool>());
+	tools.registerTool(std::make_unique<ActionTool>(getCurrentModelAction));
+	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
+	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore, settings.models.drawing));
+	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore, settings.models.vision));
+	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore));
+	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
+	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
+	std::string registeredTools;
+	for (const std::string &toolName : tools.names())
+	{
+		if (!registeredTools.empty())
+			registeredTools += ", ";
+		registeredTools += toolName;
+	}
+	LOG_INFO("已注册模型工具：" + registeredTools);
+	ChatService chatService(dock, userSession, models, tools, memoryService, settings.chat, settings.bot.managerId);
+	InboundMessageQueue inboundQueue;
+	OutboundMessageQueue outboundQueue;
+	QueuedMessageSender messageSender(outboundQueue);
+	OneBotEventDecoder oneBotEventDecoder;
+	OneBotMessageEncoder oneBotMessageEncoder(
+		settings.chat.privateAction, settings.chat.groupAction);
+	Voice voice(settings.voice, &running);
+	CommandRegistry commandRegistry(settings.bot.managerId);
+	commandRegistry.registryCommand(std::make_unique<HelpCommand>(settings.resources.helpFile));
+	commandRegistry.registryCommand(std::make_unique<ModelListCommand>(models));
+	commandRegistry.registryCommand(std::make_unique<SearchSongsCommand>());
+	commandRegistry.registryCommand(std::make_unique<QueryModelCommand>(getCurrentModelAction));
+	commandRegistry.registryCommand(std::make_unique<GeneratePictureCommand>(dock, settings.models.drawing));
+	commandRegistry.registryCommand(std::make_unique<ResetChatCommand>(userSession));
+	commandRegistry.registryCommand(std::make_unique<SetSoulCommand>(userSession));
+	commandRegistry.registryCommand(std::make_unique<SwitchModelCommand>(userSession, models));
+	commandRegistry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));
+	commandRegistry.registryCommand(std::make_unique<RemoveContextCommand>(userSession));
+	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
+	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
+		commandRegistry, voice, settings.message, settings.models.vision,
+		globalVoice, accessibilityChat);
+	KeyedTaskScheduler messageWorkers(
+		settings.messageExecution,
+		[](std::exception_ptr error)
+		{
+			try
+			{
+				if (error)
+					std::rethrow_exception(error);
+			}
+			catch (const std::exception &exception)
+			{
+				LOG_ERROR("消息处理任务异常：" + std::string(exception.what()));
+			}
+			catch (...)
+			{
+				LOG_ERROR("消息处理任务发生未知异常");
+			}
+		});
+	LOG_INFO("消息执行器线程：初始 " +
+		std::to_string(settings.messageExecution.initialWorkerThreads) +
+		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
+		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), settings.bot.managerId, std::cref(running));
+
+	std::thread transportThread;
+	switch (transportConfig.mode)
+	{
+	case TransportMode::ForwardWebSocket:
+		transportThread = std::thread(
+			MyWebSocket::connectWebSocket,
+			std::cref(transportConfig.forwardWebSocket),
+			std::ref(inboundQueue), std::ref(outboundQueue),
+			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
+			std::cref(running));
+		break;
+	case TransportMode::ReverseWebSocket:
+		transportThread = std::thread(
+			MyReverseWebSocket::connectReverseWebSocket,
+			std::cref(transportConfig.reverseWebSocket),
+			std::ref(inboundQueue), std::ref(outboundQueue),
+			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
+			std::cref(running));
+		break;
+	case TransportMode::Http:
+		transportThread = std::thread(
+			OneBotHttpTransport::run,
+			std::cref(transportConfig),
+			std::ref(inboundQueue), std::ref(outboundQueue),
+			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
+			std::cref(running));
+		break;
+	}
+
+	while (running.load())
+	{
+		if (receivedSignal != 0)
+		{
+			LOG_INFO("收到退出信号：" + std::to_string(receivedSignal));
+			running.store(false);
+			break;
+		}
+
+		if (auto msg = inboundQueue.tryPop())
+		{
+			auto message = std::make_shared<InboundMessage>(std::move(*msg));
+			const TaskSubmitResult submitResult = messageWorkers.submit(
+				message->user_id,
+				[&messageClass, maxMessageTokens = settings.chat.maxMessageTokens,
+				 message]() mutable {
+				workingThread(messageClass, std::move(*message), maxMessageTokens);
+			});
+			if (submitResult == TaskSubmitResult::Full)
+			{
+				LOG_WARNING("消息执行队列已满，拒绝新的入站消息");
+				if (messageClass.messageFilter(message->message_type, message->raw_message))
+					messageClass.sendError(*message, "系统繁忙，请稍后重试。");
+			}
 		}
 		else
 		{
-			// 休眠算法...
-			std::this_thread::sleep_for(std::chrono::seconds(1));
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
 	}
 
-	// 判断是否退出 ...
-
-	// 资源回收
-	resourceCleanup();
+	resourceCleanup(running, messageWorkers, memoryService, timingThread,
+					transportThread);
+	Log::getInstance().shutdown();
 
 	return 0;
 }

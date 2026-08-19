@@ -14,6 +14,8 @@ struct ResponseToolCall
 
 struct ChatResponse
 {
+    bool cancelled = false;
+    bool multimodal_unsupported = false;
     int code = 0;              // HTTP 状态码（200=成功，其余视为失败）
     std::string content;       // 助手回复文本
     std::string finish_reason; // "stop" / "length" / "tool_calls" / "content_filter" 等
