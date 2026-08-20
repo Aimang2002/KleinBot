@@ -16,7 +16,8 @@
 #include "src/Network/MyWebSocket.h"
 #include "Network/OneBotHttpTransport.h"
 #include "Network/TransportConfig.h"
-#include "TimingTast/TimingTast.h"
+#include "Persistence/ReminderStore.h"
+#include "Reminder/ReminderService.h"
 #include "MessageSender/QueuedMessageSender.h"
 #include "MessageQueue/OutboundMessageQueue.h"
 #include "Port/OutboundMessage.h"
@@ -43,6 +44,9 @@
 #include "Tool/RecallConversationTool.h"
 #include "Action/WebSearchAction.h"
 #include "Action/WebFetchAction.h"
+#include "Action/SetReminderAction.h"
+#include "Action/ListRemindersAction.h"
+#include "Action/CancelReminderAction.h"
 #include "WebSearch/TavilySearchProvider.h"
 #include "Tool/GenerateImageTool.h"
 #include "Tool/InspectImageTool.h"
@@ -112,36 +116,41 @@ bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::millisecon
 }
 
 // 子线程
-void pollingThread(ChatService &chatService, MessageSenderPort &sender, uint64_t managerId, const std::atomic<bool> &running)
+void pollingThread(ChatService &chatService, MessageSenderPort &sender,
+				   ReminderService &reminders, uint64_t managerId, const std::atomic<bool> &running)
 {
-	std::string message;
-	uint64_t user_id;
-	bool tag = false;
-
 	while (running.load())
 	{
 		std::time_t now = std::time(nullptr);
 		std::tm *local_time = std::localtime(&now);
 		if (managerId != 0 && local_time->tm_hour == 8 && local_time->tm_min == 0 && local_time->tm_sec < 4)
 		{
-			message = "早上好，请跟我打招呼的同时来一句元气满满的句子，让我一整天都有活力（直接说就好，不要在前面加上语气词例如“好的”）";
-			user_id = managerId;
+			const std::string message = "早上好，请跟我打招呼的同时来一句元气满满的句子，让我一整天都有活力（直接说就好，不要在前面加上语气词例如“好的”）";
 			LOG_INFO("每日早安即将发送，亲爱的管理员，早上好。");
-			tag = true;
-		}
-		else if (auto due = TimingTast::getInstance().popDueEvent(TimingTast::getInstance().getPresentTime()))
-		{
-			message = JsonParse::getInstance().toJson(due->content);
-			user_id = due->user_id;
-			tag = true;
+			std::string response = chatService.replyOneShot(message);
+			sender.send_private(static_cast<long long>(managerId), TextMessage{response});
 		}
 
-		if (tag)
+		// 到期提醒：逐条经模型渲染后私聊送达，模型失败时兜底直发原文
+		for (const DueEvent &due : reminders.popDue(nowSeconds()))
 		{
-			std::string response = chatService.replyOneShot(message);
-			sender.send_private(static_cast<long long>(user_id), TextMessage{response});
-			tag = false;
+			std::string prompt = "现在是" + formatLocal(nowSeconds()) +
+								 "。你之前收到用户的委托：" + due.content +
+								 "。请以克莱茵的口吻把这个提醒转达给用户，简短自然。";
+			if (due.late)
+				prompt += "该提醒已错过原定触发时间（" + formatLocal(due.scheduled_at) +
+						  "），请向用户说明这一点并致歉。";
+			LOG_INFO("提醒到期：id=" + std::to_string(due.id) + "，user_id=" +
+					 std::to_string(due.user_id));
+			std::string response = chatService.replyOneShot(prompt);
+			if (response.empty())
+			{
+				LOG_WARNING("提醒渲染失败，兜底直发原文：id=" + std::to_string(due.id));
+				response = "提醒（原定 " + formatLocal(due.scheduled_at) + "）：" + due.content;
+			}
+			sender.send_private(static_cast<long long>(due.user_id), TextMessage{response});
 		}
+
 		sleepWhileRunning(running, std::chrono::seconds(3));
 	}
 	LOG_INFO("定时任务线程已退出");
@@ -269,6 +278,9 @@ int main(int argc, char **argv)
 	const std::string &dbPath = settings.storage.conversationDatabase;
 	ConversationStore conversationStore(dbPath);
 	ImageAssetStore imageAssetStore(dbPath, settings.storage.imageAssets);
+	ReminderStore reminderStore(dbPath);
+	// 构造即重建内存队列：24 小时内漏触发的提醒会补发，超窗的滚动或丢弃
+	ReminderService reminderService(reminderStore);
 	UserSessionService userSession(models, conversationStore, settings.bot, settings.chat);
 	Dock dock(settings.dock, &running);
 	MemoryService memoryService(dbPath, conversationStore, dock, models, settings.memory);
@@ -336,6 +348,12 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore));
 	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
 	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
+	SetReminderAction setReminderAction(reminderService);
+	ListRemindersAction listRemindersAction(reminderService);
+	CancelReminderAction cancelReminderAction(reminderService);
+	tools.registerTool(std::make_unique<ActionTool>(setReminderAction));
+	tools.registerTool(std::make_unique<ActionTool>(listRemindersAction));
+	tools.registerTool(std::make_unique<ActionTool>(cancelReminderAction));
 	std::string registeredTools;
 	for (const std::string &toolName : tools.names())
 	{
@@ -389,7 +407,7 @@ int main(int argc, char **argv)
 		std::to_string(settings.messageExecution.initialWorkerThreads) +
 		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
 		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), settings.bot.managerId, std::cref(running));
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)

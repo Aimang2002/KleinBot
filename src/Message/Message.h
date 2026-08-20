@@ -1,7 +1,6 @@
 #ifndef MESSAGE_H
 #define MESSAGE_H
 
-#include "../TimingTast/TimingTast.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../ModelApiCaller/Voice/Voice.h"
 #include "../ComputerStatus/ComputerStatus.h"

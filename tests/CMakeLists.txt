@@ -7,6 +7,7 @@ add_executable(kleinbot_tests
     MultimodalRoutingTests.cpp
     NetworkAuthTests.cpp
     OutboundInfrastructureTests.cpp
+    ReminderTests.cpp
     StorageIntegrationTests.cpp
     TaskSchedulerTests.cpp
     TransportConfigTests.cpp
