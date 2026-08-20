@@ -217,7 +217,7 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 | API 标准 | 支持 | 说明 |
 | --- | :---: | --- |
 | OpenAI | ✅ | 全功能：工具调用、联网、图片生成 |
-| Anthropic | ✅ | 文本聊天与视觉调用，暂不支持工具调用 |
+| Anthropic | ✅ | 文本聊天、视觉调用与工具调用（原生 tool_use 协议）；不支持图像生成 |
 | Google | ❌ | 暂不实现 |
 | Azure | ❌ | 暂不实现 |
 
@@ -259,7 +259,7 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 
 ## 模型工具（Function Calling）
 
-对话过程中模型可自主调用以下工具，无需用户指令触发。工具调用使用标准 OpenAI tools 协议，因此主模型需以 `OpenAI` APIStandard 接入。
+对话过程中模型可自主调用以下工具，无需用户指令触发。工具调用使用标准 OpenAI tools 协议；`Anthropic` APIStandard 的模型走原生 tool_use 协议，由适配器自动完成双向转换。
 
 | 工具 | 作用 | 典型场景 |
 | --- | --- | --- |

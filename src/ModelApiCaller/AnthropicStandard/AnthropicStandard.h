@@ -18,10 +18,11 @@ public:
     VisionResponse request_vision(const ChatModel &model, const std::string &model_name, const std::string &prompt, const std::string &base64) override;
     ImageResponse request_image(const ChatModel &model, const std::string &model_name, const std::string &prompt) override;
 
+    // 公开供单元测试直接验证响应解析；生产路径仍由 request_chat 内部调用
+    ChatResponse chat_json_parse(const std::string &response);
+
 private:
     std::pair<std::string, long> http_post(const std::string &url, const std::string &api_key, const std::string &payload);
-
-    ChatResponse chat_json_parse(const std::string &response);
 
     VisionResponse vision_json_parse(const std::string &response);
 

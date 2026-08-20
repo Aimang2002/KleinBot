@@ -198,15 +198,26 @@ ChatResponse AnthropicStandard::chat_json_parse(const std::string &response)
             return responseFormat;
         }
 
-        // content 是 block 数组：[{type:"text", text:"..."}, ...]
+        // content 是 block 数组：[{type:"text", text:"..."}, {type:"tool_use", ...}]
         if (json_data.contains("content") && json_data["content"].is_array())
         {
             std::string text;
             for (auto &block : json_data["content"])
             {
-                if (block.is_object() && block.value("type", "") == "text")
+                if (!block.is_object())
+                    continue;
+                const std::string type = block.value("type", "");
+                if (type == "text")
                 {
                     text += block.value("text", "");
+                }
+                else if (type == "tool_use")
+                {
+                    ResponseToolCall call;
+                    call.id = block.value("id", "");
+                    call.name = block.value("name", "");
+                    call.arguments = block.value("input", nlohmann::json::object()).dump();
+                    responseFormat.tool_calls.push_back(std::move(call));
                 }
             }
             responseFormat.content = text;
@@ -222,8 +233,11 @@ ChatResponse AnthropicStandard::chat_json_parse(const std::string &response)
             responseFormat.content = "没有content字段";
         }
 
-        // 字段名是 stop_reason（end_turn / max_tokens / stop_sequence）
+        // 字段名是 stop_reason（end_turn / max_tokens / stop_sequence / tool_use）；
+        // tool_use 映射为 ChatService 工具循环使用的 tool_calls
         responseFormat.finish_reason = json_data.value("stop_reason", "");
+        if (responseFormat.finish_reason == "tool_use")
+            responseFormat.finish_reason = "tool_calls";
 
         if (json_data.contains("usage") && json_data["usage"].is_object())
         {

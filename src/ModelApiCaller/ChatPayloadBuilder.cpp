@@ -116,16 +116,85 @@ nlohmann::json ChatPayloadBuilder::anthropic(const std::string &modelName,
         payload["system"] = request.system_prompt;
 
     nlohmann::json messages = nlohmann::json::array();
-    for (const ChatMessage &message : request.history)
+    for (std::size_t i = 0; i < request.history.size(); ++i)
     {
+        const ChatMessage &message = request.history[i];
         if (message.role == "system")
             continue;
+
+        // Anthropic 协议要求 tool_use 的结果作为下一条 user 消息里的 tool_result 块
+        // 回传，同一轮的多个结果必须合并在同一条消息中，因此聚合连续的 tool 消息
+        if (message.role == "tool")
+        {
+            nlohmann::json results = nlohmann::json::array();
+            while (i < request.history.size() && request.history[i].role == "tool")
+            {
+                results.push_back({
+                    {"type", "tool_result"},
+                    {"tool_use_id", request.history[i].tool_call_id},
+                    {"content", request.history[i].content}
+                });
+                ++i;
+            }
+            --i;
+            messages.push_back({{"role", "user"}, {"content", std::move(results)}});
+            continue;
+        }
+
+        if (message.role == "assistant" && !message.tool_calls.empty())
+        {
+            nlohmann::json content = nlohmann::json::array();
+            if (!message.content.empty())
+                content.push_back({{"type", "text"}, {"text", message.content}});
+            for (const ToolCallRequest &call : message.tool_calls)
+            {
+                nlohmann::json input = nlohmann::json::object();
+                if (!call.arguments.empty())
+                {
+                    // 部分网关会拼接损坏的参数文本，解析失败时退回空对象，
+                    // 避免整条 tool_use 块无法序列化导致请求被网关拒绝
+                    try
+                    {
+                        input = nlohmann::json::parse(call.arguments);
+                    }
+                    catch (const nlohmann::json::exception &)
+                    {
+                    }
+                }
+                content.push_back({
+                    {"type", "tool_use"},
+                    {"id", call.id},
+                    {"name", call.name},
+                    {"input", std::move(input)}
+                });
+            }
+            messages.push_back({{"role", "assistant"}, {"content", std::move(content)}});
+            continue;
+        }
+
         messages.push_back({
             {"role", message.role},
             {"content", anthropicContent(message)}
         });
     }
     payload["messages"] = std::move(messages);
+
+    if (!request.tools.empty())
+    {
+        nlohmann::json tools = nlohmann::json::array();
+        for (const std::string &schema : request.tools)
+        {
+            const nlohmann::json definition = nlohmann::json::parse(schema);
+            const nlohmann::json function = definition.value(
+                "function", nlohmann::json::object());
+            tools.push_back({
+                {"name", function.value("name", "")},
+                {"description", function.value("description", "")},
+                {"input_schema", function.value("parameters", nlohmann::json::object())}
+            });
+        }
+        payload["tools"] = std::move(tools);
+    }
     return payload;
 }
 
