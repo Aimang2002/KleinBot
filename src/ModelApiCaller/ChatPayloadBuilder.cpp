@@ -44,6 +44,22 @@ nlohmann::json anthropicContent(const ChatMessage &message)
         content.push_back({{"type", "text"}, {"text", message.content}});
     return content;
 }
+
+// 在消息的最后一个内容块上挂 cache_control 断点。
+// 断点只能挂在块上，纯文本消息需先转为块数组；两种编码对模型输入等价
+void attachCacheBreakpoint(nlohmann::json &message)
+{
+    if (!message.contains("content"))
+        return;
+    if (message["content"].is_string())
+    {
+        const std::string text = message["content"];
+        message["content"] = nlohmann::json::array(
+            {{{"type", "text"}, {"text", text}}});
+    }
+    if (message["content"].is_array() && !message["content"].empty())
+        message["content"].back()["cache_control"] = {{"type", "ephemeral"}};
+}
 }
 
 nlohmann::json ChatPayloadBuilder::openAI(const std::string &modelName,
@@ -113,7 +129,14 @@ nlohmann::json ChatPayloadBuilder::anthropic(const std::string &modelName,
         ? request.max_tokens
         : defaultMaxTokens;
     if (!request.system_prompt.empty())
-        payload["system"] = request.system_prompt;
+    {
+        // 协议的提示缓存必须显式打 cache_control 断点，且最多 4 个；
+        // 布局为 tools 末项、system、倒数第 3 条消息、最后一条消息
+        payload["system"] = nlohmann::json::array({
+            {{"type", "text"}, {"text", request.system_prompt},
+             {"cache_control", {{"type", "ephemeral"}}}}
+        });
+    }
 
     nlohmann::json messages = nlohmann::json::array();
     for (std::size_t i = 0; i < request.history.size(); ++i)
@@ -177,6 +200,14 @@ nlohmann::json ChatPayloadBuilder::anthropic(const std::string &modelName,
             {"content", anthropicContent(message)}
         });
     }
+    // 工具循环每轮固定追加 2 条消息（assistant tool_use + user tool_result），
+    // 跨轮次同样追加 2 条（assistant 回复 + 新 user），因此上一请求的末条
+    // 断点恰好落在本请求的倒数第 3 条：该断点负责命中上一请求写入的缓存，
+    // 末条断点负责把新增后缀写入缓存
+    if (messages.size() >= 3)
+        attachCacheBreakpoint(messages[messages.size() - 3]);
+    if (!messages.empty())
+        attachCacheBreakpoint(messages.back());
     payload["messages"] = std::move(messages);
 
     if (!request.tools.empty())
@@ -193,6 +224,8 @@ nlohmann::json ChatPayloadBuilder::anthropic(const std::string &modelName,
                 {"input_schema", function.value("parameters", nlohmann::json::object())}
             });
         }
+        // tools 位于缓存前缀最前，单独断点保证 system 变化时工具表仍可命中
+        tools.back()["cache_control"] = {{"type", "ephemeral"}};
         payload["tools"] = std::move(tools);
     }
     return payload;

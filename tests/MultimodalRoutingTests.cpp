@@ -254,6 +254,70 @@ TEST(ChatPayloadBuilderTest, MergesConsecutiveToolResultsIntoSingleAnthropicUser
     EXPECT_EQ(results.at("content").at(1).at("content"), "当前时间 12:00");
 }
 
+TEST(ChatPayloadBuilderTest, AddsAnthropicCacheBreakpointsOnToolsAndSystem)
+{
+    ChatRequest request;
+    request.system_prompt = "system";
+    request.tools = {
+        R"({"type":"function","function":{"name":"tool_a","description":"a","parameters":{"type":"object"}}})",
+        R"({"type":"function","function":{"name":"tool_b","description":"b","parameters":{"type":"object"}}})"
+    };
+    request.history.push_back({"user", "hi"});
+
+    const nlohmann::json payload = ChatPayloadBuilder::anthropic(
+        "claude-model", request, 4096);
+
+    ASSERT_TRUE(payload.at("system").is_array());
+    EXPECT_EQ(payload.at("system").at(0).at("text"), "system");
+    EXPECT_EQ(payload.at("system").at(0).at("cache_control").at("type"),
+              "ephemeral");
+    EXPECT_FALSE(payload.at("tools").at(0).contains("cache_control"));
+    EXPECT_EQ(payload.at("tools").at(1).at("cache_control").at("type"),
+              "ephemeral");
+    // 单条消息时只有末条断点，纯文本消息转为块数组携带断点
+    const auto &content = payload.at("messages").at(0).at("content");
+    ASSERT_TRUE(content.is_array());
+    EXPECT_EQ(content.at(0).at("text"), "hi");
+    EXPECT_EQ(content.at(0).at("cache_control").at("type"), "ephemeral");
+}
+
+TEST(ChatPayloadBuilderTest, PlacesAnthropicMessageBreakpointsOnThirdFromLastAndLast)
+{
+    ChatRequest request;
+    request.history.push_back({"user", "第一句"});
+    request.history.push_back({"assistant", "第二句"});
+    ChatMessage toolCall;
+    toolCall.role = "assistant";
+    toolCall.tool_calls.push_back({"call-1", "inspect_image", "{}"});
+    ChatMessage toolResult;
+    toolResult.role = "tool";
+    toolResult.tool_call_id = "call-1";
+    toolResult.content = "结果";
+    request.history.push_back(std::move(toolCall));
+    request.history.push_back(std::move(toolResult));
+    request.history.push_back({"user", "最后一句"});
+
+    const nlohmann::json payload = ChatPayloadBuilder::anthropic(
+        "claude-model", request, 4096);
+
+    // 映射后 5 条消息：user / assistant / assistant(tool_use) / user(tool_result) / user
+    const auto &messages = payload.at("messages");
+    ASSERT_EQ(messages.size(), 5U);
+    // 倒数第 3 条（assistant tool_use）的末块带断点
+    EXPECT_EQ(messages.at(2).at("content").back()
+                  .at("cache_control").at("type"),
+              "ephemeral");
+    // 最后一条（纯文本 user）转为块数组并在文本块上带断点
+    const auto &lastContent = messages.at(4).at("content");
+    ASSERT_TRUE(lastContent.is_array());
+    EXPECT_EQ(lastContent.at(0).at("text"), "最后一句");
+    EXPECT_EQ(lastContent.at(0).at("cache_control").at("type"), "ephemeral");
+    // 其余消息不带断点
+    EXPECT_TRUE(messages.at(0).at("content").is_string());
+    EXPECT_TRUE(messages.at(1).at("content").is_string());
+    EXPECT_FALSE(messages.at(3).at("content").at(0).contains("cache_control"));
+}
+
 TEST(AnthropicStandardTest, ParsesToolUseBlocksAndMapsStopReason)
 {
     AnthropicStandard standard;
