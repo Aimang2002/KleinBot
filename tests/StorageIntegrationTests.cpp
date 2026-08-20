@@ -3,9 +3,11 @@
 #include "Asset/ImageAssetStore.h"
 #include "Persistence/ConversationStore.h"
 #include "Tool/SendImageTool.h"
+#include "UserSession/UserSessionService.h"
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <regex>
 #include <sqlite3.h>
 #include <string>
@@ -67,6 +69,81 @@ TEST(ConversationStoreIntegrationTest, PersistsSearchesAndRemovesUserHistory)
     store.clearUser(10);
     EXPECT_TRUE(store.loadAll(10).empty());
     EXPECT_EQ(store.loadAll(20).size(), 1U);
+}
+
+namespace
+{
+std::string writeModelRegistryFile(const std::string &directory)
+{
+    const std::filesystem::path path =
+        std::filesystem::path(directory) / "models.json";
+    {
+        std::ofstream output(path);
+        output << R"({
+            "Models": [
+                {
+                    "ModelName": ["test-model"],
+                    "api_key": "key",
+                    "api_endpoint": "https://example.test/chat",
+                    "APIStandard": "OpenAI"
+                }
+            ]
+        })";
+    }
+    return path.string();
+}
+}
+
+TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+    UserSessionService session(registry, store, bot, options);
+
+    for (int i = 1; i <= 40; ++i)
+        session.appendMessage(10, i % 2 == 1 ? "user" : "assistant",
+                              "消息" + std::to_string(i));
+
+    auto bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    ASSERT_EQ(bundle->request.history.size(), 40U);
+    // 超过旧上限 20 条但未到高水位 40 时头部不动，前缀保持稳定
+    EXPECT_EQ(bundle->request.history.front().content, "消息1");
+    EXPECT_EQ(bundle->request.history.back().content, "消息40");
+
+    session.appendMessage(10, "user", "消息41");
+    session.appendMessage(10, "assistant", "消息42");
+    bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    // 越过高水位后一次性截回低水位 20 条，之后头部重新稳定
+    ASSERT_EQ(bundle->request.history.size(), 20U);
+    EXPECT_EQ(bundle->request.history.front().content, "消息23");
+    EXPECT_EQ(bundle->request.history.back().content, "消息42");
+}
+
+TEST(UserSessionWindowTest, DropsExpiredMessagesOnColdStartLoad)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    options.messageSurvivalSeconds = 3600;
+    BotIdentity bot;
+
+    const time_t now = std::time(nullptr);
+    store.append(10, "user", "过期消息", now - 7200);
+    store.append(10, "assistant", "存活消息", now);
+
+    UserSessionService session(registry, store, bot, options);
+    auto bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    ASSERT_EQ(bundle->request.history.size(), 1U);
+    EXPECT_EQ(bundle->request.history.front().content, "存活消息");
 }
 
 TEST(ImageAssetStoreIntegrationTest, SavesFindsAndClearsAssetsWithFiles)

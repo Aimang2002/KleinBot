@@ -197,12 +197,18 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
 
     // ===== 临时裁切算法（占位，待 Phase 3 后期替换） =====
     // 策略：
-    //   1. 丢弃超过存活时间的旧消息
-    //   2. 若剩余条数超过 MAX_TURNS，只保留末尾若干条
+    //   1. 丢弃超过存活时间的旧消息（仅在缓存已冷的场景生效，
+    //      供应商缓存 TTL 只有几分钟，隔天返回时缓存本来就失效）
+    //   2. 高低水位裁切：未超过高水位前绝不改动头部，历史前缀逐字节
+    //      稳定，供应商前缀缓存才能跨请求命中；超过高水位时一次性
+    //      截回低水位，只在截断那一轮付一次全量缓存 miss，随后前缀
+    //      重新稳定。禁止改成每轮滑动的滑窗：头部每变一次，整个前缀
+    //      缓存都会作废
     // 注意：本函数只读，不回写 user_chatHistory，原始历史保持完整
     const time_t now = std::time(nullptr);
     const time_t survival = chatOptions.messageSurvivalSeconds;
-    const size_t MAX_TURNS = 20;
+    const size_t HISTORY_HIGH_WATERMARK = 40;
+    const size_t HISTORY_LOW_WATERMARK = 20;
 
     std::vector<ChatMessage> filtered;
     filtered.reserve(p.user_chatHistory.size());
@@ -212,9 +218,9 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
             continue;
         filtered.push_back({tm.role, tm.content});
     }
-    if (filtered.size() > MAX_TURNS)
+    if (filtered.size() > HISTORY_HIGH_WATERMARK)
     {
-        filtered.erase(filtered.begin(), filtered.end() - MAX_TURNS);
+        filtered.erase(filtered.begin(), filtered.end() - HISTORY_LOW_WATERMARK);
     }
     result.request.history = std::move(filtered);
 
