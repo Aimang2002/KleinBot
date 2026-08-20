@@ -123,6 +123,26 @@ TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
     ASSERT_EQ(bundle->request.history.size(), 20U);
     EXPECT_EQ(bundle->request.history.front().content, "消息23");
     EXPECT_EQ(bundle->request.history.back().content, "消息42");
+
+    // 关键回归：截断之后的轮次头部不得继续滑动，否则退化为滑窗，
+    // 每轮请求的前缀缓存都会整体作废
+    for (int i = 43; i <= 62; ++i)
+        session.appendMessage(10, i % 2 == 1 ? "user" : "assistant",
+                              "消息" + std::to_string(i));
+    bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    ASSERT_EQ(bundle->request.history.size(), 40U);
+    EXPECT_EQ(bundle->request.history.front().content, "消息23");
+    EXPECT_EQ(bundle->request.history.back().content, "消息62");
+
+    // 第二次越界：再次一次性截回低水位，进入下一个稳定周期
+    session.appendMessage(10, "user", "消息63");
+    session.appendMessage(10, "assistant", "消息64");
+    bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    ASSERT_EQ(bundle->request.history.size(), 20U);
+    EXPECT_EQ(bundle->request.history.front().content, "消息45");
+    EXPECT_EQ(bundle->request.history.back().content, "消息64");
 }
 
 TEST(UserSessionWindowTest, DropsExpiredMessagesOnColdStartLoad)

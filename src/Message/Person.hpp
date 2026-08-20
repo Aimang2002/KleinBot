@@ -22,6 +22,11 @@ struct Person
     // 历史对话
     std::vector<TimestampedMessage> user_chatHistory; // 用户聊天信息和时间戳
 
+    // 上下文裁切锚点：当前请求窗口在存活消息列表中的起始下标。
+    // 只有窗口超过高水位时才整体前移，两次移动之间头部逐字节稳定，
+    // 供应商前缀缓存才能跨请求命中（见 UserSessionService::buildChatRequest）
+    std::size_t history_anchor = 0;
+
     // 会话设定
     std::string system_prompt;
     double temperature = 0.7;       // 温度
