@@ -286,36 +286,68 @@ TEST(ChatPayloadBuilderTest, PlacesAnthropicMessageBreakpointsOnThirdFromLastAnd
     ChatRequest request;
     request.history.push_back({"user", "第一句"});
     request.history.push_back({"assistant", "第二句"});
-    ChatMessage toolCall;
-    toolCall.role = "assistant";
-    toolCall.tool_calls.push_back({"call-1", "inspect_image", "{}"});
-    ChatMessage toolResult;
-    toolResult.role = "tool";
-    toolResult.tool_call_id = "call-1";
-    toolResult.content = "结果";
-    request.history.push_back(std::move(toolCall));
-    request.history.push_back(std::move(toolResult));
+    request.history.push_back({"user", "第三句"});
+    request.history.push_back({"assistant", "第四句"});
     request.history.push_back({"user", "最后一句"});
 
     const nlohmann::json payload = ChatPayloadBuilder::anthropic(
         "claude-model", request, 4096);
 
-    // 映射后 5 条消息：user / assistant / assistant(tool_use) / user(tool_result) / user
     const auto &messages = payload.at("messages");
     ASSERT_EQ(messages.size(), 5U);
-    // 倒数第 3 条（assistant tool_use）的末块带断点
-    EXPECT_EQ(messages.at(2).at("content").back()
-                  .at("cache_control").at("type"),
-              "ephemeral");
-    // 最后一条（纯文本 user）转为块数组并在文本块上带断点
+    // 倒数第 3 条（第三句）转为块数组并在文本块上带断点
+    const auto &thirdFromLast = messages.at(2).at("content");
+    ASSERT_TRUE(thirdFromLast.is_array());
+    EXPECT_EQ(thirdFromLast.at(0).at("text"), "第三句");
+    EXPECT_EQ(thirdFromLast.at(0).at("cache_control").at("type"), "ephemeral");
+    // 最后一条同样带断点
     const auto &lastContent = messages.at(4).at("content");
     ASSERT_TRUE(lastContent.is_array());
     EXPECT_EQ(lastContent.at(0).at("text"), "最后一句");
     EXPECT_EQ(lastContent.at(0).at("cache_control").at("type"), "ephemeral");
-    // 其余消息不带断点
+    // 其余消息不带断点、保持字符串编码
     EXPECT_TRUE(messages.at(0).at("content").is_string());
     EXPECT_TRUE(messages.at(1).at("content").is_string());
-    EXPECT_FALSE(messages.at(3).at("content").at(0).contains("cache_control"));
+    EXPECT_TRUE(messages.at(3).at("content").is_string());
+}
+
+TEST(ChatPayloadBuilderTest, MergesConsecutiveAnthropicUserMessages)
+{
+    ChatRequest request;
+    ChatMessage user;
+    user.role = "user";
+    user.content = "看图";
+    ChatMessage assistant;
+    assistant.role = "assistant";
+    assistant.tool_calls.push_back({"call-1", "inspect_image", "{}"});
+    ChatMessage tool;
+    tool.role = "tool";
+    tool.tool_call_id = "call-1";
+    tool.content = "图片描述";
+    ChatMessage wrapUp;
+    wrapUp.role = "user";
+    wrapUp.content = "[系统注] 工具调用轮次已达上限，不得再调用任何工具。";
+    request.history.push_back(std::move(user));
+    request.history.push_back(std::move(assistant));
+    request.history.push_back(std::move(tool));
+    request.history.push_back(std::move(wrapUp));
+
+    const nlohmann::json payload = ChatPayloadBuilder::anthropic(
+        "claude-model", request, 4096);
+
+    // 收尾注记并入 tool_result 所在的 user 消息，保持 user/assistant 交替
+    const auto &messages = payload.at("messages");
+    ASSERT_EQ(messages.size(), 3U);
+    EXPECT_EQ(messages.at(0).at("role"), "user");
+    EXPECT_EQ(messages.at(1).at("role"), "assistant");
+    EXPECT_EQ(messages.at(2).at("role"), "user");
+    const auto &merged = messages.at(2).at("content");
+    ASSERT_TRUE(merged.is_array());
+    ASSERT_EQ(merged.size(), 2U);
+    EXPECT_EQ(merged.at(0).at("type"), "tool_result");
+    EXPECT_EQ(merged.at(1).at("type"), "text");
+    EXPECT_NE(merged.at(1).at("text").get<std::string>().find("不得再调用任何工具"),
+              std::string::npos);
 }
 
 TEST(AnthropicStandardTest, ParsesToolUseBlocksAndMapsStopReason)

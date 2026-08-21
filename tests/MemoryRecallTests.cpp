@@ -128,6 +128,30 @@ TEST(RecallContextInjectionTest, KeepsSystemPromptStableAndPrependsCurrentUserCo
               std::string::npos);
 }
 
+TEST(RecallContextInjectionTest, AppendContextNoteTouchesOnlyLastUserMessage)
+{
+    ChatRequest request;
+    request.system_prompt = "stable system prompt";
+    request.history.push_back({"user", "较早的问题"});
+    request.history.push_back({"assistant", "较早的回答"});
+    request.history.push_back({"user", "这是什么图？\n[image asset_id=asset-1 source=inbound]"});
+
+    ASSERT_TRUE(appendContextNote(request, "当前用户消息中的图片没有直接提供给你。"));
+
+    EXPECT_EQ(request.system_prompt, "stable system prompt");
+    EXPECT_EQ(request.history.front().content, "较早的问题");
+    const std::string &last = request.history.back().content;
+    EXPECT_NE(last.find("\n[系统注] 当前用户消息中的图片没有直接提供给你。"),
+              std::string::npos);
+    EXPECT_NE(last.find("[image asset_id=asset-1"), std::string::npos);
+
+    // 没有任何 user 消息时安全返回 false，不改动请求
+    ChatRequest empty;
+    empty.history.push_back({"assistant", "只有助手消息"});
+    EXPECT_FALSE(appendContextNote(empty, "注记"));
+    EXPECT_EQ(empty.history.back().content, "只有助手消息");
+}
+
 TEST(TextRecallTest, ExpandsChineseQuestionIntoUsefulTerms)
 {
     const auto plan = buildRecallQueryPlan({"我以前是不是提过作息问题"});

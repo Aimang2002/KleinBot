@@ -23,3 +23,17 @@ bool attachRecallContext(ChatRequest &request, const std::string &evidence)
     }
     return false;
 }
+
+bool appendContextNote(ChatRequest &request, const std::string &note)
+{
+    for (auto iterator = request.history.rbegin(); iterator != request.history.rend(); ++iterator)
+    {
+        if (iterator->role != "user")
+            continue;
+        iterator->content = iterator->content.empty()
+            ? "[系统注] " + note
+            : iterator->content + "\n[系统注] " + note;
+        return true;
+    }
+    return false;
+}

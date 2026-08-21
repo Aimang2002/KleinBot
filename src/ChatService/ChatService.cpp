@@ -95,14 +95,16 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
     }
     if (imageRoute == CurrentImageRoute::NativeMultimodal)
     {
-        bundle.request.system_prompt +=
+        // 每轮互斥的路由指令必须注入消息尾部而不是 system：
+        // system 位于前缀最前端，图片/文本交替会反复作废整个前缀缓存
+        appendContextNote(bundle.request,
             "如果当前请求直接附带用户刚发送的图片，你可以查看它并直接回答，"
-            "不需要为了查看这张当前图片调用 inspect_image。";
+            "不需要为了查看这张当前图片调用 inspect_image。");
     }
     else if (imageRoute == CurrentImageRoute::ToolFallback)
     {
-        bundle.request.system_prompt +=
-            "当前用户消息中的图片没有直接提供给你；涉及其内容时必须调用 inspect_image。";
+        appendContextNote(bundle.request,
+            "当前用户消息中的图片没有直接提供给你；涉及其内容时必须调用 inspect_image。");
     }
 
     const std::string automaticRecall = this->memoryService.recallForMessage(
@@ -124,8 +126,8 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
         const std::size_t removedImages = removeRequestImages(bundle.request);
         LOG_WARNING("当前主模型接口明确拒绝多模态内容，已移除 " +
                     std::to_string(removedImages) + " 张图片并降级到 inspect_image");
-        bundle.request.system_prompt +=
-            "当前用户消息中的图片没有直接提供给你；涉及其内容时必须调用 inspect_image。";
+        appendContextNote(bundle.request,
+            "更正：上方提到的当前图片未能直接附上，涉及其内容时必须调用 inspect_image。");
         response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
         if (response.cancelled)
             return resultReply;
@@ -153,11 +155,15 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
             }
             wrapUpAttempted = true;
             LOG_WARNING("工具调用轮次超过上限，基于已有证据收尾作答");
-            bundle.request.tools.clear();
-            bundle.request.system_prompt +=
-                "\n\n工具调用轮次已达上限，不得再调用任何工具。"
+            // 收尾指令作为 user 消息追加在尾部，tools 表原样保留：
+            // 清空 tools 会改动前缀最前端，使该请求的全量历史缓存作废
+            ChatMessage wrapUpNote;
+            wrapUpNote.role = "user";
+            wrapUpNote.content =
+                "[系统注] 工具调用轮次已达上限，不得再调用任何工具。"
                 "必须基于对话中已有的工具证据直接回答用户最初的问题，"
                 "证据不足时明确说明具体缺了什么，不要请用户重试。";
+            bundle.request.history.push_back(std::move(wrapUpNote));
             response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
             if (response.cancelled)
                 return resultReply;

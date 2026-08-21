@@ -200,6 +200,39 @@ nlohmann::json ChatPayloadBuilder::anthropic(const std::string &modelName,
             {"content", anthropicContent(message)}
         });
     }
+    // Anthropic 要求 user/assistant 角色交替；工具结果聚合成的 user 消息
+    // 之后若紧跟普通 user 消息（如工具轮次上限的收尾注记），把后者的
+    // 内容块并入前一条 user 消息，避免请求被协议拒绝
+    for (std::size_t i = 1; i < messages.size(); )
+    {
+        if (messages[i].value("role", "") == "user" &&
+            messages[i - 1].value("role", "") == "user")
+        {
+            nlohmann::json &target = messages[i - 1]["content"];
+            if (target.is_string())
+            {
+                const std::string text = target;
+                target = nlohmann::json::array(
+                    {{{"type", "text"}, {"text", text}}});
+            }
+            const nlohmann::json &source = messages[i]["content"];
+            if (source.is_string())
+            {
+                target.push_back({{"type", "text"}, {"text", source.get<std::string>()}});
+            }
+            else if (source.is_array())
+            {
+                for (const auto &block : source)
+                    target.push_back(block);
+            }
+            messages.erase(messages.begin() + static_cast<long>(i));
+        }
+        else
+        {
+            ++i;
+        }
+    }
+
     // 工具循环每轮固定追加 2 条消息（assistant tool_use + user tool_result），
     // 跨轮次同样追加 2 条（assistant 回复 + 新 user），因此上一请求的末条
     // 断点恰好落在本请求的倒数第 3 条：该断点负责命中上一请求写入的缓存，
