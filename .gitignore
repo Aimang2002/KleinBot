@@ -4,6 +4,7 @@
 build
 logs/
 .claude
+.zcode
 CLAUDE.md
 mermaid.md
 重构任务.md
