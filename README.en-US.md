@@ -1,19 +1,27 @@
 
 
 <p align="center">
-  <a >
-    <img src="https://github.com/Aimang2002/mySource/blob/main/picture/anime/output.png?raw=true" width="200" height="200" alt="go-cqhttp">
-  </a>
+  <img src="assets/avatar.jpg" width="180" height="180" alt="KleinBot" style="border-radius: 18px;">
 </p><br>
+
+<p align="center"><a href="README.md">中文（默认）</a> | <a href="README.en-US.md">English</a></p>
 
 
 
 <div style="text-align: center;color: #7E926E; monospace;">
-  <h1>Klein QQ Bot</h1>
+  <h1>KleinBot</h1>
   <p style="font-style: italic;color: #000;">
-    QQ Bot developed with C/C++
+    A self-hosted multimodal QQ Agent built with C++17
   </p>
   <br>
+
+  <p>
+    <a href="#compilation"><img src="https://img.shields.io/badge/C%2B%2B-17-blue" alt="C++17"></a>
+    <a href="#running"><img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey" alt="Linux and Windows"></a>
+    <a href="#compatibility"><img src="https://img.shields.io/badge/protocol-OneBot%2011-green" alt="OneBot 11"></a>
+    <a href="#agent-runtime-and-tools"><img src="https://img.shields.io/badge/Agent-tool%20calling-purple" alt="Agent tool calling"></a>
+    <a href="#features"><img src="https://img.shields.io/badge/multimodal-application%20layer-orange" alt="Application-layer multimodal"></a>
+  </p>
 
 
   <p>
@@ -21,7 +29,11 @@
 # Project Introduction
 
 
-Klein QQ Bot (hereinafter referred to as <font color="green" >Klein</font>) is a QQ bot developed with C/C++, designed to call LLM (Large Language Model) APIs from various vendors and integrate with several excellent open-source projects (details below).
+KleinBot (hereinafter referred to as <font color="green" >Klein</font>) is a multimodal Agent built with C++17 and delivered through QQ. It connects to QQ through OneBot and, at the application layer, orchestrates text, images, voice, and music messages while combining LLM, vision, image-generation, and speech capabilities from different providers into executable task loops.
+
+The model can decide when to use web search, web fetching, image inspection and generation, long-term memory, reminders, and other tools. Klein handles tool registration, context assembly, argument validation, result feedback, round limits, cancellation, permissions, and resource boundaries without deciding which tool the model must choose.
+
+Klein is not merely a traditional QQ bot, nor a fully autonomous Agent without application constraints. It is an **event-driven, bounded application-layer multimodal Agent**: QQ provides the interaction and delivery layer, while Klein's Agent runtime handles perception, decisions, actions, and result integration. The runtime also provides the responsibilities commonly associated with an Agent Harness, without requiring a separate Harness framework.
 
 
 
@@ -129,6 +141,13 @@ Klein does not implement the protocol layer itself and does not directly connect
 |  Voice Sending | <font color="gree">√</font> | Requires GPT-SoVIST integration |
 |  Image Analysis | <font color="gree">√</font> |   Requires LLM integration   |
 
+| Capability | Description |
+| --- | --- |
+| **Agent Loop** | The model chooses which tools to call and how many rounds to use; the application executes tools, feeds results back into context, and enforces execution boundaries. |
+| **Multimodal orchestration** | Vision-capable models can inspect images directly; other models use a dedicated vision path. Images are isolated per user and stored as reusable assets. |
+| **Long-term memory** | User facts, preferences, and conversation history can be extracted in the background and recalled when needed. |
+| **Reminders** | Natural-language reminder registration with structured time parsing, SQLite persistence, and daily or weekly repetition. |
+
 
 
 # Built-in Commands
@@ -141,19 +160,28 @@ All built-in commands start with "#". They are primarily used to control various
 
 |     Command      |                           Description                           | Example                                                         |
 | :-----------: | :----------------------------------------------------------: | ------------------------------------------------------------ |
-|     #帮助     |                     Introduces operational commands to the sender                     | #帮助                                                        |
-|   #歌曲推荐   |           Randomly recommends a song from NetEase Cloud Music to the sender           | #歌曲推荐                                                    |
-|  #轻量型人格  |                   Allows specifying a built-in lightweight personality.                   | #轻量型人格:xxx                                              |
-|   #设置人格   |                       Uses built-in personalities                       | #设置人格:XXX                                                |
-|   #人格还原   |                Removes the previously set personality and reverts to the default                | #人格还原                                                    |
-|     #话题     |                    Guides the content Klein will send                     | #话题:跟我来一场辩论                                         |
-|   #重置对话   |            Deletes all contextual chat history, including previously set personalities            | #重置对话                                                    |
-|   #设置定时   |           Sets a reminder; Klein will send you a message at the specified time.            | “#设置定时:2024年8月2日18:10/提醒的内容"(The set time must be greater than the current time) |
-|   #切换模型   |             Switches between large language models based on the loaded model name             | #切换模型:gpt-3.5-turbo                                      |
-| #查询当前模型 |                 Checks the model currently being called by Klein                  | #查询当前模型                                                |
-|   #开启语音   | Converts text to speech and enables voice replies (<font color="orange">requires running the open-source project GPT-SoVIST</font>) | #开启语音                                                    |
-|     #搜歌     | Appends the song name, and the bot returns search results (currently only supports NetEase Cloud Music) | #搜歌：rubia                                                 |
-|   #模型列表   |               Lists all large language models currently supported by the bot                | #模型列表                                                    |
+| `#帮助` | Introduces the available operations | `#帮助` |
+| `#重置对话` | Clears the user's context, personality, and long-term memory | `#重置对话` |
+| `#删除上条对话` | Rewinds the most recent conversation turn (`#rewind` / `#undo` are aliases) | `#删除上条对话` |
+| `#设置人格` | Sets a custom personality description | `#设置人格:你是一个傲娇猫娘` |
+| `#人格还原` | Restores the default personality | `#人格还原` |
+| `#切换模型` | Switches to a registered model | `#切换模型:deepseek-chat` |
+| `#查询当前模型` | Shows the model currently in use | `#查询当前模型` |
+| `#模型列表` | Lists all registered models | `#模型列表` |
+| `#搜歌` | Searches NetEase Cloud Music and returns a music card | `#搜歌:rubia` |
+| `#图片生成` | Generates and sends an image (`#生成图片` is an alias) | `#图片生成:cyberpunk city` |
+| `#开启语音` / `#关闭语音` | Enables or disables voice replies for the current user | `#开启语音` |
+
+Some public capabilities can also be triggered with natural language, without the `#` prefix. The model interprets the request and calls the corresponding tool:
+
+| Capability | Example |
+| --- | --- |
+| Query the current model | “Which model are you using?” |
+| Enable or disable voice replies | “Please reply with voice” / “Turn voice off” |
+| Generate an image | “Draw a cyberpunk city for me” |
+| Set, list, or cancel reminders | “Remind me to attend the meeting at 9 tomorrow morning” / “What reminders do I have?” |
+
+Natural-language triggering depends on the model's ability and the relevant feature configuration. Commands such as `#重置对话`, `#设置人格`, `#人格还原`, and `#切换模型` still require the explicit command format.
 
 
 
@@ -174,9 +202,16 @@ Private commands are those that can only be used by administrator users. If regu
 
 
 
-## 3. Other Commands
+## 3. Image Messages
 
-In addition to the above commands, there is one more special command. It has no explicit invocation method; instead, it activates automatically when an image is sent. At that time, Klein will interface with a vision model and return the analysis results.
+Sending an image does not require a command. If the main model supports vision, the image is sent as multimodal content; otherwise Klein stores it as a user-isolated asset and the model can inspect it through the `inspect_image` tool. Requests to generate, resend, or analyze images are handled by the corresponding model tools.
+
+
+# Agent Runtime and Tools
+
+Klein runs a standard tool-driven Agent loop: the model requests a tool, Klein validates permissions and executes it, the result and any outbound message are fed back into the context, and the model continues until it returns a final answer, a tool terminates the turn, or the round limit is reached.
+
+`ChatService` coordinates each task, `ToolRegistry` exposes the available tool schemas, and `ToolContext` carries user, message, and session context. This application layer provides the Harness responsibilities: the model selects tools, while the runtime controls execution boundaries and integrates environmental feedback.
 
 
 

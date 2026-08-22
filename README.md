@@ -8,9 +8,11 @@
 
 *KleinBot 是一个以 QQ 为交互载体、在应用层实现多模态感知、工具调用与任务编排的对话式 Agent*
 
-[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)]() [![OneBot](https://img.shields.io/badge/protocol-OneBot%2011-green)]() [![Version](https://img.shields.io/badge/version-2.4.0%20dev-orange)]()
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)](#快速开始) [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)](#快速开始) [![OneBot](https://img.shields.io/badge/protocol-OneBot%2011-green)](#简介) [![Agent](https://img.shields.io/badge/Agent-tool%20calling-purple)](#核心特性) [![Multimodal](https://img.shields.io/badge/multimodal-application%20layer-orange)](#核心特性)
 
 </div>
+
+<p align="center"><a href="README.md">中文</a> | <a href="README.en-US.md">English</a></p>
 
 ---
 
