@@ -70,7 +70,7 @@ cmake --preset linux-release
 cmake --build --preset linux-release
 ```
 
-产物：`build/linux-release/KleinQBot<版本号>`（版本号跟随 `CMakeLists.txt` 的项目版本，当前为 `2.4.0`）
+产物：`build/linux-release/KleinQBot<版本号>`
 
 ### Windows
 
