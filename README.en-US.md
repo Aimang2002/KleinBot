@@ -161,7 +161,8 @@ All built-in commands start with "#". They are primarily used to control various
 |     Command      |                           Description                           | Example                                                         |
 | :-----------: | :----------------------------------------------------------: | ------------------------------------------------------------ |
 | `#帮助` | Introduces the available operations | `#帮助` |
-| `#重置对话` | Clears the user's context, personality, and long-term memory | `#重置对话` |
+| `#重置对话` | Clears the current conversation window for a fresh topic; history and long-term memory are kept and still recallable | `#重置对话` |
+| `#重置上下文` | Completely deletes all conversation history, long-term memory, and images | `#重置上下文` |
 | `#删除上条对话` | Rewinds the most recent conversation turn (`#rewind` / `#undo` are aliases) | `#删除上条对话` |
 | `#设置人格` | Sets a custom personality description | `#设置人格:你是一个傲娇猫娘` |
 | `#人格还原` | Restores the default personality | `#人格还原` |
@@ -181,7 +182,7 @@ Some public capabilities can also be triggered with natural language, without th
 | Generate an image | “Draw a cyberpunk city for me” |
 | Set, list, or cancel reminders | “Remind me to attend the meeting at 9 tomorrow morning” / “What reminders do I have?” |
 
-Natural-language triggering depends on the model's ability and the relevant feature configuration. Commands such as `#重置对话`, `#设置人格`, `#人格还原`, and `#切换模型` still require the explicit command format.
+Natural-language triggering depends on the model's ability and the relevant feature configuration. Commands such as `#重置对话`, `#重置上下文`, `#设置人格`, `#人格还原`, and `#切换模型` still require the explicit command format.
 
 
 
