@@ -1,7 +1,7 @@
 
 
 <p align="center">
-  <img src="assets/avatar.jpg" width="180" height="180" alt="KleinBot" style="border-radius: 18px;">
+  <img src="assets/avatar-rounded.png" width="180" height="180" alt="KleinBot">
 </p><br>
 
 <p align="center"><a href="README.md">中文（默认）</a> | <a href="README.en-US.md">English</a></p>
@@ -29,11 +29,11 @@
 # Project Introduction
 
 
-KleinBot (hereinafter referred to as <font color="green" >Klein</font>) is a multimodal Agent built with C++17 and delivered through QQ. It connects to QQ through OneBot and, at the application layer, orchestrates text, images, voice, and music messages while combining LLM, vision, image-generation, and speech capabilities from different providers into executable task loops.
+KleinBot (hereinafter referred to as <font color="green" >Klein</font>) is an application-layer multimodal Agent built with C++17 and delivered through QQ. It connects to QQ through OneBot, orchestrates text, image, voice, and music messages, and combines LLM, vision, image-generation, and speech capabilities from different providers.
 
-The model can decide when to use web search, web fetching, image inspection and generation, long-term memory, reminders, and other tools. Klein handles tool registration, context assembly, argument validation, result feedback, round limits, cancellation, permissions, and resource boundaries without deciding which tool the model must choose.
+The model can choose tools for web search, web fetching, image processing, long-term memory, and reminders. Klein provides context assembly, tool execution, result feedback, permissions, and resource boundaries to turn model reasoning into a controlled task loop.
 
-Klein is not merely a traditional QQ bot, nor a fully autonomous Agent without application constraints. It is an **event-driven, bounded application-layer multimodal Agent**: QQ provides the interaction and delivery layer, while Klein's Agent runtime handles perception, decisions, actions, and result integration. The runtime also provides the responsibilities commonly associated with an Agent Harness, without requiring a separate Harness framework.
+It is an **event-driven, bounded application-layer multimodal Agent**: QQ provides the interaction and delivery layer, while Klein's runtime handles perception, decisions, actions, and result integration.
 
 
 
