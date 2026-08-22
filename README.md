@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/avatar-rounded.png" width="180" height="180" alt="KleinBot" />
+<img src="assets/avatar-rounded.png" width="180" height="180" alt="KleinBot" style="border-radius: 18px;" />
 
 # KleinBot
 
@@ -35,9 +35,9 @@
 
 KleinBot（下文简称 **Klein**）是一个使用 C++17 开发、以 QQ 为交互载体的应用层多模态 Agent。它通过 OneBot 接入 QQ，统一编排文本、图片、语音和音乐等消息，并组合不同厂商的 LLM、视觉、绘图与语音能力。
 
-模型可以根据自然语言自主选择搜索、网页阅读、图片处理、长期记忆和提醒等工具；Klein 负责上下文、工具执行、结果回灌、权限和资源边界，将模型推理组织成可控的任务闭环。
+模型负责理解意图、规划行动和选择工具；Harness 负责提供上下文、连接外部能力、执行工具、回收环境反馈，并通过权限、验证、轮次和资源边界将模型的推理组织成可控的任务闭环。
 
-Klein 不实现协议端本身，而是对接支持 CQ 码的第三方 OneBot 实现。测试使用的协议端为 [LLOneBot](https://github.com/LLOneBot/LLOneBot)，其他兼容 OneBot 11 的实现原则上也可以对接。
+> Klein 不实现协议端本身，而是对接支持 CQ 码的第三方 OneBot 实现。测试使用的协议端为 [LLOneBot](https://github.com/LLOneBot/LLOneBot)，其他兼容 OneBot 11 的实现原则上也可以对接。
 
 ## 核心特性
 

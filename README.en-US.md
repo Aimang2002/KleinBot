@@ -1,7 +1,7 @@
 
 
 <p align="center">
-  <img src="assets/avatar-rounded.png" width="180" height="180" alt="KleinBot">
+  <img src="assets/avatar-rounded.png" width="180" height="180" alt="KleinBot" style="border-radius: 18px;">
 </p><br>
 
 <p align="center"><a href="README.md">中文（默认）</a> | <a href="README.en-US.md">English</a></p>
@@ -31,9 +31,9 @@
 
 KleinBot (hereinafter referred to as <font color="green" >Klein</font>) is an application-layer multimodal Agent built with C++17 and delivered through QQ. It connects to QQ through OneBot, orchestrates text, image, voice, and music messages, and combines LLM, vision, image-generation, and speech capabilities from different providers.
 
-The model can choose tools for web search, web fetching, image processing, long-term memory, and reminders. Klein provides context assembly, tool execution, result feedback, permissions, and resource boundaries to turn model reasoning into a controlled task loop.
+The model is responsible for understanding intent, planning actions, and selecting tools; the Harness provides context, connects external capabilities, executes tools, collects environmental feedback, and organizes model reasoning into a controlled task loop through permissions, validation, round limits, and resource boundaries.
 
-It is an **event-driven, bounded application-layer multimodal Agent**: QQ provides the interaction and delivery layer, while Klein's runtime handles perception, decisions, actions, and result integration.
+> It is an **event-driven, bounded application-layer multimodal Agent**: QQ provides the interaction and delivery layer, while Klein's runtime handles perception, decisions, actions, and result integration.
 
 
 
