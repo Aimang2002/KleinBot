@@ -371,7 +371,7 @@ ctest --preset linux-debug
 
 第三方依赖：[curl](https://github.com/curl/curl)、[Boost](https://github.com/boostorg/boost)（仅最小 Asio/Beast 头文件，随仓库提供）、[SQLite](https://www.sqlite.org/)、[nlohmann/json](https://github.com/nlohmann/json)（随仓库提供）、[cpp-httplib](https://github.com/yhirose/cpp-httplib)（v0.53.1 单头文件，随仓库提供，用于 Web 配置面板）、[GoogleTest](https://github.com/google/googletest)（仅测试构建）。Windows 构建会自动下载固定版本的 curl 和 SQLite 并校验哈希。
 
-> ⚠️ 本地 `build/config.json`、API Key、Token、QQ ID、数据库和生成媒体不得提交到仓库。
+> 注意：本地 `build/config.json`、API Key、Token、QQ ID、数据库和生成媒体不得提交到仓库。
 
 ## 鸣谢
 
@@ -379,8 +379,8 @@ ctest --preset linux-debug
 - [cpp-httplib](https://github.com/yhirose/cpp-httplib)
 - [Boost](https://github.com/boostorg/boost)
 - [curl](https://curl.se/)
-- [LLOneBot](https://github.com/LLOneBot/LLOneBot)
-- [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)
+- [SQLite](https://www.sqlite.org/)
+- [GoogleTest](https://github.com/google/googletest)
 
 ---
 

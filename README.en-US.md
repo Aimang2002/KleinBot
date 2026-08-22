@@ -367,5 +367,8 @@ Below is an explanation of the configuration file parameters:
 # Acknowledgments
 
 + [nlohmann/json](https://github.com/nlohmann/json)
++ [cpp-httplib](https://github.com/yhirose/cpp-httplib)
 + [Boost](https://github.com/boostorg/boost)
 + [curl](https://curl.se/)
++ [SQLite](https://www.sqlite.org/)
++ [GoogleTest](https://github.com/google/googletest)
