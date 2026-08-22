@@ -70,7 +70,7 @@ cmake --preset linux-release
 cmake --build --preset linux-release
 ```
 
-产物：`build/linux-release/KleinQBot2.4.0`
+产物：`build/linux-release/KleinQBot<版本号>`（版本号跟随 `CMakeLists.txt` 的项目版本，当前为 `2.4.0`）
 
 ### Windows
 
@@ -81,7 +81,7 @@ cmake --preset windows-mingw-release
 cmake --build --preset windows-mingw-release
 ```
 
-产物：`build/windows-mingw-release/KleinQBot2.4.0.exe`（默认静态链接 MinGW 运行时，仅依赖 Windows 系统 DLL）
+产物：`build/windows-mingw-release/KleinQBot<版本号>.exe`（默认静态链接 MinGW 运行时，仅依赖 Windows 系统 DLL）
 
 > 若 CMake 报错 `POSIX thread support`，说明当前 MinGW 使用 win32 线程模型，请更换为带 POSIX 线程支持的工具链。
 
