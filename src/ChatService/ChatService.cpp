@@ -59,7 +59,7 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
         "没有可靠召回结果时不得猜测。"
         "当用户询问当前模型时调用 get_current_model；当用户要求开启或关闭语音时调用 set_voice_mode。"
         "管理员控制操作只能调用 admin_control，系统会在工具执行前校验管理员身份。"
-        "不要把重置对话、设置人格或还原人格转换为工具调用。";
+        "不要把重置对话、重置上下文、设置人格或还原人格转换为工具调用。";
     const bool webSearchAvailable = this->tools.find(KleinWebSearchToolName) != nullptr;
     if (webSearchAvailable)
     {

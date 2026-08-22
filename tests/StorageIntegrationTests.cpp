@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include "Asset/ImageAssetStore.h"
+#include "Command/ResetChatCommand.h"
+#include "Command/ResetContextCommand.h"
 #include "Persistence/ConversationStore.h"
 #include "Tool/SendImageTool.h"
 #include "UserSession/UserSessionService.h"
@@ -162,8 +164,135 @@ TEST(UserSessionWindowTest, DropsExpiredMessagesOnColdStartLoad)
     UserSessionService session(registry, store, bot, options);
     auto bundle = session.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
-    ASSERT_EQ(bundle->request.history.size(), 1U);
+    EXPECT_EQ(bundle->request.history.size(), 1U);
     EXPECT_EQ(bundle->request.history.front().content, "存活消息");
+}
+
+TEST(ConversationStoreIntegrationTest, ContextStartBoundaryFiltersColdStartLoadOnly)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    store.append(10, "user", "旧话题消息", 1000);
+    const int64_t boundary = store.append(10, "assistant", "旧话题回答", 1001);
+    store.append(20, "user", "其他用户", 1002);
+    ASSERT_GT(boundary, 0);
+
+    EXPECT_EQ(store.contextStartId(10), 0);
+    store.setContextStartId(10, boundary + 1);
+    EXPECT_EQ(store.contextStartId(10), boundary + 1);
+    EXPECT_EQ(store.contextStartId(20), 0);
+
+    // 起点只影响冷启动加载；召回用的全量读取和检索不受影响
+    EXPECT_TRUE(store.loadFrom(10, store.contextStartId(10)).empty());
+    ASSERT_EQ(store.loadAll(10).size(), 2U);
+    EXPECT_EQ(store.search(10, "旧话题").size(), 2U);
+
+    store.append(10, "user", "新话题消息", 1003);
+    const auto active = store.loadFrom(10, store.contextStartId(10));
+    ASSERT_EQ(active.size(), 1U);
+    EXPECT_EQ(active.front().content, "新话题消息");
+
+    store.setContextStartId(10, 0);
+    EXPECT_EQ(store.loadFrom(10, 0).size(), 3U);
+}
+
+TEST(UserSessionWindowTest, LightResetClearsWindowKeepsHistoryAndPersistsAcrossRestart)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+
+    {
+        UserSessionService session(registry, store, bot, options);
+        session.appendMessage(10, "user", "旧话题提问");
+        session.appendMessage(10, "assistant", "旧话题回答");
+        session.resetChat(10);
+
+        // 窗口立即清空，模型从新话题开始
+        auto bundle = session.buildChatRequest(10);
+        ASSERT_TRUE(bundle.has_value());
+        EXPECT_TRUE(bundle->request.history.empty());
+
+        // SQLite 原始历史保留，召回链路仍能命中旧话题
+        ASSERT_EQ(store.loadAll(10).size(), 2U);
+        EXPECT_EQ(store.search(10, "旧话题").size(), 2U);
+
+        session.appendMessage(10, "user", "新话题消息");
+        bundle = session.buildChatRequest(10);
+        ASSERT_TRUE(bundle.has_value());
+        ASSERT_EQ(bundle->request.history.size(), 1U);
+        EXPECT_EQ(bundle->request.history.front().content, "新话题消息");
+
+        // 轻重置后删除上条只作用于边界之后的轮次，不回删旧话题
+        EXPECT_EQ(session.removePreviousContext(10), "上条对话已被删除！");
+        ASSERT_EQ(store.loadAll(10).size(), 2U);
+        EXPECT_EQ(session.removePreviousContext(10), "没有上下文！");
+        ASSERT_EQ(store.loadAll(10).size(), 2U);
+    }
+
+    // 模拟重启：新实例冷启动只加载起点之后的消息，旧话题不会复活
+    UserSessionService restarted(registry, store, bot, options);
+    auto bundle = restarted.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    EXPECT_TRUE(bundle->request.history.empty());
+    ASSERT_EQ(store.loadAll(10).size(), 2U);
+}
+
+TEST(UserSessionWindowTest, HeavyResetClearsBoundaryAndAllHistory)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+
+    UserSessionService session(registry, store, bot, options);
+    session.appendMessage(10, "user", "第一轮");
+    session.resetChat(10);
+    session.appendMessage(10, "user", "第二轮");
+    session.resetContext(10);
+
+    EXPECT_TRUE(store.loadAll(10).empty());
+    EXPECT_EQ(store.contextStartId(10), 0);
+
+    UserSessionService restarted(registry, store, bot, options);
+    auto bundle = restarted.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    EXPECT_TRUE(bundle->request.history.empty());
+}
+
+TEST(ResetCommandsIntegrationTest, MapsTriggersToLightAndHeavyResets)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+    UserSessionService session(registry, store, bot, options);
+
+    ResetChatCommand light(session);
+    ResetContextCommand heavy(session);
+    EXPECT_TRUE(light.canHandle("#重置对话"));
+    EXPECT_FALSE(light.canHandle("#重置上下文"));
+    EXPECT_TRUE(heavy.canHandle("#重置上下文"));
+    EXPECT_FALSE(heavy.canHandle("#重置对话"));
+
+    InboundMessage data;
+    const CommandContext context{10, 0, "private", data};
+    session.appendMessage(10, "user", "内容");
+
+    const auto lightReply = std::get<TextMessage>(light.execute(context).payload).content;
+    EXPECT_EQ(lightReply, "对话重置成功。");
+    EXPECT_EQ(store.loadAll(10).size(), 1U);
+
+    const auto heavyReply = std::get<TextMessage>(heavy.execute(context).payload).content;
+    EXPECT_NE(heavyReply.find("彻底"), std::string::npos);
+    EXPECT_TRUE(store.loadAll(10).empty());
 }
 
 TEST(ImageAssetStoreIntegrationTest, SavesFindsAndClearsAssetsWithFiles)

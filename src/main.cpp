@@ -39,6 +39,7 @@
 #include "Command/QueryModelCommand.h"
 #include "Command/RemoveContextCommand.h"
 #include "Command/ResetChatCommand.h"
+#include "Command/ResetContextCommand.h"
 #include "Command/SearchSongsCommand.h"
 #include "Command/SetSoulCommand.h"
 #include "Command/SwitchModelCommand.h"
@@ -394,6 +395,7 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<QueryModelCommand>(getCurrentModelAction));
 	commandRegistry.registryCommand(std::make_unique<GeneratePictureCommand>(dock, settings.models.drawing));
 	commandRegistry.registryCommand(std::make_unique<ResetChatCommand>(userSession));
+	commandRegistry.registryCommand(std::make_unique<ResetContextCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<SetSoulCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<SwitchModelCommand>(userSession, models));
 	commandRegistry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));

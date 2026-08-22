@@ -31,7 +31,11 @@ public:
     void setMemoryService(MemoryService *service);
     void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
+    // 轻重置（#重置对话）：清空内存镜像并把上下文起点落库，
+    // SQLite 原始历史、长期记忆和图片资源保留，旧话题仍可召回
     void resetChat(const uint64_t user_id);
+    // 彻底重置（#重置上下文）：内存、SQLite 原始历史、长期记忆和图片资源全删
+    void resetContext(const uint64_t user_id);
     std::string getModelName(uint64_t user_id);
     void setPersonality(const uint64_t user_id, const std::string &Personality);
     void resetPersonality(const uint64_t user_id);

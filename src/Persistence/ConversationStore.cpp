@@ -52,6 +52,12 @@ ConversationStore::ConversationStore(const std::string &dbPath)
     sqlite3_exec(db,
         "CREATE INDEX IF NOT EXISTS idx_user_time ON conversations(user_id, timestamp);",
         nullptr, nullptr, nullptr);
+    // 上下文起点表：#重置对话 轻重置的持久化边界，只影响冷启动加载，不删历史行
+    sqlite3_exec(db,
+        "CREATE TABLE IF NOT EXISTS context_state ("
+        " user_id INTEGER PRIMARY KEY,"
+        " context_start_id INTEGER NOT NULL DEFAULT 0);",
+        nullptr, nullptr, nullptr);
 }
 
 ConversationStore::~ConversationStore()
@@ -115,6 +121,82 @@ std::vector<TimestampedMessage> ConversationStore::loadAll(uint64_t user_id)
     }
     sqlite3_finalize(stmt);
     return out;
+}
+
+std::vector<TimestampedMessage> ConversationStore::loadFrom(uint64_t user_id,
+                                                            int64_t startId)
+{
+    std::lock_guard<std::mutex> lock(dbMutex);
+    std::vector<TimestampedMessage> out;
+    if (!db)
+        return out;
+    if (startId < 0)
+        startId = 0;
+    const char *sql =
+        "SELECT id, role, content, timestamp FROM conversations "
+        "WHERE user_id=? AND id>=? ORDER BY id ASC;";
+    sqlite3_stmt *stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    {
+        LOG_ERROR("loadFrom prepare 失败：" + std::string(sqlite3_errmsg(db)));
+        return out;
+    }
+    sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(user_id));
+    sqlite3_bind_int64(stmt, 2, static_cast<sqlite3_int64>(startId));
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        TimestampedMessage m;
+        m.id = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+        m.role = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+        m.content = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
+        m.timestamp = static_cast<time_t>(sqlite3_column_int64(stmt, 3));
+        out.push_back(std::move(m));
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
+int64_t ConversationStore::contextStartId(uint64_t user_id)
+{
+    std::lock_guard<std::mutex> lock(dbMutex);
+    if (!db)
+        return 0;
+    const char *sql = "SELECT context_start_id FROM context_state WHERE user_id=?;";
+    sqlite3_stmt *stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    {
+        LOG_ERROR("contextStartId prepare 失败：" + std::string(sqlite3_errmsg(db)));
+        return 0;
+    }
+    int64_t startId = 0;
+    sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(user_id));
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        startId = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+    sqlite3_finalize(stmt);
+    return startId;
+}
+
+void ConversationStore::setContextStartId(uint64_t user_id, int64_t startId)
+{
+    std::lock_guard<std::mutex> lock(dbMutex);
+    if (!db)
+        return;
+    if (startId < 0)
+        startId = 0;
+    const char *sql =
+        "INSERT INTO context_state (user_id, context_start_id) VALUES (?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET context_start_id=excluded.context_start_id;";
+    sqlite3_stmt *stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    {
+        LOG_ERROR("setContextStartId prepare 失败：" + std::string(sqlite3_errmsg(db)));
+        return;
+    }
+    sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(user_id));
+    sqlite3_bind_int64(stmt, 2, static_cast<sqlite3_int64>(startId));
+    if (sqlite3_step(stmt) != SQLITE_DONE)
+        LOG_ERROR("setContextStartId step 失败：" + std::string(sqlite3_errmsg(db)));
+    sqlite3_finalize(stmt);
 }
 
 std::vector<TimestampedMessage> ConversationStore::search(uint64_t user_id, const std::string &keyword)

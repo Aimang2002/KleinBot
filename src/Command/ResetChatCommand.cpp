@@ -1,5 +1,4 @@
 #include "ResetChatCommand.h"
-#include "../UserSession/UserSessionService.h"
 #include "../Log/Log.h"
 
 CommandResult ResetChatCommand::execute(const CommandContext &ctx)

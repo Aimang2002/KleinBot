@@ -48,7 +48,9 @@ void UserSessionService::ensureUserExistsUnlock(const uint64_t user_id)
         return;
 
     Person p = this->createDefaultPerson(user_id);
-    p.user_chatHistory = this->store.loadAll(user_id); // 冷启动从 SQLite 读回
+    // 冷启动只读回上下文起点之后的消息：轻重置留下的旧话题行
+    // 留在库里供召回，但不再进入内存镜像和模型窗口
+    p.user_chatHistory = this->store.loadFrom(user_id, this->store.contextStartId(user_id));
     this->user_messages->emplace(user_id, p);
 }
 
@@ -63,9 +65,26 @@ void UserSessionService::resetChat(const uint64_t user_id)
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     auto user = this->user_messages->find(user_id);
-    // 重置对话会删除之前的所有信息，但不包括人格信息
+    auto &history = user->second.user_chatHistory;
+    // 轻重置：只丢弃内存镜像，并把起点持久化为最后一条消息的下一个 id，
+    // 重启后冷启动不再读回旧话题；镜像清空后与库重新构成"后缀"关系，
+    // #删除上条对话 的按条数删末尾逻辑因此天然只作用于新话题
+    if (!history.empty())
+        this->store.setContextStartId(user_id, history.back().id + 1);
+    history.clear();
+    user->second.history_anchor = 0;
+}
+
+void UserSessionService::resetContext(const uint64_t user_id)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_message);
+    this->ensureUserExistsUnlock(user_id);
+    auto user = this->user_messages->find(user_id);
+    // 彻底重置会删除之前的所有信息，但不包括人格信息
     user->second.user_chatHistory.clear();
+    user->second.history_anchor = 0;
     this->store.clearUser(user_id); // 同步清库
+    this->store.setContextStartId(user_id, 0);
     if (this->memoryService != nullptr)
         this->memoryService->clearUser(user_id);
     if (this->imageAssetStore != nullptr)
@@ -161,9 +180,13 @@ int64_t UserSessionService::appendMessage(const uint64_t user_id, const std::str
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     const time_t ts = std::time(nullptr);
-    // 锁内：先改内存，再写库，保证两者一致
-    this->user_messages->find(user_id)->second.user_chatHistory.push_back({role, content, ts});
-    return this->store.append(user_id, role, content, ts);
+    // 锁内：先改内存，再写库，保证两者一致；行 id 回填镜像，
+    // 供 resetChat 计算上下文起点边界
+    auto &history = this->user_messages->find(user_id)->second.user_chatHistory;
+    history.push_back({role, content, ts});
+    const int64_t id = this->store.append(user_id, role, content, ts);
+    history.back().id = id;
+    return id;
 }
 
 Person UserSessionService::getUserConfig(const uint64_t user_id)

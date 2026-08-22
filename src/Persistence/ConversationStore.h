@@ -26,8 +26,17 @@ public:
     int64_t append(uint64_t user_id, const std::string &role,
                    const std::string &content, time_t timestamp);
 
-    // 读回某用户全部历史，按 id 升序（= 插入顺序）
+    // 读回某用户全部历史，按 id 升序（= 插入顺序），供召回/检索使用
     std::vector<TimestampedMessage> loadAll(uint64_t user_id);
+
+    // 读回某用户 id >= startId 的历史，按 id 升序（冷启动加载入口）
+    std::vector<TimestampedMessage> loadFrom(uint64_t user_id, int64_t startId);
+
+    // 读取某用户上下文起点（#重置对话 轻重置的持久化边界），无记录返回 0
+    int64_t contextStartId(uint64_t user_id);
+
+    // 设置/归零上下文起点；起点只影响 loadFrom，不删除任何历史行
+    void setContextStartId(uint64_t user_id, int64_t startId);
 
     // 单关键词兼容接口，内部使用多查询检索，结果按 id 升序。
     std::vector<TimestampedMessage> search(uint64_t user_id, const std::string &keyword);
