@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Klein 配置面板</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: #f3f5f8;
+      color: #24292f;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 20px;
+      height: 52px;
+      background: #1f2937;
+      color: #fff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .2);
+    }
+
+    header h1 {
+      font-size: 17px;
+      margin: 0;
+      margin-right: 8px;
+    }
+
+    .tab {
+      border: 0;
+      background: transparent;
+      color: #9ca3af;
+      padding: 0 4px;
+      height: 52px;
+      font-size: 14px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+    }
+
+    .tab.active {
+      color: #fff;
+      border-bottom-color: #60a5fa;
+    }
+
+    header .spacer {
+      flex: 1;
+    }
+
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 7px 16px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    #save {
+      background: #2563eb;
+      color: #fff;
+    }
+
+    #save:hover {
+      background: #1d4ed8;
+    }
+
+    #reload {
+      background: #374151;
+      color: #fff;
+    }
+
+    main {
+      max-width: 860px;
+      margin: 20px auto 60px;
+      padding: 0 16px;
+    }
+
+    #banner {
+      display: none;
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    #banner.ok {
+      display: block;
+      background: #dcfce7;
+      color: #14532d;
+      border: 1px solid #86efac;
+    }
+
+    #banner.err {
+      display: block;
+      background: #fee2e2;
+      color: #7f1d1d;
+      border: 1px solid #fca5a5;
+    }
+
+    .note {
+      margin-bottom: 14px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      background: #eff6ff;
+      color: #1e40af;
+      border: 1px solid #bfdbfe;
+      line-height: 1.6;
+    }
+
+    details.section {
+      background: #fff;
+      border: 1px solid #d8dee4;
+      border-radius: 10px;
+      margin-bottom: 14px;
+    }
+
+    details.section>summary {
+      padding: 12px 16px;
+      font-weight: 600;
+      cursor: pointer;
+      background: #f6f8fa;
+      user-select: none;
+      border-radius: 10px 10px 0 0;
+    }
+
+    details.section .row:last-child,
+    .provider .row:last-child {
+      border-radius: 0 0 10px 10px;
+    }
+
+    [data-hint] {
+      position: relative;
+    }
+
+    .row label[data-hint] {
+      cursor: help;
+    }
+
+    [data-hint]::after {
+      content: attr(data-hint);
+      position: absolute;
+      left: 0;
+      top: 100%;
+      margin-top: 6px;
+      background: #1f2937;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1.6;
+      white-space: normal;
+      width: max-content;
+      max-width: 380px;
+      z-index: 50;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, .25);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity .12s ease .25s, visibility .12s ease .25s;
+    }
+
+    [data-hint]:hover::after {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      border-top: 1px solid #eef1f4;
+    }
+
+    .row label {
+      flex: 0 0 240px;
+      font-size: 13px;
+      color: #57606a;
+    }
+
+    .row label .path {
+      font-size: 11px;
+      color: #8b949e;
+      display: block;
+      font-weight: 400;
+    }
+
+    input,
+    textarea,
+    select {
+      flex: 1;
+      padding: 7px 10px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      background: #fff;
+    }
+
+    input:focus,
+    textarea:focus,
+    select:focus {
+      outline: 2px solid #93c5fd;
+      border-color: #2563eb;
+    }
+
+    input.invalid,
+    textarea.invalid {
+      border-color: #dc2626;
+      background: #fff5f5;
+    }
+
+    input[type=checkbox] {
+      flex: 0;
+      width: 18px;
+      height: 18px;
+    }
+
+    textarea {
+      min-height: 80px;
+    }
+
+    #modelsView textarea {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 13px;
+    }
+
+    .provider {
+      background: #fff;
+      border: 1px solid #d8dee4;
+      border-radius: 10px;
+      margin-bottom: 14px;
+    }
+
+    .provider-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: #f6f8fa;
+      font-weight: 600;
+      font-size: 14px;
+      border-radius: 10px 10px 0 0;
+    }
+
+    .remove {
+      background: #fee2e2;
+      color: #b91c1c;
+      padding: 4px 12px;
+    }
+
+    .remove:hover {
+      background: #fecaca;
+    }
+
+    #addProvider {
+      background: #ecfdf5;
+      color: #047857;
+      border: 1px dashed #6ee7b7;
+      padding: 10px 18px;
+      width: 100%;
+    }
+
+    #addProvider:hover {
+      background: #d1fae5;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #8b949e;
+    }
+
+    #login {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(15, 23, 42, .55);
+      align-items: center;
+      justify-content: center;
+    }
+
+    #login .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 28px;
+      width: 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    #login h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    #login p {
+      margin: 0;
+      font-size: 13px;
+      color: #57606a;
+    }
+
+    footer {
+      text-align: center;
+      font-size: 12px;
+      color: #8b949e;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Klein 配置面板</h1>
+    <button id="tabConfig" class="tab active" type="button">主配置</button>
+    <button id="tabModels" class="tab" type="button">模型供应商</button>
+    <span class="spacer"></span>
+    <button id="reload" type="button">重新加载</button>
+    <button id="save" type="button">保存并应用</button>
+  </header>
+  <main>
+    <div id="banner"></div>
+    <div id="configView">
+      <div id="form"></div>
+    </div>
+    <div id="modelsView" style="display:none">
+      <div class="note" id="registryInfo">正在加载模型注册表……</div>
+      <div id="providers"></div>
+      <button id="addProvider" type="button">＋ 添加供应商</button>
+    </div>
+    <footer>保存后立即写盘并刷新内存快照；标注“需重启”的项在机器人重启后生效。密钥字段留空表示保持原值。</footer>
+  </main>
+  <div id="login">
+    <div class="card">
+      <h2>访问鉴权</h2>
+      <p>请输入配置中 webui.access_token 对应的访问令牌。</p>
+      <input id="token" type="password" placeholder="访问令牌">
+      <button id="tokenOk" type="button" style="background:#2563eb;color:#fff">连接</button>
+    </div>
+  </div>
+  <script>
+    "use strict";
+    const SENTINEL = "__KLEIN_MASKED__";
+    const SECRET_KEYS = new Set(["api_key", "access_token", "secret"]);
+    const TOKEN_STORAGE = "klein_webui_token";
+    let activeView = "config";
+    let modelsLoaded = false;
+
+    const SECTION_LABELS = {
+      bot: "机器人身份", chat: "聊天参数", models: "模型端点", voice: "语音",
+      features: "功能开关", memory: "长期记忆", web_search: "联网搜索", web_fetch: "网页抓取",
+      storage: "存储路径", resources: "运行资源", network: "网络代理",
+      communication: "OneBot 通信", webui: "Web 配置面板"
+    };
+    const KEY_LABELS = {
+      schema_version: "配置版本", enabled: "启用", id: "QQ 号", manager_id: "管理员 QQ",
+      name: "名称", group_chat_enabled: "启用群聊", default_model: "默认模型",
+      temperature: "温度 temperature", top_p: "Top P", frequency_penalty: "频率惩罚",
+      presence_penalty: "存在惩罚", max_message_tokens: "单条消息最大 token",
+      worker_threads: "工作线程数", max_pending_messages: "队列容量",
+      worker_idle_seconds: "线程空闲超时（秒）", message_survival_seconds: "消息存活（秒）",
+      private_action: "私聊 Action", group_action: "群聊 Action", registry_path: "模型注册表路径",
+      drawing: "画图模型", vision: "视觉模型", stable_diffusion: "Stable Diffusion",
+      model: "模型", endpoint: "端点", api_key: "API Key", api_standard: "API 标准",
+      host: "主机", port: "端口", bind: "绑定地址", path: "路径", access_token: "访问令牌",
+      output_directory: "输出目录", reference_audio: "参考音频", reference_text: "参考文本",
+      accessibility_chat: "无障碍聊天", batch_turns: "批处理轮数", idle_seconds: "空闲触发（秒）",
+      recall_limit: "召回上限", provider: "搜索 Provider", search_depth: "搜索深度",
+      max_results: "最大结果数", max_content_chars: "正文最大字符数",
+      max_response_bytes: "响应最大字节数", connect_timeout_ms: "连接超时（ms）",
+      request_timeout_ms: "请求超时（ms）", cache_ttl_seconds: "缓存 TTL（秒）",
+      cache_max_entries: "缓存最大条目数", conversation_database: "会话数据库",
+      image_assets: "图片资产目录", personality_directory: "人格目录", help_file: "帮助文件",
+      image_download_directory: "图片下载目录", proxy: "代理服务器", protocol: "协议",
+      active_transport: "活动传输名称", transports: "传输配置", defaults: "默认参数",
+      api: "API 调用", events: "事件接收", secret: "签名密钥", base_url: "Base URL",
+      type: "类型", options: "选项", literal: "字面值", from_env: "环境变量名"
+    };
+    const IMPACT_LABELS = { dynamic: "动态生效", rebuild: "需重建", restart: "需重启" };
+
+    // 字段说明：悬停显示。按“完整路径 → 通用键名”两级查找，传输 Profile 的动态路径靠兜底层覆盖
+    const SECTION_HINTS = {
+      bot: "机器人的身份与基本行为：QQ 号、管理员、群聊开关。",
+      chat: "对话采样参数与消息处理：默认模型、温度、队列容量与工作线程。",
+      models: "模型注册表路径，以及画图、视觉、Stable Diffusion 的专用端点。",
+      voice: "GPT-SoVITS 语音合成配置；字段不全时语音功能会自动关闭。",
+      features: "可选的业务功能开关。",
+      memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
+      web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
+      web_fetch: "网页抓取工具，无需第三方 Key，结果按 URL 缓存。",
+      storage: "SQLite 数据库与图片资产的位置（改动需重启）。",
+      resources: "人格、帮助文档等运行时资源文件的位置。",
+      network: "出站请求的公共代理（模型调用、搜索等），留空不使用。",
+      communication: "与 OneBot 协议端的连接方式：正向/反向 WebSocket 或 HTTP 组合。",
+      webui: "本配置面板自身的监听配置（改动需重启生效）。"
+    };
+    const KEY_HINTS = {
+      type: "传输类型：forward_websocket = Klein 主动连接 OneBot 端；reverse_websocket = OneBot 端反向连进来；http = API 调用 + 事件上报组合。",
+      host: "对端服务地址（IP 或域名）。",
+      bind: "本机监听地址；127.0.0.1 仅本机可连，0.0.0.0 会暴露给局域网/公网。",
+      port: "端口号，1~65535。",
+      path: "URL 路径，需以 / 开头。",
+      access_token: "Bearer 访问令牌；留空表示保持原值（掩码显示）。",
+      secret: "HMAC-SHA1 签名密钥；留空表示保持原值（掩码显示）。",
+      base_url: "OneBot HTTP API 的基础地址。",
+      api: "Klein 主动调用 OneBot HTTP API 的配置。",
+      events: "Klein 监听 OneBot 端事件上报的配置。",
+      transports: "命名的传输配置集合，通过 active_transport 激活其中一个。",
+      defaults: "通信超时与事件体积的默认值。",
+      options: "协议附加选项（保留字段，暂未使用）。",
+      enabled: "功能开关。",
+      model: "模型名称。",
+      endpoint: "API 端点地址。",
+      api_key: "API 密钥；留空表示保持原值（掩码显示）。",
+      api_standard: "请求协议标准：OpenAI 或 Anthropic。"
+    };
+    const FIELD_HINTS = {
+      schema_version: "配置结构版本，当前必须为 1，请勿修改。",
+      "bot.id": "机器人的 QQ 号，用于识别 @ 消息与发送消息（改动需重启）。",
+      "bot.manager_id": "管理员 QQ，可执行 #刷新配置文件 等管理命令；0 表示不设置。",
+      "bot.name": "机器人昵称，用于人格提示词（改动需重启）。",
+      "bot.group_chat_enabled": "是否响应群聊消息，关闭后仅私聊可用（保存即生效）。",
+      "chat.default_model": "默认对话模型名，必须已注册在模型注册表中（需重启）。",
+      "chat.temperature": "采样温度 0~2：越高回答越随机，常用 0.7~1.0。",
+      "chat.top_p": "核采样 0~1：与温度二选一调节随机性。",
+      "chat.frequency_penalty": "频率惩罚 -2~2：正值降低字词重复倾向。",
+      "chat.presence_penalty": "存在惩罚 -2~2：正值鼓励引入新话题。",
+      "chat.max_message_tokens": "单条消息的 token 上限，超出会提示用户精简。",
+      "chat.worker_threads": "消息处理线程数；留空 = 按 CPU 核心数自动（需重启）。",
+      "chat.max_pending_messages": "待处理消息队列容量，占满后拒绝新消息（需重启）。",
+      "chat.worker_idle_seconds": "空闲工作线程的回收秒数（需重启）。",
+      "chat.message_survival_seconds": "消息在处理队列中的最长存活秒数。",
+      "chat.private_action": "OneBot 私聊发送的 action 名，一般无需修改。",
+      "chat.group_action": "OneBot 群聊发送的 action 名，一般无需修改。",
+      "models.registry_path": "模型注册表 JSON 的路径（相对工作目录，改动需重启）；可在“模型供应商”页编辑内容。",
+      "models.drawing.model": "画图模型名（配合 #画图 命令与画图工具）。",
+      "models.drawing.endpoint": "画图模型的 API 端点地址。",
+      "models.drawing.api_key": "画图模型的 API Key；留空表示保持原值（掩码显示）。",
+      "models.drawing.api_standard": "画图模型的请求协议标准。",
+      "models.vision.model": "视觉识别模型名，收到图片时调用。",
+      "models.vision.endpoint": "视觉模型的 API 端点地址。",
+      "models.vision.api_key": "视觉模型的 API Key；留空表示保持原值（掩码显示）。",
+      "models.vision.api_standard": "视觉模型的请求协议标准。",
+      "models.stable_diffusion.endpoint": "本地 Stable Diffusion WebUI 地址，如 http://127.0.0.1:7860。",
+      "models.stable_diffusion.model": "本地 SD 使用的 checkpoint 名称。",
+      "voice.enabled": "语音功能总开关（保存即生效）。",
+      "voice.host": "GPT-SoVITS 服务地址。",
+      "voice.port": "GPT-SoVITS 服务端口。",
+      "voice.output_directory": "生成的语音文件输出目录。",
+      "voice.reference_audio": "参考音频文件路径（音色克隆用）。",
+      "voice.reference_text": "参考音频对应的文本内容。",
+      "features.accessibility_chat": "无障碍聊天模式（保存即生效）。",
+      "memory.enabled": "长期记忆功能总开关。",
+      "memory.model": "提取记忆所用的模型名，留空时跟随默认模型。",
+      "memory.batch_turns": "每积累多少轮对话提取一次记忆。",
+      "memory.idle_seconds": "用户空闲多少秒后触发本批记忆提取。",
+      "memory.recall_limit": "每次注入对话上下文的记忆条数上限。",
+      "web_search.enabled": "联网搜索工具开关；开启需配置 Tavily API Key。",
+      "web_search.provider": "搜索服务商，当前仅支持 tavily。",
+      "web_search.endpoint": "搜索 API 地址，默认官方端点。",
+      "web_search.api_key": "Tavily API Key；缺失时搜索功能自动关闭；留空表示保持原值。",
+      "web_search.search_depth": "搜索深度：basic 快速 / advanced 更全面。",
+      "web_search.max_results": "单次搜索返回的最大结果数，1~10。",
+      "web_search.max_content_chars": "每条搜索结果注入上下文的正文字符上限。",
+      "web_search.max_response_bytes": "搜索响应体的大小上限（字节）。",
+      "web_search.connect_timeout_ms": "搜索连接超时（毫秒）。",
+      "web_search.request_timeout_ms": "搜索请求超时（毫秒）。",
+      "web_fetch.enabled": "网页抓取工具开关，无需第三方 Key。",
+      "web_fetch.max_content_chars": "抓取正文的最大字符数，超出部分交给默认模型摘录。",
+      "web_fetch.max_response_bytes": "抓取响应体的大小上限（字节）。",
+      "web_fetch.connect_timeout_ms": "抓取连接超时（毫秒）。",
+      "web_fetch.request_timeout_ms": "抓取请求超时（毫秒）。",
+      "web_fetch.cache_ttl_seconds": "抓取结果按 URL 缓存的秒数。",
+      "web_fetch.cache_max_entries": "抓取缓存的最大条目数。",
+      "storage.conversation_database": "会话 SQLite 数据库路径（改动需重启）。",
+      "storage.image_assets": "图片资产（元数据 + 文件）的存储目录（改动需重启）。",
+      "resources.personality_directory": "人格文本文件所在目录（改动需重启）。",
+      "resources.help_file": "#帮助 命令输出的帮助文件路径（改动需重启）。",
+      "resources.image_download_directory": "聊天图片的下载目录。",
+      "network.proxy": "出站 HTTP(S) 代理地址（模型调用、搜索、抓取共用），留空直连。",
+      "communication.protocol.type": "通信协议类型，当前仅支持 onebot。",
+      "communication.active_transport": "当前启用的传输配置名，对应 transports 里的键（需重启）。",
+      "communication.defaults.connect_timeout_ms": "通信连接超时（毫秒）。",
+      "communication.defaults.request_timeout_ms": "通信请求超时（毫秒）。",
+      "communication.defaults.max_event_body_bytes": "事件上报请求体的大小上限（字节）。",
+      "webui.enabled": "Web 配置面板开关（需重启生效）。",
+      "webui.bind": "面板监听地址：127.0.0.1 仅本机可访问；改为 0.0.0.0 会暴露给局域网/公网并产生安全警告。",
+      "webui.port": "面板端口，默认 55346（KLEIN 的九宫格键盘映射）。",
+      "webui.access_token": "面板访问令牌；留空表示保持原值（掩码显示），支持环境变量引用。"
+    };
+
+    function hintFor(path, key) {
+      return FIELD_HINTS[path] || KEY_HINTS[key] || "";
+    }
+
+    const $ = (id) => document.getElementById(id);
+    const token = () => localStorage.getItem(TOKEN_STORAGE) || "";
+
+    function label(key, isSection) {
+      if (isSection && SECTION_LABELS[key]) return SECTION_LABELS[key];
+      return KEY_LABELS[key] || key;
+    }
+
+    /* ---------- 通用 ---------- */
+
+    async function request(path, options) {
+      const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
+      if (token()) headers["Authorization"] = "Bearer " + token();
+      const response = await fetch(path, Object.assign({}, options, { headers }));
+      if (response.status === 401) { $("login").style.display = "flex"; throw new Error("unauthorized"); }
+      return response;
+    }
+
+    function showBanner(text, isError) {
+      const banner = $("banner");
+      banner.textContent = text;
+      banner.className = isError ? "err" : "ok";
+    }
+
+    function diagnosticsText(items) {
+      return (items || []).map((d) => d.severity + " " + d.path + " - " + d.message).join("\n");
+    }
+
+    function clearMarks() {
+      for (const input of document.querySelectorAll(".invalid")) {
+        input.classList.remove("invalid");
+        input.title = "";
+      }
+    }
+
+    /* ---------- 主配置视图 ---------- */
+
+    function rowFor(path, labelText, hint) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const labelElement = document.createElement("label");
+      labelElement.innerHTML = labelText.replace(/</g, "&lt;") + '<span class="path"></span>';
+      labelElement.querySelector(".path").textContent = path;
+      if (hint) labelElement.dataset.hint = hint;
+      row.appendChild(labelElement);
+      return row;
+    }
+
+    function renderValue(parent, key, value, path, isSection) {
+      if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+        const section = document.createElement("details");
+        section.className = "section";
+        section.dataset.key = key;
+        if (isSection) section.open = true;
+        const summary = document.createElement("summary");
+        summary.textContent = label(key, true);
+        if (SECTION_HINTS[key]) summary.dataset.hint = SECTION_HINTS[key];
+        section.appendChild(summary);
+        const fields = document.createElement("div");
+        fields.className = "fields";
+        section.appendChild(fields);
+        for (const [childKey, childValue] of Object.entries(value))
+          renderValue(fields, childKey, childValue, path ? path + "." + childKey : childKey, false);
+        parent.appendChild(section);
+        return;
+      }
+
+      const row = rowFor(path, label(key, false), hintFor(path, key));
+      let input;
+      if (Array.isArray(value)) {
+        input = document.createElement("textarea");
+        input.value = JSON.stringify(value, null, 2);
+        input.dataset.kind = "json";
+      } else if (typeof value === "boolean") {
+        input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = value;
+        input.dataset.kind = "bool";
+      } else if (typeof value === "number") {
+        input = document.createElement("input");
+        input.type = "number";
+        input.step = "any";
+        input.value = value;
+        input.dataset.kind = "number";
+        input.dataset.int = Number.isInteger(value) ? "1" : "";
+        input.dataset.original = String(value);
+      } else if (SECRET_KEYS.has(key)) {
+        input = document.createElement("input");
+        input.type = "password";
+        input.placeholder = "留空保持原值（已掩码）";
+        input.dataset.kind = "secret";
+        input.dataset.original = typeof value === "string" ? value : SENTINEL;
+        input.autocomplete = "new-password";
+      } else {
+        input = document.createElement("input");
+        input.type = "text";
+        input.value = value === null ? "" : value;
+        input.dataset.kind = "null";
+        input.dataset.original = value === null ? "null" : String(value);
+      }
+      input.dataset.path = path;
+      row.appendChild(input);
+      parent.appendChild(row);
+    }
+
+    function collectFrom(container) {
+      const result = {};
+      for (const child of container.children) {
+        if (child.classList.contains("section")) {
+          result[child.dataset.key] = collectFrom(child.querySelector(".fields"));
+          continue;
+        }
+        const input = child.querySelector("input, textarea");
+        if (!input || !input.dataset.path) continue;
+        const key = input.dataset.path.split(".").pop();
+        const kind = input.dataset.kind;
+        if (kind === "bool") result[key] = input.checked;
+        else if (kind === "secret")
+          result[key] = input.value === "" ? input.dataset.original : input.value;
+        else if (kind === "number") {
+          let raw = input.value;
+          if (raw === "") raw = input.dataset.original;
+          const number = input.dataset.int === "1" ? Number.parseInt(raw, 10) : Number.parseFloat(raw);
+          result[key] = Number.isNaN(number) ? Number(input.dataset.original) : number;
+        } else if (kind === "json") {
+          try { result[key] = JSON.parse(input.value || "[]"); }
+          catch { result[key] = null; input.classList.add("invalid"); input.title = "JSON 解析失败"; }
+        } else {
+          const original = input.dataset.original;
+          result[key] = input.value === "" && original === "null" ? null : input.value;
+        }
+      }
+      return result;
+    }
+
+    function markFields(diagnostics) {
+      for (const diagnostic of diagnostics) {
+        const input = document.querySelector('[data-path="' + diagnostic.path + '"]');
+        if (input) { input.classList.add("invalid"); input.title = diagnostic.message; }
+      }
+    }
+
+    function showSaveResult(body) {
+      const counts = body.counts || {};
+      const total = (counts.dynamic || 0) + (counts.rebuild || 0) + (counts.restart || 0);
+      let text = "已保存并刷新内存快照。" +
+        "变更 " + total + " 项（动态 " + (counts.dynamic || 0) +
+        "、需重建 " + (counts.rebuild || 0) + "、需重启 " + (counts.restart || 0) + "）。";
+      const groups = {};
+      for (const change of body.diff || [])
+        (groups[change.impact] = groups[change.impact] || []).push(change.path);
+      for (const impact of ["restart", "rebuild"]) {
+        const paths = groups[impact];
+        if (paths && paths.length)
+          text += "\n【" + IMPACT_LABELS[impact] + "】" + paths.join("、");
+      }
+      if (counts.restart > 0) text += "\n需重启的项要重启机器人后才会生效。";
+      const extra = (body.diagnostics || []).concat(body.warnings || []);
+      if (extra.length) text += "\n诊断：" + diagnosticsText(extra);
+      showBanner(text, false);
+    }
+
+    async function loadConfig() {
+      try {
+        const response = await request("/api/config", { method: "GET" });
+        if (!response.ok) { showBanner("读取配置失败：HTTP " + response.status, true); return; }
+        const document_ = await response.json();
+        const form = $("form");
+        form.textContent = "";
+        for (const [key, value] of Object.entries(document_))
+          renderValue(form, key, value, key, true);
+        $("banner").className = "";
+      } catch (error) {
+        if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
+      }
+    }
+
+    async function saveConfig() {
+      clearMarks();
+      const candidate = collectFrom($("form"));
+      try {
+        const response = await request("/api/config", { method: "POST", body: JSON.stringify(candidate) });
+        const body = await response.json();
+        if (response.status === 422) {
+          markFields(body.diagnostics || []);
+          showBanner("保存被拒绝（" + (body.diagnostics || []).length + " 条诊断）：\n" +
+            diagnosticsText(body.diagnostics), true);
+          return;
+        }
+        if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
+        showSaveResult(body);
+        await loadConfig();
+      } catch (error) {
+        if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
+      }
+    }
+
+    /* ---------- 模型供应商视图 ---------- */
+
+    function providerRow(labelText, hint, input) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const labelElement = document.createElement("label");
+      labelElement.textContent = labelText;
+      if (hint) labelElement.dataset.hint = hint;
+      row.appendChild(labelElement);
+      row.appendChild(input);
+      return row;
+    }
+
+    function addProviderCard(provider) {
+      const original = provider || {};
+      const card = document.createElement("div");
+      card.className = "provider";
+      card.dataset.original = JSON.stringify(original);
+
+      const head = document.createElement("div");
+      head.className = "provider-head";
+      const names = (original.ModelName || original.name || []);
+      const title = document.createElement("span");
+      title.textContent = names.length ? names.join("、") : "新供应商";
+      head.appendChild(title);
+      const remove = document.createElement("button");
+      remove.className = "remove";
+      remove.type = "button";
+      remove.textContent = "删除";
+      remove.addEventListener("click", () => card.remove());
+      head.appendChild(remove);
+      card.appendChild(head);
+
+      const namesInput = document.createElement("textarea");
+      namesInput.dataset.field = "names";
+      namesInput.placeholder = "每行一个模型名称";
+      namesInput.value = names.join("\n");
+      card.appendChild(providerRow("模型名称", "该组共享密钥的模型名，每行一个；#切换模型 与默认模型引用这些名字。", namesInput));
+
+      const endpointInput = document.createElement("input");
+      endpointInput.type = "text";
+      endpointInput.dataset.field = "endpoint";
+      endpointInput.value = original.api_endpoint || "";
+      endpointInput.placeholder = "https://api.example.com/v1";
+      card.appendChild(providerRow("API 端点", "该供应商的 API 地址，如 https://api.deepseek.com/v1。", endpointInput));
+
+      const keyInput = document.createElement("input");
+      keyInput.type = "password";
+      keyInput.dataset.field = "apiKey";
+      keyInput.placeholder = "留空保持原值（已掩码）";
+      keyInput.autocomplete = "new-password";
+      card.appendChild(providerRow("API Key", "组内所有模型共享的密钥；留空表示保持原值（掩码显示）。", keyInput));
+
+      const standardInput = document.createElement("select");
+      standardInput.dataset.field = "standard";
+      for (const option of ["OpenAI", "Anthropic"]) {
+        const element = document.createElement("option");
+        element.value = option;
+        element.textContent = option;
+        standardInput.appendChild(element);
+      }
+      standardInput.value = original.APIStandard === "Anthropic" ? "Anthropic" : "OpenAI";
+      card.appendChild(providerRow("API 标准", "请求协议：OpenAI 兼容接口或 Anthropic 原生接口。", standardInput));
+
+      const visionInput = document.createElement("input");
+      visionInput.type = "checkbox";
+      visionInput.dataset.field = "vision";
+      visionInput.checked = ((original.Capabilities || original.capabilities || {}).vision) || false;
+      card.appendChild(providerRow("支持视觉输入", "勾选后这组模型可作为视觉模型接收图片输入。", visionInput));
+
+      $("providers").appendChild(card);
+    }
+
+    function collectModels() {
+      const Models = [];
+      for (const card of document.querySelectorAll("#providers .provider")) {
+        let base = {};
+        try { base = JSON.parse(card.dataset.original || "{}"); } catch { base = {}; }
+        const provider = (base !== null && typeof base === "object" && !Array.isArray(base))
+          ? base : {};
+
+        const names = card.querySelector('[data-field="names"]').value
+          .split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+        provider.ModelName = names;
+        provider.api_endpoint = card.querySelector('[data-field="endpoint"]').value.trim();
+        const keyInput = card.querySelector('[data-field="apiKey"]');
+        provider.api_key = keyInput.value === ""
+          ? (typeof provider.api_key === "string" ? provider.api_key : SENTINEL)
+          : keyInput.value;
+        provider.APIStandard = card.querySelector('[data-field="standard"]').value;
+        const capabilities = (provider.Capabilities && typeof provider.Capabilities === "object" &&
+          !Array.isArray(provider.Capabilities)) ? provider.Capabilities : {};
+        capabilities.vision = card.querySelector('[data-field="vision"]').checked;
+        provider.Capabilities = capabilities;
+        delete provider.name;
+        delete provider.capabilities;
+        Models.push(provider);
+      }
+      return { Models };
+    }
+
+    async function loadModels() {
+      try {
+        const response = await request("/api/models", { method: "GET" });
+        if (!response.ok) { showBanner("读取模型注册表失败：HTTP " + response.status, true); return; }
+        const body = await response.json();
+        const info = $("registryInfo");
+        info.textContent = "注册表文件：" + body.registry_path +
+          (body.exists ? "" : "（文件尚不存在，首次保存时将创建）") +
+          "。保存后需重启机器人，新注册表才会被加载。";
+        const providers = $("providers");
+        providers.textContent = "";
+        const list = (body.models && body.models.Models) || [];
+        for (const provider of list) addProviderCard(provider);
+        if (!list.length)
+          info.textContent += " 当前没有注册任何供应商，点击下方按钮添加。";
+        modelsLoaded = true;
+        $("banner").className = "";
+      } catch (error) {
+        if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
+      }
+    }
+
+    async function saveModels() {
+      clearMarks();
+      const candidate = collectModels();
+      try {
+        const response = await request("/api/models", { method: "POST", body: JSON.stringify(candidate) });
+        const body = await response.json();
+        if (response.status === 422) {
+          showBanner("保存被拒绝（" + (body.diagnostics || []).length + " 条诊断）：\n" +
+            diagnosticsText(body.diagnostics), true);
+          return;
+        }
+        if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
+        let text = "模型注册表已保存。需重启机器人后新配置才会生效。";
+        if ((body.warnings || []).length) text += "\n警告：\n" + diagnosticsText(body.warnings);
+        showBanner(text, false);
+        await loadModels();
+      } catch (error) {
+        if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
+      }
+    }
+
+    /* ---------- 视图切换与入口 ---------- */
+
+    function switchView(view) {
+      activeView = view;
+      $("configView").style.display = view === "config" ? "" : "none";
+      $("modelsView").style.display = view === "models" ? "" : "none";
+      $("tabConfig").classList.toggle("active", view === "config");
+      $("tabModels").classList.toggle("active", view === "models");
+      $("banner").className = "";
+      if (view === "models" && !modelsLoaded) loadModels();
+    }
+
+    $("tabConfig").addEventListener("click", () => switchView("config"));
+    $("tabModels").addEventListener("click", () => switchView("models"));
+    $("save").addEventListener("click", () => activeView === "models" ? saveModels() : saveConfig());
+    $("reload").addEventListener("click", () => activeView === "models" ? loadModels() : loadConfig());
+    $("addProvider").addEventListener("click", () => addProviderCard(null));
+    $("tokenOk").addEventListener("click", () => {
+      localStorage.setItem(TOKEN_STORAGE, $("token").value.trim());
+      $("login").style.display = "none";
+      loadConfig();
+    });
+    $("token").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") $("tokenOk").click();
+    });
+    loadConfig();
+  </script>
+</body>
+
+</html>

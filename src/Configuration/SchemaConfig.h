@@ -135,6 +135,17 @@ struct CommunicationSchema
     std::size_t maxBodyBytes = 1048576;
 };
 
+// Web 面板默认端口：KLEIN 在手机九宫格键盘上的映射（K=5, L=5, E=3, I=4, N=6）
+inline constexpr int kDefaultWebUiPort = 55346;
+
+struct WebUiSchema
+{
+    bool enabled = false;
+    std::string bind = "127.0.0.1";
+    int port = kDefaultWebUiPort;
+    std::string accessToken;
+};
+
 struct SchemaConfig
 {
     int schemaVersion = 1;
@@ -150,6 +161,7 @@ struct SchemaConfig
     ResourceSchema resources;
     std::string proxy;
     CommunicationSchema communication;
+    WebUiSchema webUi;
 };
 
 #endif

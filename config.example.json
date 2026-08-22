@@ -122,5 +122,11 @@
             "request_timeout_ms": 15000,
             "max_event_body_bytes": 1048576
         }
+    },
+    "webui": {
+        "enabled": true,
+        "bind": "127.0.0.1",
+        "port": 55346,
+        "access_token": {"from_env": "KLEIN_WEBUI_TOKEN"}
     }
 }

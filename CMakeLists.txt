@@ -97,6 +97,16 @@ if(MINGW AND KLEINBOT_STATIC_MINGW_RUNTIME)
     )
 endif()
 
+# Web 面板页面是运行时资源：文件变化即同步到可执行文件目录（POST_BUILD 只在重链时触发，
+# 纯前端改动不会重链，所以用依赖 panel.html 的独立目标保证增量构建也能同步）
+add_custom_target(panel_page_sync ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/WebUI/panel.html"
+            "$<TARGET_FILE_DIR:${EXECUTABLE_NAME}>/panel.html"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/WebUI/panel.html"
+)
+add_dependencies(${EXECUTABLE_NAME} panel_page_sync)
+
 include(CTest)
 if(BUILD_TESTING)
     kleinbot_configure_test_dependencies()

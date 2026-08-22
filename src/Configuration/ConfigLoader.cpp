@@ -428,7 +428,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     decoder.unknownFields(document,
                           {"schema_version", "bot", "chat", "models", "voice", "features",
                            "memory", "web_search", "web_fetch", "storage", "resources",
-                           "network", "communication"},
+                           "network", "communication", "webui"},
                           "$" );
 
     SchemaConfig config;
@@ -649,6 +649,32 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     const json *communication = decoder.object(document, "communication", "communication", true);
     if (communication != nullptr)
         config.communication = decodeCommunication(decoder, *communication);
+
+    const json *webUi = decoder.object(document, "webui", "webui");
+    if (webUi != nullptr)
+    {
+        decoder.unknownFields(*webUi, {"enabled", "bind", "port", "access_token"}, "webui");
+        config.webUi.enabled = decoder.boolean(*webUi, "enabled", "webui.enabled", false);
+        config.webUi.bind = decoder.string(*webUi, "bind", "webui.bind", "127.0.0.1");
+        config.webUi.port = static_cast<int>(decoder.integer(
+            *webUi, "port", "webui.port", kDefaultWebUiPort, 1, 65535));
+        if (config.webUi.enabled)
+            config.webUi.accessToken = decoder.secret(
+                *webUi, "access_token", "webui.access_token", ConfigSeverity::FeatureDisabled);
+        if (config.webUi.enabled && config.webUi.accessToken.empty())
+        {
+            config.webUi.enabled = false;
+            decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Security,
+                               "webui.access_token", "访问令牌缺失，Web 配置面板已关闭");
+        }
+        if (config.webUi.enabled && config.webUi.bind != "127.0.0.1" &&
+            config.webUi.bind != "localhost" && config.webUi.bind != "::1")
+        {
+            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Security,
+                               "webui.bind",
+                               "绑定地址不是回环地址，面板将暴露给外部网络，请确认已由反向代理提供 TLS");
+        }
+    }
 
     result.config = std::make_shared<const SchemaConfig>(std::move(config));
     return result;

@@ -82,7 +82,7 @@ cmake --build --preset windows-mingw-release
 
 ### 运行
 
-1. 复制 `config.example.json` 为可执行文件工作目录下的 `config.json`，按[配置](#配置)章节填写；
+1. 首次运行：工作目录下没有 `config.json` 时会自动生成一份占位骨架（Web 面板同时启用，访问令牌打印在启动日志中），也可以手动复制 `config.example.json` 为 `config.json`；
 2. 准备一个 OneBot 协议端（如 [LLOneBot](https://github.com/LLOneBot/LLOneBot)）并建立通信；
 3. 运行可执行文件，向机器人私聊或群内 @ 它即可对话。
 
@@ -105,6 +105,7 @@ KleinBot 使用 Schema 化 JSON 配置，运行时读取当前工作目录的 `c
 | `resources` | 人格、帮助文件和下载目录 |
 | `network` | 公共代理配置 |
 | `communication` | 协议、活动传输 Profile 和网络默认值 |
+| `webui` | Web 配置面板开关、绑定地址、端口和访问令牌 |
 
 ### 密钥管理
 
@@ -186,6 +187,36 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 配置加载统一完成类型转换、默认值填充和语义校验：可选字段损坏时使用安全默认值或关闭对应功能；核心身份、活动协议和活动传输无效时拒绝启动。业务模块不读取配置文件，也不依赖全局配置对象。
 
 `#刷新配置文件` 会重新读取同路径、完整校验候选配置、生成动态/需重建/需重启差异并原子发布新快照；候选无效时保留旧快照。
+
+### Web 配置面板（可选）
+
+在浏览器中编辑 `config.json`，替代手工改文件：
+
+```json
+"webui": {
+    "enabled": true,
+    "bind": "127.0.0.1",
+    "port": 55346,
+    "access_token": {"from_env": "KLEIN_WEBUI_TOKEN"}
+}
+```
+
+```bash
+export KLEIN_WEBUI_TOKEN="自定一个强令牌"
+```
+
+启动后访问 `http://127.0.0.1:55346/`，首次打开输入访问令牌即可。面板行为：
+
+- 页面文件 `panel.html` 位于可执行文件旁（构建时自动从 `src/WebUI/panel.html` 同步），改动后刷新浏览器即可生效；
+- 表单化编辑全部配置节（含未知字段），保存时先跑与启动一致的完整校验，不合法直接拒绝并逐字段提示，不会写坏文件；
+- 字段标签和分区标题悬停会显示用途说明，包括取值范围与生效方式（保存即生效 / 需重启）；
+- “模型供应商”页管理 `source/ModelsName.json`：添加/删除供应商、批量填写模型名称、选择 API 标准，注册表保存后需重启机器人加载；
+- 密钥字段（`api_key` / `access_token` / `secret`）以掩码显示，浏览器永远拿不到明文；留空表示保持原值，`from_env` 引用原样保留；
+- 保存经临时文件原子替换并收紧文件权限为 0600，随后自动刷新内存快照，并报告各变更的影响等级（动态 / 需重建 / 需重启）——需重启的项重启机器人后才生效。
+
+首次运行没有 `config.json` 时会自动生成占位骨架配置，Web 面板随之启用：绑定 `127.0.0.1`、端口 55346（KLEIN 的九宫格键盘映射），访问令牌随机生成并打印在启动日志中，按日志提示在面板里补全机器人 QQ、默认模型和通信配置后重启即可。
+
+安全边界：`enabled: true` 但令牌缺失时面板自动关闭；默认只绑定回环地址，绑定非回环地址会产生安全警告。如需远程访问，请由反向代理提供 TLS 后再暴露，不要直接把端口暴露到公网。
 
 ## 模型接入
 
@@ -321,13 +352,14 @@ ctest --preset linux-debug
 
 测试基于 GoogleTest / CTest，覆盖 Action、Tool 适配器、命令映射，以及 SQLite 会话与图片资产生命周期的集成测试。自动化测试不调用真实模型 API，统一使用 Fake/Mock 适配器与临时数据库。Windows 对应 `windows-mingw-debug` 预设。
 
-第三方依赖：[curl](https://github.com/curl/curl)、[Boost](https://github.com/boostorg/boost)（仅最小 Asio/Beast 头文件，随仓库提供）、[SQLite](https://www.sqlite.org/)、[nlohmann/json](https://github.com/nlohmann/json)（随仓库提供）、[GoogleTest](https://github.com/google/googletest)（仅测试构建）。Windows 构建会自动下载固定版本的 curl 和 SQLite 并校验哈希。
+第三方依赖：[curl](https://github.com/curl/curl)、[Boost](https://github.com/boostorg/boost)（仅最小 Asio/Beast 头文件，随仓库提供）、[SQLite](https://www.sqlite.org/)、[nlohmann/json](https://github.com/nlohmann/json)（随仓库提供）、[cpp-httplib](https://github.com/yhirose/cpp-httplib)（v0.53.1 单头文件，随仓库提供，用于 Web 配置面板）、[GoogleTest](https://github.com/google/googletest)（仅测试构建）。Windows 构建会自动下载固定版本的 curl 和 SQLite 并校验哈希。
 
 > ⚠️ 本地 `build/config.json`、API Key、Token、QQ ID、数据库和生成媒体不得提交到仓库。
 
 ## 鸣谢
 
 - [nlohmann/json](https://github.com/nlohmann/json)
+- [cpp-httplib](https://github.com/yhirose/cpp-httplib)
 - [Boost](https://github.com/boostorg/boost)
 - [curl](https://curl.se/)
 - [LLOneBot](https://github.com/LLOneBot/LLOneBot)

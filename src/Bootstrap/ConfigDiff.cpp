@@ -223,6 +223,14 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.communication.maxBodyBytes,
                  candidate.communication.maxBodyBytes,
                  "communication.defaults.max_event_body_bytes", rebuild);
+
+    constexpr ConfigChangeImpact webUiImpact = ConfigChangeImpact::Restart;
+    addIfChanged(diff, current.webUi.enabled, candidate.webUi.enabled,
+                 "webui.enabled", webUiImpact);
+    addIfChanged(diff, current.webUi.bind, candidate.webUi.bind, "webui.bind", webUiImpact);
+    addIfChanged(diff, current.webUi.port, candidate.webUi.port, "webui.port", webUiImpact);
+    addIfChanged(diff, current.webUi.accessToken, candidate.webUi.accessToken,
+                 "webui.access_token", webUiImpact);
     return diff;
 }
 

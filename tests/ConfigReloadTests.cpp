@@ -137,3 +137,41 @@ TEST(ConfigSnapshotStoreTest, KeepsCurrentSnapshotWhenCandidateIsInvalid)
     EXPECT_TRUE(reloaded.diff.empty());
     EXPECT_FALSE(reloaded.diagnostics.empty());
 }
+
+TEST(WebUiSchemaTest, MissingTokenEnvironmentDisablesPanelWithoutBlockingStartup)
+{
+    // 面板令牌引用不存在的环境变量时应降级关闭面板，而不是以 Error 阻断启动
+    const char *config = R"({
+    "schema_version": 1,
+    "bot": {"id": 10001},
+    "chat": {"default_model": "test-model"},
+    "models": {"registry_path": "ModelsName.json"},
+    "resources": {
+        "personality_directory": "source/personality/",
+        "help_file": "source/help.txt"
+    },
+    "communication": {
+        "protocol": {"type": "onebot"},
+        "active_transport": "local",
+        "transports": {
+            "local": {"type": "reverse_websocket", "bind": "127.0.0.1", "port": 8600}
+        }
+    },
+    "webui": {
+        "enabled": true,
+        "access_token": {"from_env": "KLEIN_ABSENT_WEBUI_TOKEN_FOR_TEST"}
+    }
+})";
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadText(config);
+
+    EXPECT_TRUE(result.canStart());
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_FALSE(result.config->webUi.enabled);
+    for (const ConfigDiagnostic &diagnostic : result.diagnostics)
+    {
+        EXPECT_NE(diagnostic.severity, ConfigSeverity::Error);
+        EXPECT_NE(diagnostic.severity, ConfigSeverity::Fatal);
+    }
+}

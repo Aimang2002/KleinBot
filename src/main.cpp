@@ -9,6 +9,7 @@
 #include "Bootstrap/ConfigSnapshotStore.h"
 #include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
+#include "Configuration/ConfigTemplate.h"
 #include "Message/Message.h"
 #include "Log/Log.h"
 #include "MessageQueue/InboundMessageQueue.h"
@@ -16,6 +17,7 @@
 #include "src/Network/MyWebSocket.h"
 #include "Network/OneBotHttpTransport.h"
 #include "Network/TransportConfig.h"
+#include "WebUI/ConfigPanelServer.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
 #include "MessageSender/QueuedMessageSender.h"
@@ -182,7 +184,8 @@ void workingThread(Message &messageClass, InboundMessage data, std::size_t maxMe
 
 void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWorkers,
 					 MemoryService &memoryService,
-					 std::thread &timingThread, std::thread &transportThread)
+					 std::thread &timingThread, std::thread &transportThread,
+					 std::thread &panelThread)
 {
 	running.store(false);
 	LOG_INFO("正在停止消息执行器并等待活动任务退出...");
@@ -201,6 +204,11 @@ void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWork
 	{
 		LOG_INFO("正在等待通信线程退出...");
 		transportThread.join();
+	}
+	if (panelThread.joinable())
+	{
+		LOG_INFO("正在等待配置面板线程退出...");
+		panelThread.join();
 	}
 	LOG_INFO("资源回收完成，Klein 已安全退出");
 }
@@ -250,6 +258,15 @@ int main(int argc, char **argv)
 			std::cerr << "未知参数或缺少参数值：" << argument << std::endl;
 			return -1;
 		}
+	}
+
+	std::string bootstrapToken;
+	if (ConfigTemplate::createIfMissing(configPath, bootstrapToken))
+	{
+		LOG_INFO("首次运行：已生成默认配置文件 " + configPath);
+		LOG_INFO("Web 配置面板：http://127.0.0.1:" + std::to_string(kDefaultWebUiPort) + "/");
+		LOG_INFO("面板访问令牌：" + bootstrapToken);
+		LOG_WARNING("默认配置为占位骨架，请通过面板或直接编辑文件补全机器人 QQ、默认模型与通信配置后重启。");
 	}
 
 	ConfigLoader configLoader;
@@ -438,6 +455,14 @@ int main(int argc, char **argv)
 		break;
 	}
 
+	std::thread panelThread;
+	if (settings.webUi.enabled)
+	{
+		panelThread = std::thread(
+			ConfigPanelServer::run,
+			settings.webUi, configPath, std::ref(configStore), std::cref(running));
+	}
+
 	while (running.load())
 	{
 		if (receivedSignal != 0)
@@ -470,7 +495,7 @@ int main(int argc, char **argv)
 	}
 
 	resourceCleanup(running, messageWorkers, memoryService, timingThread,
-					transportThread);
+					transportThread, panelThread);
 	Log::getInstance().shutdown();
 
 	return 0;

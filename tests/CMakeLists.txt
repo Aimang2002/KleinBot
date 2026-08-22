@@ -1,7 +1,10 @@
 add_executable(kleinbot_tests
     ActionTests.cpp
     CommandAdapterTests.cpp
+    ConfigPanelServerTests.cpp
     ConfigReloadTests.cpp
+    ConfigTemplateTests.cpp
+    ConfigWriterTests.cpp
     CurlRequestControlTests.cpp
     MemoryRecallTests.cpp
     MultimodalRoutingTests.cpp
@@ -22,6 +25,16 @@ target_link_libraries(kleinbot_tests
         kleinbot_core
         GTest::gtest_main
 )
+
+# 面板页面测试依赖：GET / 从测试进程工作目录读取 panel.html；
+# 独立目标 + 文件依赖，纯页面改动在增量构建时也会同步
+add_custom_target(panel_page_sync_tests ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/src/WebUI/panel.html"
+            "$<TARGET_FILE_DIR:kleinbot_tests>/panel.html"
+    DEPENDS "${PROJECT_SOURCE_DIR}/src/WebUI/panel.html"
+)
+add_dependencies(kleinbot_tests panel_page_sync_tests)
 
 target_link_libraries(transport_contract_driver PRIVATE kleinbot_core)
 

@@ -140,5 +140,7 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.resources.helpFile,
         schema.resources.imageDownloadDirectory};
     result.transport = mapTransport(schema.communication);
+    result.webUi = {schema.webUi.enabled, schema.webUi.bind,
+                    schema.webUi.port, schema.webUi.accessToken};
     return result;
 }

@@ -38,6 +38,14 @@ struct ResourceRuntimeSettings
     std::string imageDownloadDirectory;
 };
 
+struct WebUiSettings
+{
+    bool enabled = false;
+    std::string bind = "127.0.0.1";
+    int port = kDefaultWebUiPort;
+    std::string accessToken;
+};
+
 struct RuntimeSettings
 {
     int schemaVersion = 1;
@@ -54,6 +62,7 @@ struct RuntimeSettings
     StorageRuntimeSettings storage;
     ResourceRuntimeSettings resources;
     TransportConfig transport;
+    WebUiSettings webUi;
 };
 
 RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema);
