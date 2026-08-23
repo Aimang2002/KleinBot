@@ -187,7 +187,7 @@ TEST(WebSearchConfigTest, DisablesFeatureWhenKeyIsMissing)
         "bot": {"id": 1},
         "chat": {"default_model": "test"},
         "models": {"registry_path": "models.json"},
-        "resources": {"personality_directory": "source/personality", "help_file": "source/help.txt"},
+        "resources": {"help_file": "source/help.txt"},
         "web_search": {"enabled": true},
         "communication": {
             "protocol": {"type": "onebot"},
@@ -209,7 +209,7 @@ TEST(WebSearchConfigTest, MapsEnabledSearchSettingsIntoRuntimeOptions)
         "bot": {"id": 1},
         "chat": {"default_model": "test"},
         "models": {"registry_path": "models.json"},
-        "resources": {"personality_directory": "source/personality", "help_file": "source/help.txt"},
+        "resources": {"help_file": "source/help.txt"},
         "network": {"proxy": "http://127.0.0.1:7890"},
         "web_search": {
             "enabled": true,

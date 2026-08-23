@@ -104,7 +104,6 @@ struct StorageSchema
 
 struct ResourceSchema
 {
-    std::string personalityDirectory;
     std::string helpFile;
     std::string imageDownloadDirectory;
 };

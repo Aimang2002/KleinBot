@@ -27,7 +27,10 @@ struct ChatCallBundle
 class UserSessionService
 {
 public:
-    UserSessionService(const ModelRegistry &mr, ConversationStore &store, const BotIdentity &bot, const ChatOptions &chat);
+    // soulFile：默认人格文件，用户无持久化人格时读取；文件缺失/为空时
+    // 退回内置默认 "You are my assistant, your name is ..."
+    UserSessionService(const ModelRegistry &mr, ConversationStore &store, const BotIdentity &bot,
+                       const ChatOptions &chat, const std::string &soulFile = "source/soul.md");
     void setMemoryService(MemoryService *service);
     void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
@@ -57,9 +60,12 @@ private:
 private:
     void ensureUserExistsUnlock(const uint64_t user_id);
     Person createDefaultPerson(const uint64_t user_id);
+    // 读取 soul.md 作为默认人格；不可用时退回 default_personality
+    std::string loadSoulFallback();
     const ModelRegistry &registry;
     BotIdentity botIdentity;
     ChatOptions chatOptions;
+    std::string soul_file;
     ConversationStore &store;
     MemoryService *memoryService = nullptr;
     ImageAssetStore *imageAssetStore = nullptr;

@@ -196,9 +196,6 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.storage.imageAssets, candidate.storage.imageAssets,
                  "storage.image_assets", ConfigChangeImpact::Restart);
 
-    addIfChanged(diff, current.resources.personalityDirectory,
-                 candidate.resources.personalityDirectory,
-                 "resources.personality_directory", rebuild);
     addIfChanged(diff, current.resources.helpFile, candidate.resources.helpFile,
                  "resources.help_file", rebuild);
     addIfChanged(diff, current.resources.imageDownloadDirectory,

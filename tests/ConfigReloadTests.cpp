@@ -17,7 +17,6 @@ const char *validConfig = R"({
     "chat": {"default_model": "test-model"},
     "models": {"registry_path": "ModelsName.json"},
     "resources": {
-        "personality_directory": "source/personality/",
         "help_file": "source/help.txt"
     },
     "communication": {
@@ -147,7 +146,6 @@ TEST(WebUiSchemaTest, MissingTokenEnvironmentDisablesPanelWithoutBlockingStartup
     "chat": {"default_model": "test-model"},
     "models": {"registry_path": "ModelsName.json"},
     "resources": {
-        "personality_directory": "source/personality/",
         "help_file": "source/help.txt"
     },
     "communication": {

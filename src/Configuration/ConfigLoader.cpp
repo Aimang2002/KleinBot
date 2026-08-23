@@ -633,8 +633,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     const json *resources = decoder.object(document, "resources", "resources", true);
     if (resources != nullptr)
     {
-        decoder.unknownFields(*resources, {"personality_directory", "help_file", "image_download_directory"}, "resources");
-        config.resources.personalityDirectory = decoder.string(*resources, "personality_directory", "resources.personality_directory", {}, true);
+        decoder.unknownFields(*resources, {"help_file", "image_download_directory"}, "resources");
         config.resources.helpFile = decoder.string(*resources, "help_file", "resources.help_file", {}, true);
         config.resources.imageDownloadDirectory = decoder.string(*resources, "image_download_directory", "resources.image_download_directory");
     }

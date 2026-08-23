@@ -299,7 +299,9 @@ int main(int argc, char **argv)
 	ReminderStore reminderStore(dbPath);
 	// 构造即重建内存队列：24 小时内漏触发的提醒会补发，超窗的滚动或丢弃
 	ReminderService reminderService(reminderStore);
-	UserSessionService userSession(models, conversationStore, settings.bot, settings.chat);
+	// 默认人格来自 source/soul.md，用户人格持久化在会话库 user_persona 表
+	UserSessionService userSession(models, conversationStore, settings.bot, settings.chat,
+	                                "source/soul.md");
 	Dock dock(settings.dock, &running);
 	MemoryService memoryService(dbPath, conversationStore, dock, models, settings.memory);
 	userSession.setMemoryService(&memoryService);

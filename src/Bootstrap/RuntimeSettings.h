@@ -33,7 +33,6 @@ struct StorageRuntimeSettings
 
 struct ResourceRuntimeSettings
 {
-    std::string personalityDirectory;
     std::string helpFile;
     std::string imageDownloadDirectory;
 };

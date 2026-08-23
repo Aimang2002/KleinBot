@@ -136,7 +136,6 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
     result.dock.proxy = schema.proxy;
     result.storage = {schema.storage.conversationDatabase, schema.storage.imageAssets};
     result.resources = {
-        schema.resources.personalityDirectory,
         schema.resources.helpFile,
         schema.resources.imageDownloadDirectory};
     result.transport = mapTransport(schema.communication);

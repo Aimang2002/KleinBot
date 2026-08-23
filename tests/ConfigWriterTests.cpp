@@ -22,7 +22,6 @@ const char *secretConfig = R"({
         "api_key": {"from_env": "KLEIN_CONFIG_WRITER_TEST_ABSENT"}
     },
     "resources": {
-        "personality_directory": "source/personality/",
         "help_file": "source/help.txt"
     },
     "communication": {

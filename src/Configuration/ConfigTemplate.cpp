@@ -44,7 +44,6 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
         "chat": {"default_model": "your-chat-model"},
         "models": {"registry_path": "source/ModelsName.json"},
         "resources": {
-            "personality_directory": "source/personality/",
             "help_file": "source/help.txt"
         },
         "communication": {
