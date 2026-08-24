@@ -3,16 +3,16 @@
 
 namespace
 {
-template <std::size_t Size>
-bool containsAny(const std::string &text, const std::array<const char *, Size> &terms)
-{
-    for (const char *term : terms)
+    template <std::size_t Size>
+    bool containsAny(const std::string &text, const std::array<const char *, Size> &terms)
     {
-        if (text.find(term) != std::string::npos)
-            return true;
+        for (const char *term : terms)
+        {
+            if (text.find(term) != std::string::npos)
+                return true;
+        }
+        return false;
     }
-    return false;
-}
 }
 
 bool hasExplicitRecallIntent(const std::string &text)
