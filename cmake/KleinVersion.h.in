@@ -1,0 +1,10 @@
+#ifndef KLEIN_VERSION_H
+#define KLEIN_VERSION_H
+
+// 由 CMake 从 project(... VERSION ...) 生成，勿手改。
+// 版本号唯一来源是 CMakeLists.txt 顶部的 project() 声明；
+// 渠道后缀（如 _betaVersion）来自 KLEINBOT_VERSION_SUFFIX 缓存变量
+#define KLEINBOT_VERSION_STRING "v@PROJECT_VERSION@@KLEINBOT_VERSION_SUFFIX@"
+#define KLEINBOT_VERSION "@PROJECT_VERSION@"
+
+#endif // KLEIN_VERSION_H

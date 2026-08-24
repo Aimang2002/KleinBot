@@ -59,8 +59,7 @@
 #include "Asset/ImageAssetStore.h"
 #include "Memory/MemoryService.h"
 #include "utils/KeyedTaskScheduler.h"
-
-#define __KLEIN_VERSION__ "v2.4.0"
+#include "KleinVersion.h"
 
 namespace
 {
@@ -235,7 +234,7 @@ void init(int schemaVersion)
 			  << Klein_logo << "\n"
 			  << "\033[0m" << std::endl; // 显示logo
 
-	LOG_INFO("当前Klein版本：" + std::string(__KLEIN_VERSION__));
+	LOG_INFO("当前Klein版本：" + std::string(KLEINBOT_VERSION_STRING));
 	LOG_INFO("当前配置Schema版本：" + std::to_string(schemaVersion));
 }
 

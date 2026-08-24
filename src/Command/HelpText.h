@@ -2,8 +2,9 @@
 #define HELP_TEXT_H
 
 /*
- *  #帮助 的文本：硬编码编译进可执行文件，独立成文件避免大段文字混入命令逻辑。
- *  内容定稿后不常改，需要调整（如发版更新版本行）时只改本文件，无需触碰 HelpCommand。
+ *  #帮助 的正文：硬编码编译进可执行文件，独立成文件避免大段文字混入命令逻辑。
+ *  版本行不在此处：HelpCommand 运行时从 CMake 生成的 KleinVersion.h 拼接，
+ *  版本号唯一来源是 CMakeLists.txt 的 project(... VERSION ...)。
  */
 inline constexpr const char *kHelpText = R"(欢迎使用克莱茵QQ机器人，当前支持的功能有：
 
@@ -31,9 +32,6 @@ inline constexpr const char *kHelpText = R"(欢迎使用克莱茵QQ机器人，�
 
 克莱茵还会在聊天中自主使用联网搜索、网页阅读、长期记忆等能力（部分功能需管理员开启）。
 
-PS：克莱茵回复的速度在1秒~5分钟不等，当多次发送不回复时，可能是管理员在维修或者服务器断网断电，届时在QQ主页的随心贴留言即可。
-
-当前克莱茵版本:v2.4.0_betaVersion
-Create:@埃芒)";
+PS：克莱茵回复的速度在1秒~5分钟不等，当多次发送不回复时，可能是管理员在维修或者服务器断网断电，届时在QQ主页的随心贴留言即可。)";
 
 #endif // HELP_TEXT_H

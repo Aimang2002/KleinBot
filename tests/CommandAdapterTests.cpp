@@ -6,6 +6,7 @@
 #include "Command/HelpText.h"
 #include "Command/QueryModelCommand.h"
 #include "Command/VoiceSwitchCommand.h"
+#include "KleinVersion.h"
 
 namespace
 {
@@ -104,8 +105,8 @@ TEST(AdminCommandTest, PreservesAdminRequirementAndMapsOperation)
     EXPECT_EQ(textContent(result), "action-result");
 }
 
-// 帮助文本硬编码于 HelpText.h 并编译进可执行文件，#帮助 原样返回
-TEST(HelpCommandTest, ReturnsHardCodedHelpText)
+// 帮助正文硬编码于 HelpText.h，版本行由 HelpCommand 从 CMake 生成的版本宏拼接
+TEST(HelpCommandTest, ReturnsHardCodedHelpTextWithGeneratedVersion)
 {
     HelpCommand command;
     InboundMessage data;
@@ -118,7 +119,10 @@ TEST(HelpCommandTest, ReturnsHardCodedHelpText)
     const auto result = command.execute(context);
 
     const std::string &content = textContent(result);
-    EXPECT_EQ(content, kHelpText);
+    EXPECT_EQ(content, std::string(kHelpText) +
+                          "\n\n当前克莱茵版本:" + KLEINBOT_VERSION_STRING +
+                          "\nCreate:@埃芒");
     EXPECT_NE(content.find("欢迎使用克莱茵QQ机器人"), std::string::npos);
-    EXPECT_NE(content.find("当前克莱茵版本"), std::string::npos);
+    EXPECT_NE(content.find("当前克莱茵版本:" + std::string(KLEINBOT_VERSION_STRING)),
+              std::string::npos);
 }

@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.21)
-project("Qbot2.4.0" LANGUAGES C CXX)
+project(KleinBot VERSION 2.4.0 LANGUAGES C CXX)
+
+# 版本号唯一来源：上方的 project(... VERSION ...)；渠道后缀单独控制，
+# 发布正式版时 -DKLEINBOT_VERSION_SUFFIX="" 或改默认值即可，无需动源码
+set(KLEINBOT_VERSION_SUFFIX "_betaVersion" CACHE STRING "版本渠道后缀，正式版置空")
+
+# 生成版本头：可执行文件命名、启动日志与帮助文本都消费 KLEINBOT_VERSION_STRING
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/KleinVersion.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/KleinVersion.h"
+    @ONLY
+)
 
 option(DEBUG "Build the debug version" ON)
 if(WIN32)
@@ -35,10 +46,10 @@ endif()
 
 if(DEBUG)
     add_compile_definitions(DEBUG)
-    set(EXECUTABLE_NAME KleinQBot2.4.0_DEBUG)
+    set(EXECUTABLE_NAME KleinQBot${PROJECT_VERSION}_DEBUG)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
 else()
-    set(EXECUTABLE_NAME KleinQBot2.4.0)
+    set(EXECUTABLE_NAME KleinQBot${PROJECT_VERSION})
     set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
@@ -72,6 +83,7 @@ include(cmake/Dependencies.cmake)
 kleinbot_configure_dependencies()
 
 add_library(kleinbot_core STATIC ${CORE_SRC})
+target_include_directories(kleinbot_core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_features(kleinbot_core PUBLIC cxx_std_17)
 target_link_libraries(kleinbot_core
     PUBLIC
