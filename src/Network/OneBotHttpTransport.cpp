@@ -1,6 +1,7 @@
 #include "OneBotHttpTransport.h"
 
 #include "BearerAuth.h"
+#include "VoiceAttachmentCleanup.h"
 #include "WebhookSignature.h"
 #include "WebSocketHead.h"
 #include "../Log/Log.h"
@@ -96,6 +97,9 @@ void OneBotHttpTransport::runApiSender(
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
+
+        // 投递已离队：无论本轮请求成功与否（队列无重试），语音附件都在迭代结束时删除
+        const VoiceAttachmentCleanup voiceCleanup{voiceAttachmentPath(delivery->message)};
 
         try
         {

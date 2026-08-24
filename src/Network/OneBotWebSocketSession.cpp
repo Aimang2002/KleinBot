@@ -1,4 +1,5 @@
 #include "OneBotWebSocketSession.h"
+#include "VoiceAttachmentCleanup.h"
 
 #include <optional>
 
@@ -20,6 +21,8 @@ void runOneBotWebSocketSession(
     bool writeCompleted = false;
     bool writePending = false;
     std::optional<std::string> writePayload;
+    // 与 writePayload 一一对应：本次待写投递的语音附件，写入落定（成功或失败）后删除
+    VoiceAttachmentCleanup voiceCleanup;
 
     auto startRead = [&]() {
         readCompleted = false;
@@ -39,6 +42,7 @@ void runOneBotWebSocketSession(
         {
             if (auto delivery = outboundQueue.tryPop())
             {
+                voiceCleanup.hold(voiceAttachmentPath(delivery->message));
                 writePayload = messageEncoder.encode(*delivery).toJson().dump();
                 writeCompleted = false;
                 writeError = {};
@@ -60,6 +64,7 @@ void runOneBotWebSocketSession(
         {
             writeCompleted = false;
             writePayload.reset();
+            voiceCleanup.cleanup();
             if (writeError)
             {
                 throw beast::system_error(writeError);

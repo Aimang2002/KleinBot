@@ -391,7 +391,7 @@ int main(int argc, char **argv)
 		settings.chat.privateAction, settings.chat.groupAction);
 	Voice voice(settings.voice, &running);
 	CommandRegistry commandRegistry(settings.bot.managerId);
-	commandRegistry.registryCommand(std::make_unique<HelpCommand>(settings.resources.helpFile));
+	commandRegistry.registryCommand(std::make_unique<HelpCommand>());
 	commandRegistry.registryCommand(std::make_unique<ModelListCommand>(models));
 	commandRegistry.registryCommand(std::make_unique<SearchSongsCommand>());
 	commandRegistry.registryCommand(std::make_unique<QueryModelCommand>(getCurrentModelAction));

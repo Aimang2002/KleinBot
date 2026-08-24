@@ -101,13 +101,12 @@ KleinBot 使用 Schema 化 JSON 配置，运行时读取当前工作目录的 `c
 | `bot` | Bot ID、管理员、名称和群聊策略 |
 | `chat` | 默认模型、采样参数、消息限制和 OneBot action 名称 |
 | `models` | 模型注册文件、绘图、视觉和 Stable Diffusion 配置 |
-| `voice` | TTS 开关、服务地址、输出目录和参考音频 |
+| `voice` | TTS 开关、服务地址和参考音频（音频写入系统临时目录） |
 | `features` | 可选业务功能开关 |
 | `memory` | 长期记忆模型、批次和召回限制 |
 | `web_search` | Tavily 联网搜索、超时和单次结果裁剪配置 |
 | `web_fetch` | 网页抓取工具的正文上限、超时和缓存配置 |
 | `storage` | SQLite 与图片资源目录 |
-| `resources` | 帮助文件和下载目录 |
 | `network` | 公共代理配置 |
 | `communication` | 协议、活动传输 Profile 和网络默认值 |
 | `webui` | Web 配置面板开关、绑定地址、端口和访问令牌 |
@@ -353,12 +352,12 @@ Klein 完整保存原始对话，并在后台从多轮对话中提取用户资�
 
 | 目录 | 作用 |
 | --- | --- |
-| `help/` | `#帮助` 的文本（`help.txt`） |
 | `Model/` | 模型注册文件 `ModelsName.json`（实际路径由 `models.registry_path` 决定，见[模型接入](#模型接入)） |
 | `soul.md` | 默认人格文本；未用 `#设置人格` 设置自定义人格的用户读取此文件，文件缺失时使用内置英文兜底 |
-| `Song/` | 网易云音乐曲库 ID |
-| `image/` | 图片下载目录 |
-| `voice/` | TTS 音频输出目录 |
+| `image_assets/` | 聊天图片资产（按用户隔离，`#重置上下文` 时同步清理） |
+| `conversations.db` | 会话、记忆、提醒、图片资产元数据的 SQLite 数据库 |
+
+`#帮助` 的文本硬编码于 `src/Command/HelpText.h` 并编译进可执行文件（内容定稿后不常改，调整时只改该文件）；TTS 生成的语音写入系统临时目录（Linux `/tmp/kleinbot/`、Windows `%TEMP%\kleinbot\`），发送成功后自动删除。
 
 ## 开发与测试
 

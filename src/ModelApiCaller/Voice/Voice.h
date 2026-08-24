@@ -14,7 +14,7 @@ class Voice
 public:
     explicit Voice(VoiceOptions config, const std::atomic<bool> *running = nullptr);
     /**
-     * @brief 修复图片
+     * @brief 文本转语音
      *
      * @param message 	源数据
      *

@@ -16,9 +16,6 @@ const char *validConfig = R"({
     "bot": {"id": 10001, "manager_id": 10002, "name": "Klein"},
     "chat": {"default_model": "test-model"},
     "models": {"registry_path": "ModelsName.json"},
-    "resources": {
-        "help_file": "source/help.txt"
-    },
     "communication": {
         "protocol": {"type": "onebot"},
         "active_transport": "local",
@@ -145,9 +142,6 @@ TEST(WebUiSchemaTest, MissingTokenEnvironmentDisablesPanelWithoutBlockingStartup
     "bot": {"id": 10001},
     "chat": {"default_model": "test-model"},
     "models": {"registry_path": "ModelsName.json"},
-    "resources": {
-        "help_file": "source/help.txt"
-    },
     "communication": {
         "protocol": {"type": "onebot"},
         "active_transport": "local",

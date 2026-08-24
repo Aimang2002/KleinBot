@@ -32,9 +32,6 @@ const char *panelConfig = R"({
         "enabled": false,
         "api_key": {"literal": "sk-panel-plain-secret"}
     },
-    "resources": {
-        "help_file": "source/help.txt"
-    },
     "communication": {
         "protocol": {"type": "onebot"},
         "active_transport": "local",

@@ -888,7 +888,7 @@
     const SECTION_LABELS = {
       bot: "机器人身份", chat: "聊天参数", models: "模型端点", voice: "语音",
       features: "功能开关", memory: "长期记忆", web_search: "联网搜索", web_fetch: "网页抓取",
-      storage: "存储路径", resources: "运行资源", network: "网络代理",
+      storage: "存储路径", network: "网络代理",
       communication: "OneBot 通信", webui: "Web 配置面板"
     };
     const KEY_LABELS = {
@@ -902,15 +902,14 @@
       drawing: "画图模型", vision: "视觉模型", stable_diffusion: "Stable Diffusion",
       model: "模型", endpoint: "端点", api_key: "API Key", api_standard: "API 标准",
       host: "主机", port: "端口", bind: "绑定地址", path: "路径", access_token: "访问令牌",
-      output_directory: "输出目录", reference_audio: "参考音频", reference_text: "参考文本",
+      reference_audio: "参考音频", reference_text: "参考文本",
       accessibility_chat: "无障碍聊天", batch_turns: "批处理轮数", idle_seconds: "空闲触发（秒）",
       recall_limit: "召回上限", provider: "搜索 Provider", search_depth: "搜索深度",
       max_results: "最大结果数", max_content_chars: "正文最大字符数",
       max_response_bytes: "响应最大字节数", connect_timeout_ms: "连接超时（ms）",
       request_timeout_ms: "请求超时（ms）", cache_ttl_seconds: "缓存 TTL（秒）",
       cache_max_entries: "缓存最大条目数", conversation_database: "会话数据库",
-      image_assets: "图片资产目录", help_file: "帮助文件",
-      image_download_directory: "图片下载目录", proxy: "代理服务器", protocol: "协议",
+      image_assets: "图片资产目录", proxy: "代理服务器", protocol: "协议",
       active_transport: "活动传输名称", transports: "传输配置", defaults: "默认参数",
       api: "API 调用", events: "事件接收", secret: "签名密钥", base_url: "Base URL",
       type: "类型", options: "选项", literal: "字面值", from_env: "环境变量名"
@@ -928,7 +927,6 @@
       web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
       web_fetch: "网页抓取工具，无需第三方 Key，结果按 URL 缓存。",
       storage: "SQLite 数据库与图片资产的位置（改动需重启）。",
-      resources: "人格、帮助文档等运行时资源文件的位置。",
       network: "出站请求的公共代理（模型调用、搜索等），留空不使用。",
       communication: "与 OneBot 协议端的连接方式：正向/反向 WebSocket 或 HTTP 组合。",
       webui: "本配置面板自身的监听配置（改动需重启生效）。"
@@ -985,7 +983,6 @@
       "voice.enabled": "语音功能总开关（保存即生效）。",
       "voice.host": "GPT-SoVITS 服务地址。",
       "voice.port": "GPT-SoVITS 服务端口。",
-      "voice.output_directory": "生成的语音文件输出目录。",
       "voice.reference_audio": "参考音频文件路径（音色克隆用）。",
       "voice.reference_text": "参考音频对应的文本内容。",
       "features.accessibility_chat": "无障碍聊天模式（保存即生效）。",
@@ -1013,8 +1010,6 @@
       "web_fetch.cache_max_entries": "抓取缓存的最大条目数。",
       "storage.conversation_database": "会话 SQLite 数据库路径（改动需重启）。",
       "storage.image_assets": "图片资产（元数据 + 文件）的存储目录（改动需重启）。",
-      "resources.help_file": "#帮助 命令输出的帮助文件路径（改动需重启）。",
-      "resources.image_download_directory": "聊天图片的下载目录。",
       "network.proxy": "出站 HTTP(S) 代理地址（模型调用、搜索、抓取共用），留空直连。",
       "communication.protocol.type": "通信协议类型，当前仅支持 onebot。",
       "communication.active_transport": "当前启用的传输配置名，对应 transports 里的键（需重启）。",

@@ -1,8 +1,21 @@
 #include "OneBotMessageEncoder.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+
+namespace
+{
+// 本地路径转 file:// URL：分隔符归一为 /，POSIX 绝对路径拼 file://，
+// Windows 盘符路径与相对路径拼 file:///
+std::string localFileUrl(std::string path)
+{
+    std::replace(path.begin(), path.end(), '\\', '/');
+    const std::string prefix = !path.empty() && path.front() == '/' ? "file://" : "file:///";
+    return prefix + path;
+}
+}
 
 OneBotMessageEncoder::OneBotMessageEncoder(
     std::string privateMessageAction,
@@ -54,20 +67,18 @@ nlohmann::json OneBotMessageEncoder::toSegments(const OutboundMessage &message)
         else if constexpr (std::is_same_v<Message, ImageMessage>)
         {
             segment["type"] = "image";
-            std::string prefix;
             switch (concrete.source)
             {
             case ImageMessage::Source::Base64:
-                prefix = "base64://";
+                segment["data"]["file"] = "base64://" + concrete.data;
                 break;
             case ImageMessage::Source::Url:
-                prefix = "";
+                segment["data"]["file"] = concrete.data;
                 break;
             case ImageMessage::Source::LocalPath:
-                prefix = concrete.data.empty() || concrete.data.front() != '/' ? "file:///" : "file://";
+                segment["data"]["file"] = localFileUrl(concrete.data);
                 break;
             }
-            segment["data"]["file"] = prefix + concrete.data;
         }
         else if constexpr (std::is_same_v<Message, MusicMessage>)
         {
@@ -78,7 +89,7 @@ nlohmann::json OneBotMessageEncoder::toSegments(const OutboundMessage &message)
         else if constexpr (std::is_same_v<Message, VoiceMessage>)
         {
             segment["type"] = "record";
-            segment["data"]["file"] = "file:///" + concrete.audio_path;
+            segment["data"]["file"] = localFileUrl(concrete.audio_path);
         }
         else
         {

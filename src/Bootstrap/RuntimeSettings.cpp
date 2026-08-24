@@ -6,7 +6,7 @@
 
 namespace
 {
-ModelEndpointOptions mapModel(const ModelEndpointSchema &schema)
+    ModelEndpointOptions mapModel(const ModelEndpointSchema &schema)
     {
         return {schema.model, schema.endpoint, schema.apiKey, schema.apiStandard};
     }
@@ -42,11 +42,11 @@ ModelEndpointOptions mapModel(const ModelEndpointSchema &schema)
             result.http.apiAuthToken = profile.apiAccessToken;
             result.http.eventBindHost = profile.eventBindHost;
             result.http.eventBindPort = profile.eventBindPort;
-        result.http.eventPath = profile.eventPath;
-        result.http.eventAuthToken = profile.eventAccessToken;
-        result.http.eventSignatureSecret = profile.eventSecret.empty()
-            ? profile.eventAccessToken
-            : profile.eventSecret;
+            result.http.eventPath = profile.eventPath;
+            result.http.eventAuthToken = profile.eventAccessToken;
+            result.http.eventSignatureSecret = profile.eventSecret.empty()
+                                                   ? profile.eventAccessToken
+                                                   : profile.eventSecret;
         }
         return result;
     }
@@ -100,7 +100,6 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.voice.enabled,
         schema.voice.host,
         schema.voice.port,
-        schema.voice.outputDirectory,
         schema.voice.referenceAudioPath,
         schema.voice.referenceText};
     result.memory = {
@@ -135,9 +134,6 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.bot.groupChatEnabled};
     result.dock.proxy = schema.proxy;
     result.storage = {schema.storage.conversationDatabase, schema.storage.imageAssets};
-    result.resources = {
-        schema.resources.helpFile,
-        schema.resources.imageDownloadDirectory};
     result.transport = mapTransport(schema.communication);
     result.webUi = {schema.webUi.enabled, schema.webUi.bind,
                     schema.webUi.port, schema.webUi.accessToken};

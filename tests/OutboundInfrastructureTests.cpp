@@ -86,6 +86,47 @@ TEST(OneBotMessageEncoderTest, EncodesAllExistingMessageVariants)
               "file:///source/voice.wav");
 }
 
+// 本地文件统一经 localFileUrl 编码：POSIX 绝对路径 file://，Windows 盘符路径先归一为
+// 正斜杠再拼 file:///，相对路径同样 file:///；图片 LocalPath 与语音 record 共用该规则
+TEST(OneBotMessageEncoderTest, EncodesLocalFileUrlsForAbsoluteAndWindowsPaths)
+{
+    OneBotMessageEncoder encoder("private", "group");
+
+    const auto posixAbsolute = encoder.encode(OutboundDelivery{
+        DirectMessageTarget{"42"}, VoiceMessage{"/tmp/kleinbot/1730000000_0.wav"}
+    });
+    const auto windowsAbsolute = encoder.encode(OutboundDelivery{
+        DirectMessageTarget{"42"}, VoiceMessage{R"(C:\Users\klein\AppData\Local\Temp\kleinbot\a.wav)"}
+    });
+    const auto relative = encoder.encode(OutboundDelivery{
+        DirectMessageTarget{"42"}, VoiceMessage{"source/voice.wav"}
+    });
+    const auto windowsImage = encoder.encode(OutboundDelivery{
+        GroupMessageTarget{"88"}, ImageMessage{ImageMessage::Source::LocalPath, R"(source\image_assets\img_1.jpg)"}
+    });
+
+    EXPECT_EQ(posixAbsolute.params.at("message").at(0).at("data").at("file"),
+              "file:///tmp/kleinbot/1730000000_0.wav");
+    EXPECT_EQ(windowsAbsolute.params.at("message").at(0).at("data").at("file"),
+              "file:///C:/Users/klein/AppData/Local/Temp/kleinbot/a.wav");
+    EXPECT_EQ(relative.params.at("message").at(0).at("data").at("file"),
+              "file:///source/voice.wav");
+    EXPECT_EQ(windowsImage.params.at("message").at(0).at("data").at("file"),
+              "file:///source/image_assets/img_1.jpg");
+}
+
+// transport 在投递落定后依赖该函数定位并删除语音临时文件
+TEST(VoiceAttachmentPathTest, ExtractsPathOnlyForVoiceMessages)
+{
+    EXPECT_EQ(voiceAttachmentPath(VoiceMessage{"/tmp/kleinbot/a.wav"}),
+              std::optional<std::string>{"/tmp/kleinbot/a.wav"});
+    EXPECT_EQ(voiceAttachmentPath(TextMessage{"hello"}), std::nullopt);
+    EXPECT_EQ(voiceAttachmentPath(
+                  ImageMessage{ImageMessage::Source::LocalPath, "/tmp/x.png"}),
+              std::nullopt);
+    EXPECT_EQ(voiceAttachmentPath(MusicMessage{42}), std::nullopt);
+}
+
 TEST(OneBotMessageEncoderTest, RejectsTargetsUnsupportedByOneBot)
 {
     OneBotMessageEncoder encoder("private", "group");

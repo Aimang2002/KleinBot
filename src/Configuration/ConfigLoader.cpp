@@ -427,7 +427,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     Decoder decoder(result.diagnostics);
     decoder.unknownFields(document,
                           {"schema_version", "bot", "chat", "models", "voice", "features",
-                           "memory", "web_search", "web_fetch", "storage", "resources",
+                           "memory", "web_search", "web_fetch", "storage",
                            "network", "communication", "webui"},
                           "$" );
 
@@ -497,14 +497,13 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     const json *voice = decoder.object(document, "voice", "voice");
     if (voice != nullptr)
     {
-        decoder.unknownFields(*voice, {"enabled", "host", "port", "output_directory", "reference_audio", "reference_text"}, "voice");
+        decoder.unknownFields(*voice, {"enabled", "host", "port", "reference_audio", "reference_text"}, "voice");
         config.voice.enabled = decoder.boolean(*voice, "enabled", "voice.enabled", false);
         config.voice.host = decoder.string(*voice, "host", "voice.host");
         config.voice.port = decoder.string(*voice, "port", "voice.port");
-        config.voice.outputDirectory = decoder.string(*voice, "output_directory", "voice.output_directory");
         config.voice.referenceAudioPath = decoder.string(*voice, "reference_audio", "voice.reference_audio");
         config.voice.referenceText = decoder.string(*voice, "reference_text", "voice.reference_text");
-        if (config.voice.enabled && (config.voice.host.empty() || config.voice.port.empty() || config.voice.outputDirectory.empty()))
+        if (config.voice.enabled && (config.voice.host.empty() || config.voice.port.empty()))
         {
             config.voice.enabled = false;
             decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Dependency,
@@ -630,13 +629,8 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         config.storage.imageAssets = decoder.string(*storage, "image_assets", "storage.image_assets", "source/image_assets");
     }
 
-    const json *resources = decoder.object(document, "resources", "resources", true);
-    if (resources != nullptr)
-    {
-        decoder.unknownFields(*resources, {"help_file", "image_download_directory"}, "resources");
-        config.resources.helpFile = decoder.string(*resources, "help_file", "resources.help_file", {}, true);
-        config.resources.imageDownloadDirectory = decoder.string(*resources, "image_download_directory", "resources.image_download_directory");
-    }
+    // resources 段已废弃（help 内置、图片下载功能移除）：残留内容落入顶层
+    // unknownFields 检查，仅提示后忽略
 
     const json *network = decoder.object(document, "network", "network");
     if (network != nullptr)

@@ -2,6 +2,8 @@
 
 #include "Action/Action.h"
 #include "Command/AdminCommand.h"
+#include "Command/HelpCommand.h"
+#include "Command/HelpText.h"
 #include "Command/QueryModelCommand.h"
 #include "Command/VoiceSwitchCommand.h"
 
@@ -100,4 +102,23 @@ TEST(AdminCommandTest, PreservesAdminRequirementAndMapsOperation)
     EXPECT_EQ(action.lastArguments.at("action"), "refresh_config");
     EXPECT_EQ(action.lastContext.user_id, 999U);
     EXPECT_EQ(textContent(result), "action-result");
+}
+
+// 帮助文本硬编码于 HelpText.h 并编译进可执行文件，#帮助 原样返回
+TEST(HelpCommandTest, ReturnsHardCodedHelpText)
+{
+    HelpCommand command;
+    InboundMessage data;
+    auto context = makeContext(data, 123);
+
+    EXPECT_TRUE(command.canHandle("#帮助"));
+    EXPECT_TRUE(command.canHandle("help"));
+    EXPECT_FALSE(command.canHandle("#帮助一下"));
+
+    const auto result = command.execute(context);
+
+    const std::string &content = textContent(result);
+    EXPECT_EQ(content, kHelpText);
+    EXPECT_NE(content.find("欢迎使用克莱茵QQ机器人"), std::string::npos);
+    EXPECT_NE(content.find("当前克莱茵版本"), std::string::npos);
 }

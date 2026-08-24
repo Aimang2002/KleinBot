@@ -245,20 +245,14 @@ Open-source projects can be utilized via API calls or running internally on the 
 
 KleinBot reads `config.json` from the working directory at startup. On first run a placeholder skeleton is generated automatically (the Web panel comes up with it and its access token is printed in the startup log); the committed `config.example.json` is a complete template without secrets.
 
-The root object is divided by responsibility: `bot`, `chat`, `models`, `features`, `memory`, `web_search`, `web_fetch`, `storage`, `resources`, `network`, `communication`, and `webui`. Secret fields (API keys, tokens) accept either a local literal or an environment variable via `from_env`; the latter is recommended.
+The root object is divided by responsibility: `bot`, `chat`, `models`, `features`, `memory`, `web_search`, `web_fetch`, `storage`, `network`, `communication`, and `webui`. Secret fields (API keys, tokens) accept either a local literal or an environment variable via `from_env`; the latter is recommended.
 
 See `README.md` (Chinese) for the full parameter reference.
 
 
 # Source Directory Introduction
 
-+ help
-
-  + Contains the text for the `#帮助` command.
-
-+ image
-
-  + None.
+The `#帮助` text is hard-coded in `src/Command/HelpText.h` and compiled into the executable (the content is final; when it does change, only that single file needs editing). TTS audio is written to the system temp directory (`/tmp/kleinbot/` on Linux, `%TEMP%\kleinbot\` on Windows) and deleted after being sent.
 
 + Model
 
@@ -299,14 +293,6 @@ See `README.md` (Chinese) for the full parameter reference.
 + soul.md
 
   + Plain-text default persona. Users without a custom personality set via `#设置人格` get this file as their system prompt. If the file is missing, a built-in English fallback is used.
-
-+ Song
-
-  + Folder storing NetEase Cloud Music IDs
-
-+ voice
-
-  + None
 
 
 

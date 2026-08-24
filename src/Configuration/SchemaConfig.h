@@ -57,7 +57,6 @@ struct VoiceSchema
     bool enabled = false;
     std::string host;
     std::string port;
-    std::string outputDirectory;
     std::string referenceAudioPath;
     std::string referenceText;
 };
@@ -100,12 +99,6 @@ struct StorageSchema
 {
     std::string conversationDatabase = "source/conversations.db";
     std::string imageAssets = "source/image_assets";
-};
-
-struct ResourceSchema
-{
-    std::string helpFile;
-    std::string imageDownloadDirectory;
 };
 
 struct TransportProfileSchema
@@ -157,7 +150,6 @@ struct SchemaConfig
     WebSearchSchema webSearch;
     WebFetchSchema webFetch;
     StorageSchema storage;
-    ResourceSchema resources;
     std::string proxy;
     CommunicationSchema communication;
     WebUiSchema webUi;
