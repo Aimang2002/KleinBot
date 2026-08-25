@@ -121,6 +121,7 @@ TEST(HelpCommandTest, ReturnsHardCodedHelpTextWithGeneratedVersion)
     const std::string &content = textContent(result);
     EXPECT_EQ(content, std::string(kHelpText) +
                           "\n\n当前克莱茵版本:" + KLEINBOT_VERSION_STRING +
+                          " (" + KLEINBOT_GIT_HASH + ")" +
                           "\nCreate:@埃芒");
     EXPECT_NE(content.find("欢迎使用克莱茵QQ机器人"), std::string::npos);
     EXPECT_NE(content.find("当前克莱茵版本:" + std::string(KLEINBOT_VERSION_STRING)),

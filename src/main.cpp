@@ -23,6 +23,7 @@
 #include "MessageSender/QueuedMessageSender.h"
 #include "MessageQueue/OutboundMessageQueue.h"
 #include "Port/OutboundMessage.h"
+#include "Version/VersionInfo.h"
 #include "Protocol/OneBot/OneBotMessageEncoder.h"
 #include "Protocol/OneBot/OneBotEventDecoder.h"
 #include "ChatService/ChatService.h"
@@ -249,7 +250,12 @@ int main(int argc, char **argv)
 	for (int index = 1; index < argc; ++index)
 	{
 		const std::string argument = argv[index];
-		if (argument == "--check-config")
+		if (argument == "--version" || argument == "-V")
+		{
+			std::cout << VersionInfo::summary() << std::endl;
+			return 0;
+		}
+		else if (argument == "--check-config")
 			checkConfigOnly = true;
 		else if (argument == "--config" && index + 1 < argc)
 			configPath = argv[++index];

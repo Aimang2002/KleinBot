@@ -70,7 +70,7 @@ cmake --preset linux-release
 cmake --build --preset linux-release
 ```
 
-产物：`build/linux-release/KleinQBot<版本号>`
+产物：`build/linux-release/KleinBot`（文件名不含版本号，版本与构建信息用 `--version` 查看）
 
 ### Windows
 
@@ -81,7 +81,7 @@ cmake --preset windows-mingw-release
 cmake --build --preset windows-mingw-release
 ```
 
-产物：`build/windows-mingw-release/KleinQBot<版本号>.exe`（默认静态链接 MinGW 运行时，仅依赖 Windows 系统 DLL）
+产物：`build/windows-mingw-release/KleinBot.exe`（默认静态链接 MinGW 运行时，仅依赖 Windows 系统 DLL）
 
 > 若 CMake 报错 `POSIX thread support`，说明当前 MinGW 使用 win32 线程模型，请更换为带 POSIX 线程支持的工具链。
 
@@ -90,6 +90,12 @@ cmake --build --preset windows-mingw-release
 1. 首次运行：工作目录下没有 `config.json` 时会自动生成一份占位骨架（Web 面板同时启用，访问令牌打印在启动日志中），也可以手动复制 `config.example.json` 为 `config.json`；
 2. 准备一个 OneBot 协议端（如 [LLOneBot](https://github.com/LLOneBot/LLOneBot)）并建立通信；
 3. 运行可执行文件，向机器人私聊或群内 @ 它即可对话。
+
+查看构建信息（版本号、git 提交、构建时间、构建类型、编译器、libc 版本、架构）：
+
+```bash
+./KleinBot --version   # 或简写 -V
+```
 
 ## 配置
 

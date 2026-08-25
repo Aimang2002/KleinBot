@@ -1,10 +1,16 @@
 #ifndef KLEIN_VERSION_H
 #define KLEIN_VERSION_H
 
-// 由 CMake 从 project(... VERSION ...) 生成，勿手改。
-// 版本号唯一来源是 CMakeLists.txt 顶部的 project() 声明；
-// 渠道后缀（如 _betaVersion）来自 KLEINBOT_VERSION_SUFFIX 缓存变量
-#define KLEINBOT_VERSION_STRING "v@PROJECT_VERSION@@KLEINBOT_VERSION_SUFFIX@"
-#define KLEINBOT_VERSION "@PROJECT_VERSION@"
+// 由 cmake/RefreshVersion.cmake 在每次构建时重新生成，勿手改。
+// 版本号唯一来源是 CMakeLists.txt 顶部的 project() 声明；渠道后缀来自
+// KLEINBOT_VERSION_SUFFIX 缓存变量；短哈希来自 git（无 git 环境为 unknown，
+// 工作区有未提交修改时追加 -dirty）。
+// 构建时间使用 __DATE__/__TIME__ 编译期宏，不在本头文件中，避免每次构建触发重编。
+#define KLEINBOT_VERSION_STRING "v@KLEINBOT_VERSION@@KLEINBOT_VERSION_SUFFIX@"
+#define KLEINBOT_VERSION "@KLEINBOT_VERSION@"
+#define KLEINBOT_GIT_HASH "@KLEINBOT_GIT_HASH@"
+#define KLEINBOT_ARCH "@KLEINBOT_ARCH@"
+#define KLEINBOT_BUILD_TYPE "@KLEINBOT_BUILD_TYPE@"
+#define KLEINBOT_COMPILER "@KLEINBOT_COMPILER@"
 
 #endif // KLEIN_VERSION_H
