@@ -452,7 +452,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
                               {"default_model", "temperature", "top_p", "frequency_penalty",
                                "presence_penalty", "max_message_tokens", "worker_threads",
                                "max_pending_messages", "worker_idle_seconds",
-                               "message_survival_seconds", "private_action", "group_action"},
+                               "message_survival_seconds"},
                               "chat");
         config.chat.defaultModel = decoder.string(*chat, "default_model", "chat.default_model", {}, true);
         config.chat.temperature = decoder.number(*chat, "temperature", "chat.temperature", 1.0, 0.0, 2.0);
@@ -474,8 +474,6 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
             *chat, "worker_idle_seconds", "chat.worker_idle_seconds", 30, 1, 3600));
         config.chat.messageSurvivalSeconds = decoder.integer(
             *chat, "message_survival_seconds", "chat.message_survival_seconds", 3600, 1, std::numeric_limits<int>::max());
-        config.chat.privateAction = decoder.string(*chat, "private_action", "chat.private_action", "send_private_msg");
-        config.chat.groupAction = decoder.string(*chat, "group_action", "chat.group_action", "send_group_msg");
     }
 
     const json *models = decoder.object(document, "models", "models", true);

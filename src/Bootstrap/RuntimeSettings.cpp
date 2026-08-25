@@ -87,9 +87,7 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.chat.frequencyPenalty,
         schema.chat.presencePenalty,
         schema.chat.maxMessageTokens,
-        schema.chat.messageSurvivalSeconds,
-        schema.chat.privateAction,
-        schema.chat.groupAction};
+        schema.chat.messageSurvivalSeconds};
     result.messageExecution = mapMessageExecution(schema.chat);
     result.models.registryPath = schema.models.registryPath;
     result.models.drawing = mapModel(schema.models.drawing);

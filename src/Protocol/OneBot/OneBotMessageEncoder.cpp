@@ -17,14 +17,6 @@ std::string localFileUrl(std::string path)
 }
 }
 
-OneBotMessageEncoder::OneBotMessageEncoder(
-    std::string privateMessageAction,
-    std::string groupMessageAction)
-    : privateMessageAction(std::move(privateMessageAction)),
-      groupMessageAction(std::move(groupMessageAction))
-{
-}
-
 OneBotAction OneBotMessageEncoder::encode(const OutboundDelivery &delivery) const
 {
     OneBotAction action;
@@ -34,12 +26,12 @@ OneBotAction OneBotMessageEncoder::encode(const OutboundDelivery &delivery) cons
         using Target = std::decay_t<decltype(target)>;
         if constexpr (std::is_same_v<Target, DirectMessageTarget>)
         {
-            action.action = privateMessageAction;
+            action.action = "send_private_msg";
             action.params["user_id"] = parseNumericId(target.user_id);
         }
         else if constexpr (std::is_same_v<Target, GroupMessageTarget>)
         {
-            action.action = groupMessageAction;
+            action.action = "send_group_msg";
             action.params["group_id"] = parseNumericId(target.group_id);
         }
         else

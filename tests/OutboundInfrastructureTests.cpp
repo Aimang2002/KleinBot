@@ -44,7 +44,7 @@ TEST(QueuedMessageSenderTest, EnqueuesProtocolIndependentTargets)
 
 TEST(OneBotMessageEncoderTest, PreservesPrivateTextEnvelopeContract)
 {
-    OneBotMessageEncoder encoder("send_private_msg", "send_group_msg");
+    OneBotMessageEncoder encoder;
     const OutboundDelivery delivery{DirectMessageTarget{"42"}, TextMessage{"hello"}};
 
     const nlohmann::json encoded = encoder.encode(delivery).toJson();
@@ -62,7 +62,7 @@ TEST(OneBotMessageEncoderTest, PreservesPrivateTextEnvelopeContract)
 
 TEST(OneBotMessageEncoderTest, EncodesAllExistingMessageVariants)
 {
-    OneBotMessageEncoder encoder("private", "group");
+    OneBotMessageEncoder encoder;
 
     const auto image = encoder.encode(OutboundDelivery{
         GroupMessageTarget{"88"},
@@ -75,7 +75,7 @@ TEST(OneBotMessageEncoderTest, EncodesAllExistingMessageVariants)
         DirectMessageTarget{"42"}, VoiceMessage{"source/voice.wav"}
     });
 
-    EXPECT_EQ(image.action, "group");
+    EXPECT_EQ(image.action, "send_group_msg");
     EXPECT_EQ(image.params.at("group_id"), 88);
     EXPECT_EQ(image.params.at("message").at(0).at("data").at("file"),
               "file:///source/image.png");
@@ -90,7 +90,7 @@ TEST(OneBotMessageEncoderTest, EncodesAllExistingMessageVariants)
 // 正斜杠再拼 file:///，相对路径同样 file:///；图片 LocalPath 与语音 record 共用该规则
 TEST(OneBotMessageEncoderTest, EncodesLocalFileUrlsForAbsoluteAndWindowsPaths)
 {
-    OneBotMessageEncoder encoder("private", "group");
+    OneBotMessageEncoder encoder;
 
     const auto posixAbsolute = encoder.encode(OutboundDelivery{
         DirectMessageTarget{"42"}, VoiceMessage{"/tmp/kleinbot/1730000000_0.wav"}
@@ -129,7 +129,7 @@ TEST(VoiceAttachmentPathTest, ExtractsPathOnlyForVoiceMessages)
 
 TEST(OneBotMessageEncoderTest, RejectsTargetsUnsupportedByOneBot)
 {
-    OneBotMessageEncoder encoder("private", "group");
+    OneBotMessageEncoder encoder;
     const OutboundDelivery delivery{DirectMessageTarget{"satori-user"}, TextMessage{"hello"}};
 
     EXPECT_THROW(encoder.encode(delivery), std::invalid_argument);

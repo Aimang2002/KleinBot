@@ -26,8 +26,6 @@ struct ChatSchema
     std::size_t maxPendingMessages = 1024;
     std::size_t workerIdleSeconds = 30;
     long messageSurvivalSeconds = 3600;
-    std::string privateAction = "send_private_msg";
-    std::string groupAction = "send_group_msg";
 };
 
 struct ModelEndpointSchema

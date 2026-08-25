@@ -392,8 +392,7 @@ int main(int argc, char **argv)
 	OutboundMessageQueue outboundQueue;
 	QueuedMessageSender messageSender(outboundQueue);
 	OneBotEventDecoder oneBotEventDecoder;
-	OneBotMessageEncoder oneBotMessageEncoder(
-		settings.chat.privateAction, settings.chat.groupAction);
+	OneBotMessageEncoder oneBotMessageEncoder;
 	Voice voice(settings.voice, &running);
 	CommandRegistry commandRegistry(settings.bot.managerId);
 	commandRegistry.registryCommand(std::make_unique<HelpCommand>());

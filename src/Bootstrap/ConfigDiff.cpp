@@ -114,10 +114,6 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
                  "chat.worker_idle_seconds", ConfigChangeImpact::Restart);
     addIfChanged(diff, current.chat.messageSurvivalSeconds, candidate.chat.messageSurvivalSeconds,
                  "chat.message_survival_seconds", rebuild);
-    addIfChanged(diff, current.chat.privateAction, candidate.chat.privateAction,
-                 "chat.private_action", rebuild);
-    addIfChanged(diff, current.chat.groupAction, candidate.chat.groupAction,
-                 "chat.group_action", rebuild);
 
     addIfChanged(diff, current.models.registryPath, candidate.models.registryPath,
                  "models.registry_path", ConfigChangeImpact::Restart);
