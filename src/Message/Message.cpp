@@ -307,12 +307,6 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 	// 开始执行下载操作
 	if (curl_handle)
 	{
-#if defined(__WIN32) || defined(__WIN64)
-		// 设置SSL证书验证
-		curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 1L);	 // 开启SSL证书验证
-		curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 2L);	 // 验证证书中的主机名
-		curl_easy_setopt(curl_handle, CURLOPT_CAINFO, "cacert.pem"); // 指定CA根证书
-#endif
 		curl_easy_setopt(curl_handle, CURLOPT_URL, message_data_url.c_str());
 		curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_data);
 		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &input);

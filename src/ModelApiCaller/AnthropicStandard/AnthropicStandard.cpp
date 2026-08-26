@@ -125,7 +125,6 @@ std::pair<std::string, long> AnthropicStandard::http_post(const std::string &url
         headers = curl_slist_append(headers, header_key.c_str());
         headers = curl_slist_append(headers, header_version.c_str());
 
-        VerifyCertificate(curl);
         curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.c_str());
@@ -319,15 +318,6 @@ size_t AnthropicStandard::write_callback_chat(char *ptr, size_t size, size_t nme
         return 0;
     }
     return newLength;
-}
-
-void AnthropicStandard::VerifyCertificate(CURL *curl)
-{
-#if defined(__WIN32) || defined(__WIN64)
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(curl, CURLOPT_CAINFO, "cacert.pem");
-#endif
 }
 
 std::string AnthropicStandard::filterNonNormalChars(std::string str)

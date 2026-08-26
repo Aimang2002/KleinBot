@@ -30,7 +30,6 @@ private:
 
     std::string filterNonNormalChars(std::string str);
 
-    void VerifyCertificate(CURL *curl);
     std::string proxy;
     const std::atomic<bool> *running;
 };
