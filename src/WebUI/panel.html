@@ -315,6 +315,24 @@
       background: var(--line);
       margin: 12px 6px;
     }
+    /* 配置版本只读标识：模型供应商下方展示，纯状态芯片、不可点击
+       （改动请直接编辑 config.json，面板保存时会原样写回该值） */
+    .nav-version {
+      margin: 10px 6px 2px;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-2);
+      box-shadow: inset 2px 0 0 var(--mint);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: .14em;
+      color: var(--faint);
+      text-align: left;
+      white-space: nowrap;
+      cursor: default;
+      user-select: none;
+    }
 
     .content {
       flex: 1;
@@ -810,13 +828,6 @@
       color: #5c6e64;
     }
 
-    /* 配置版本只读标识：右下角展示，不可在面板中编辑（改动请直接编辑 config.json） */
-    footer .config-version {
-      display: block;
-      margin-top: 4px;
-      color: #46584e;
-    }
-
     /* ============ 响应式与可访问性 ============ */
 
     @media (max-width: 900px) {
@@ -920,7 +931,6 @@
       </div>
       <footer>保存后立即写盘并刷新内存快照；标注“需重启”的项在机器人重启后生效。密钥字段留空表示保持原值。
         <span class="tagline">KLEIN · MOBIUS LAB TERMINAL</span>
-        <span id="configVersion" class="config-version" hidden></span>
       </footer>
     </main>
   </div>
@@ -1702,17 +1712,10 @@
         const panes = $("panes");
         panes.textContent = "";
         let firstKey = "";
-        // schema_version 不是可编辑项：不生成分区，只在角落展示原值，
+        // schema_version 不是可编辑项：不生成分区，只在侧边导航底部展示原值，
         // 保存时由 collectConfig 写回（改版本号请直接编辑 config.json）
         loadedSchemaVersion = typeof document_.schema_version === "number"
           ? document_.schema_version : undefined;
-        const versionBadge = $("configVersion");
-        if (loadedSchemaVersion === undefined)
-          versionBadge.hidden = true;
-        else {
-          versionBadge.textContent = "CONFIG SCHEMA v" + loadedSchemaVersion;
-          versionBadge.hidden = false;
-        }
         for (const [key, value] of orderedEntries(document_, null)) {
           if (key === "schema_version") continue;
           if (!firstKey) firstKey = key;
@@ -1755,6 +1758,13 @@
         sep.className = "nav-sep";
         nav.appendChild(sep);
         nav.appendChild(modelsNavItem());
+        const versionChip = document.createElement("div");
+        versionChip.className = "nav-version";
+        if (loadedSchemaVersion === undefined)
+          versionChip.hidden = true;
+        else
+          versionChip.textContent = "CONFIG SCHEMA v" + loadedSchemaVersion;
+        nav.appendChild(versionChip);
         const known = activePane === MODELS_KEY ||
           document.querySelectorAll('.pane[data-key="' + activePane + '"]').length > 0;
         selectPane(known && activePane ? activePane : (firstKey || MODELS_KEY));
