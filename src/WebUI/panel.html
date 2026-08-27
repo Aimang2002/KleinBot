@@ -252,10 +252,10 @@
     }
 
     .nav-label {
-      font-family: var(--mono);
-      font-size: 11px;
-      letter-spacing: .18em;
-      color: var(--faint);
+      /* 中文不走 --mono：等宽栈无中文字形，小字号回退渲染发虚 */
+      font-size: 12px;
+      letter-spacing: .25em;
+      color: var(--muted);
       padding: 0 12px 10px;
     }
 
@@ -315,6 +315,7 @@
       background: var(--line);
       margin: 12px 6px;
     }
+
     /* 配置版本只读标识：模型供应商下方展示，纯状态芯片、不可点击
        （改动请直接编辑 config.json，面板保存时会原样写回该值） */
     .nav-version {
@@ -324,10 +325,9 @@
       border-radius: 8px;
       background: var(--surface-2);
       box-shadow: inset 2px 0 0 var(--mint);
-      font-family: var(--mono);
-      font-size: 11px;
-      letter-spacing: .14em;
-      color: var(--faint);
+      font-size: 12px;
+      letter-spacing: .06em;
+      color: var(--muted);
       text-align: left;
       white-space: nowrap;
       cursor: default;
@@ -1178,10 +1178,14 @@
         modeLabel: "正向 WebSocket",
         modeDetail: "Klein 主动连接协议端",
         fields: [
-          { key: "host", label: "服务器地址", kind: "string",
-            hint: "OneBot 协议端（NapCat / LagRange 等）的地址，Klein 主动连接它。" },
-          { key: "port", label: "端口", kind: "int",
-            hint: "协议端正向 WebSocket 的监听端口，1~65535。" },
+          {
+            key: "host", label: "服务器地址", kind: "string",
+            hint: "OneBot 协议端（NapCat / LagRange 等）的地址，Klein 主动连接它。"
+          },
+          {
+            key: "port", label: "端口", kind: "int",
+            hint: "协议端正向 WebSocket 的监听端口，1~65535。"
+          },
           { key: "path", label: "路径", kind: "string" },
           { key: "access_token", label: "访问令牌", kind: "secret" }
         ]
@@ -1191,8 +1195,10 @@
         modeDetail: "协议端主动连入 Klein",
         fields: [
           { key: "bind", label: "监听地址", kind: "string" },
-          { key: "port", label: "端口", kind: "int",
-            hint: "Klein 的监听端口，协议端反向连接这里。" },
+          {
+            key: "port", label: "端口", kind: "int",
+            hint: "Klein 的监听端口，协议端反向连接这里。"
+          },
           { key: "path", label: "路径", kind: "string" },
           { key: "access_token", label: "访问令牌", kind: "secret" }
         ]
@@ -1212,8 +1218,10 @@
             title: "事件上报（协议端 → Klein）", sub: "events",
             fields: [
               { key: "bind", label: "监听地址", kind: "string" },
-              { key: "port", label: "端口", kind: "int",
-                hint: "Klein 监听事件上报的端口。" },
+              {
+                key: "port", label: "端口", kind: "int",
+                hint: "Klein 监听事件上报的端口。"
+              },
               { key: "path", label: "路径", kind: "string" },
               { key: "access_token", label: "访问令牌", kind: "secret" },
               { key: "secret", label: "上报签名密钥", kind: "secret" }
@@ -1763,7 +1771,7 @@
         if (loadedSchemaVersion === undefined)
           versionChip.hidden = true;
         else
-          versionChip.textContent = "CONFIG SCHEMA v" + loadedSchemaVersion;
+          versionChip.textContent = "配置文件版本 v" + loadedSchemaVersion;
         nav.appendChild(versionChip);
         const known = activePane === MODELS_KEY ||
           document.querySelectorAll('.pane[data-key="' + activePane + '"]').length > 0;
