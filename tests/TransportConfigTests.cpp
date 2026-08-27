@@ -75,8 +75,6 @@ TEST(ConfigLoaderTest, UsesExplicitWorkerThreadCountAsFixedPool)
 {
     nlohmann::json document = nlohmann::json::parse(validConfig);
     document["chat"]["worker_threads"] = 6;
-    document["chat"]["max_pending_messages"] = 2048;
-    document["chat"]["worker_idle_seconds"] = 45;
 
     ConfigLoader loader;
     const ConfigLoadResult result = loader.loadDocument(document);
@@ -88,8 +86,26 @@ TEST(ConfigLoaderTest, UsesExplicitWorkerThreadCountAsFixedPool)
     EXPECT_FALSE(runtime.messageExecution.dynamicScaling);
     EXPECT_EQ(runtime.messageExecution.initialWorkerThreads, 6U);
     EXPECT_EQ(runtime.messageExecution.maxWorkerThreads, 6U);
-    EXPECT_EQ(runtime.messageExecution.maxPendingMessages, 2048U);
-    EXPECT_EQ(runtime.messageExecution.workerIdleSeconds, 45U);
+}
+
+TEST(ConfigLoaderTest, QueueCapacityAndIdleTimeoutStayInternal)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["chat"]["max_pending_messages"] = 2048;
+    document["chat"]["worker_idle_seconds"] = 45;
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    // 历史配置中的键不再被识别：按未知字段忽略并回落到程序内部定值
+    ASSERT_TRUE(result.canStart());
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "chat.max_pending_messages"));
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "chat.worker_idle_seconds"));
+    const RuntimeSettings runtime = buildRuntimeSettings(*result.config);
+    EXPECT_EQ(runtime.messageExecution.maxPendingMessages,
+              MessageExecutionOptions::kMaxPendingMessages);
+    EXPECT_EQ(runtime.messageExecution.workerIdleSeconds,
+              MessageExecutionOptions::kWorkerIdleSeconds);
 }
 
 TEST(ConfigLoaderTest, RejectsMissingActiveTransportButIgnoresUnknownFields)

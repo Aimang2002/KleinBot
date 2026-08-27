@@ -952,8 +952,7 @@
       name: "名称", group_chat_enabled: "启用群聊", default_model: "默认模型",
       temperature: "温度 temperature", top_p: "Top P", frequency_penalty: "频率惩罚",
       presence_penalty: "存在惩罚", max_message_tokens: "单条消息最大 token",
-      worker_threads: "工作线程数", max_pending_messages: "队列容量",
-      worker_idle_seconds: "线程空闲超时（秒）", message_survival_seconds: "消息存活（秒）",
+      worker_threads: "工作线程数", message_survival_seconds: "消息存活（秒）",
       registry_path: "模型注册表路径",
       drawing: "画图模型", vision: "视觉模型", stable_diffusion: "Stable Diffusion",
       model: "模型", endpoint: "端点", api_key: "API Key", api_standard: "API 标准",
@@ -984,7 +983,7 @@
     // 字段说明：悬停显示。按“完整路径 → 通用键名”两级查找，传输 Profile 的动态路径靠兜底层覆盖
     const SECTION_HINTS = {
       bot: "机器人的身份与基本行为：QQ 号、管理员、群聊开关。",
-      chat: "对话采样参数与消息处理：默认模型、温度、队列容量与工作线程。",
+      chat: "对话采样参数与消息处理：默认模型、温度与工作线程。",
       models: "模型注册表路径，以及画图、视觉、Stable Diffusion 的专用端点。",
       voice: "GPT-SoVITS 语音合成配置；字段不全时语音功能会自动关闭。",
       memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
@@ -1028,8 +1027,6 @@
       "chat.presence_penalty": "存在惩罚 -2~2：正值鼓励引入新话题。",
       "chat.max_message_tokens": "单条消息的 token 上限，超出会提示用户精简。",
       "chat.worker_threads": "消息处理线程数；留空 = 按 CPU 核心数自动（需重启）。",
-      "chat.max_pending_messages": "待处理消息队列容量，占满后拒绝新消息（需重启）。",
-      "chat.worker_idle_seconds": "空闲工作线程的回收秒数（需重启）。",
       "chat.message_survival_seconds": "消息在处理队列中的最长存活秒数。",
       "models.registry_path": "模型注册表 JSON 的路径（相对工作目录，改动需重启）；可在“模型供应商”页编辑内容。",
       "models.drawing.model": "画图模型名（配合 #画图 命令与画图工具）。",

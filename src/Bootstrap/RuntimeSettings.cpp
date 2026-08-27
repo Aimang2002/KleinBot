@@ -54,9 +54,8 @@ namespace
 
 MessageExecutionOptions mapMessageExecution(const ChatSchema &chat)
 {
+    // 队列容量与空闲超时使用 MessageExecutionOptions 的内部定值，仅线程数来自配置
     MessageExecutionOptions result;
-    result.maxPendingMessages = chat.maxPendingMessages;
-    result.workerIdleSeconds = chat.workerIdleSeconds;
     if (chat.workerThreads.has_value())
     {
         result.initialWorkerThreads = *chat.workerThreads;

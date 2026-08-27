@@ -451,7 +451,6 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         decoder.unknownFields(*chat,
                               {"default_model", "temperature", "top_p", "frequency_penalty",
                                "presence_penalty", "max_message_tokens", "worker_threads",
-                               "max_pending_messages", "worker_idle_seconds",
                                "message_survival_seconds"},
                               "chat");
         config.chat.defaultModel = decoder.string(*chat, "default_model", "chat.default_model", {}, true);
@@ -468,10 +467,6 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
             if (workerThreads >= 1)
                 config.chat.workerThreads = static_cast<std::size_t>(workerThreads);
         }
-        config.chat.maxPendingMessages = static_cast<std::size_t>(decoder.integer(
-            *chat, "max_pending_messages", "chat.max_pending_messages", 1024, 1, 1000000));
-        config.chat.workerIdleSeconds = static_cast<std::size_t>(decoder.integer(
-            *chat, "worker_idle_seconds", "chat.worker_idle_seconds", 30, 1, 3600));
         config.chat.messageSurvivalSeconds = decoder.integer(
             *chat, "message_survival_seconds", "chat.message_survival_seconds", 3600, 1, std::numeric_limits<int>::max());
     }

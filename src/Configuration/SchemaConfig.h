@@ -23,8 +23,6 @@ struct ChatSchema
     double presencePenalty = 0.0;
     std::size_t maxMessageTokens = 4096;
     std::optional<std::size_t> workerThreads;
-    std::size_t maxPendingMessages = 1024;
-    std::size_t workerIdleSeconds = 30;
     long messageSurvivalSeconds = 3600;
 };
 
