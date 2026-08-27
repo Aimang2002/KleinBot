@@ -21,6 +21,7 @@
     <a href="#compatibility"><img src="https://img.shields.io/badge/protocol-OneBot%2011-green" alt="OneBot 11"></a>
     <a href="#agent-runtime-and-tools"><img src="https://img.shields.io/badge/Agent-tool%20calling-purple" alt="Agent tool calling"></a>
     <a href="#features"><img src="https://img.shields.io/badge/multimodal-application%20layer-orange" alt="Application-layer multimodal"></a>
+    <a href="#license"><img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License"></a>
   </p>
 
 
@@ -305,3 +306,7 @@ The `#帮助` text is hard-coded in `src/Command/HelpText.h` and compiled into t
 + [curl](https://curl.se/)
 + [SQLite](https://www.sqlite.org/)
 + [GoogleTest](https://github.com/google/googletest)
+
+# License
+
+This project is released under the [MIT License](LICENSE). Third-party dependencies shipped in the repository (nlohmann/json, Boost headers, cpp-httplib, etc.) retain their original licenses. Release packages must include third-party license notices and must not contain user data or secrets.

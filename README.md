@@ -8,7 +8,7 @@
 
 *KleinBot 是一个以 QQ 为交互载体、在应用层实现多模态感知、工具调用与任务编排的对话式 Agent*
 
-[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)](#快速开始) [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)](#快速开始) [![OneBot](https://img.shields.io/badge/protocol-OneBot%2011-green)](#简介) [![Agent](https://img.shields.io/badge/Agent-tool%20calling-purple)](#核心特性) [![Multimodal](https://img.shields.io/badge/multimodal-application%20layer-orange)](#核心特性)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)](#快速开始) [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)](#快速开始) [![OneBot](https://img.shields.io/badge/protocol-OneBot%2011-green)](#简介) [![Agent](https://img.shields.io/badge/Agent-tool%20calling-purple)](#核心特性) [![Multimodal](https://img.shields.io/badge/multimodal-application%20layer-orange)](#核心特性) [![License](https://img.shields.io/badge/license-MIT-yellow)](#开源协议)
 
 </div>
 
@@ -30,6 +30,7 @@
 - [运行资源目录](#运行资源目录)
 - [开发与测试](#开发与测试)
 - [鸣谢](#鸣谢)
+- [开源协议](#开源协议)
 
 ## 简介
 
@@ -388,6 +389,10 @@ ctest --preset linux-debug
 - [curl](https://curl.se/)
 - [SQLite](https://www.sqlite.org/)
 - [GoogleTest](https://github.com/google/googletest)
+
+## 开源协议
+
+本项目以 [MIT License](LICENSE) 开源。随仓库分发的第三方依赖（nlohmann/json、Boost 头文件、cpp-httplib 等）保留其原始许可证；发布包须附带第三方许可声明，且不得包含用户数据与密钥。
 
 ---
 
