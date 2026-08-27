@@ -810,6 +810,13 @@
       color: #5c6e64;
     }
 
+    /* 配置版本只读标识：右下角展示，不可在面板中编辑（改动请直接编辑 config.json） */
+    footer .config-version {
+      display: block;
+      margin-top: 4px;
+      color: #46584e;
+    }
+
     /* ============ 响应式与可访问性 ============ */
 
     @media (max-width: 900px) {
@@ -913,6 +920,7 @@
       </div>
       <footer>保存后立即写盘并刷新内存快照；标注“需重启”的项在机器人重启后生效。密钥字段留空表示保持原值。
         <span class="tagline">KLEIN · MOBIUS LAB TERMINAL</span>
+        <span id="configVersion" class="config-version" hidden></span>
       </footer>
     </main>
   </div>
@@ -940,6 +948,7 @@
     const MODELS_KEY = "__models__";
     let activePane = "";
     let modelsLoaded = false;
+    let loadedSchemaVersion; // 原样保留的 schema_version：面板不提供编辑，保存时写回原值
 
     const SECTION_LABELS = {
       bot: "机器人身份", features: "功能开关", chat: "聊天参数", models: "模型端点", voice: "语音",
@@ -948,7 +957,7 @@
       communication: "OneBot 通信", webui: "Web 配置面板"
     };
     const KEY_LABELS = {
-      schema_version: "配置版本", enabled: "启用", id: "QQ 号", manager_id: "管理员 QQ",
+      enabled: "启用", id: "QQ 号", manager_id: "管理员 QQ",
       name: "名称", group_chat_enabled: "启用群聊", default_model: "默认模型",
       temperature: "温度 temperature", top_p: "Top P", frequency_penalty: "频率惩罚",
       presence_penalty: "存在惩罚", max_message_tokens: "单条消息最大 token",
@@ -1016,7 +1025,6 @@
       api_standard: "请求协议标准：OpenAI 或 Anthropic。"
     };
     const FIELD_HINTS = {
-      schema_version: "配置结构版本，当前必须为 1，请勿修改。",
       "bot.id": "机器人的 QQ 号，用于识别 @ 消息与发送消息（改动需重启）。",
       "bot.manager_id": "管理员 QQ，可执行 #刷新配置文件 等管理命令；0 表示不设置。",
       "bot.name": "机器人昵称，用于人格提示词（改动需重启）。",
@@ -1083,7 +1091,7 @@
 
     // 模块与字段的固定展示顺序：配置文件里的键序因人而异，面板按此整理，
     // 未列出的键（新版本新增或历史遗留）按文件原序排在最后兜底
-    const SECTION_ORDER = ["schema_version", "bot", "chat", "models", "voice", "memory",
+    const SECTION_ORDER = ["bot", "chat", "models", "voice", "memory",
       "web_search", "web_fetch", "storage", "network", "communication", "webui"];
     const SECTION_KEY_ORDER = {
       bot: ["id", "manager_id", "name"],
@@ -1602,6 +1610,8 @@
 
     function collectConfig() {
       const result = {};
+      if (loadedSchemaVersion !== undefined)
+        result.schema_version = loadedSchemaVersion;
       for (const pane of $("panes").children) {
         if (pane.dataset.custom === "communication" && communicationDraft) {
           result[pane.dataset.key] = collectCommunicationPane(pane);
@@ -1692,7 +1702,19 @@
         const panes = $("panes");
         panes.textContent = "";
         let firstKey = "";
+        // schema_version 不是可编辑项：不生成分区，只在角落展示原值，
+        // 保存时由 collectConfig 写回（改版本号请直接编辑 config.json）
+        loadedSchemaVersion = typeof document_.schema_version === "number"
+          ? document_.schema_version : undefined;
+        const versionBadge = $("configVersion");
+        if (loadedSchemaVersion === undefined)
+          versionBadge.hidden = true;
+        else {
+          versionBadge.textContent = "CONFIG SCHEMA v" + loadedSchemaVersion;
+          versionBadge.hidden = false;
+        }
         for (const [key, value] of orderedEntries(document_, null)) {
+          if (key === "schema_version") continue;
           if (!firstKey) firstKey = key;
           nav.appendChild(navItem(key, label(key, true)));
           const pane = document.createElement("section");
@@ -1708,7 +1730,7 @@
           const fields = document.createElement("div");
           fields.className = "fields";
           pane.appendChild(fields);
-          // 顶层标量（如 schema_version）没有子对象，直接渲染成行并打上
+          // 未知顶层标量没有子对象，直接渲染成行并打上
           // scalar 标记：collectConfig 按此解包，避免 collectFrom 再包一层
           if (isPlainObject(value)) {
             // communication 是唯一的顶层特例：类型驱动的专用视图；
