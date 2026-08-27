@@ -942,7 +942,7 @@
     let modelsLoaded = false;
 
     const SECTION_LABELS = {
-      bot: "机器人身份", chat: "聊天参数", models: "模型端点", voice: "语音",
+      bot: "机器人身份", features: "功能开关", chat: "聊天参数", models: "模型端点", voice: "语音",
       memory: "长期记忆", web_search: "联网搜索", web_fetch: "网页抓取",
       storage: "存储路径", network: "网络代理",
       communication: "OneBot 通信", webui: "Web 配置面板"
@@ -982,7 +982,8 @@
 
     // 字段说明：悬停显示。按“完整路径 → 通用键名”两级查找，传输 Profile 的动态路径靠兜底层覆盖
     const SECTION_HINTS = {
-      bot: "机器人的身份与基本行为：QQ 号、管理员、群聊开关。",
+      bot: "机器人的身份信息：QQ 号、管理员与昵称。",
+      features: "机器人对外行为的开关，保存时写回 bot 分组。",
       chat: "对话采样参数与消息处理：默认模型、温度与工作线程。",
       models: "模型注册表路径，以及画图、视觉、Stable Diffusion 的专用端点。",
       voice: "GPT-SoVITS 语音合成配置；字段不全时语音功能会自动关闭。",
@@ -1079,6 +1080,40 @@
       "webui.port": "面板端口，默认 55346（KLEIN 的九宫格键盘映射）。",
       "webui.access_token": "面板访问令牌；留空表示保持原值（掩码显示），支持环境变量引用。"
     };
+
+    // 模块与字段的固定展示顺序：配置文件里的键序因人而异，面板按此整理，
+    // 未列出的键（新版本新增或历史遗留）按文件原序排在最后兜底
+    const SECTION_ORDER = ["schema_version", "bot", "chat", "models", "voice", "memory",
+      "web_search", "web_fetch", "storage", "network", "communication", "webui"];
+    const SECTION_KEY_ORDER = {
+      bot: ["id", "manager_id", "name"],
+      chat: ["default_model", "temperature", "top_p", "frequency_penalty",
+        "presence_penalty", "max_message_tokens", "worker_threads", "message_survival_seconds"],
+      models: ["registry_path", "drawing", "vision", "stable_diffusion"],
+      drawing: ["model", "endpoint", "api_key", "api_standard"],
+      vision: ["model", "endpoint", "api_key", "api_standard"],
+      stable_diffusion: ["endpoint", "model"],
+      voice: ["enabled", "host", "port", "reference_audio", "reference_text"],
+      memory: ["enabled", "model", "batch_turns", "idle_seconds", "recall_limit"],
+      web_search: ["enabled", "provider", "endpoint", "api_key", "search_depth", "max_results",
+        "max_content_chars", "max_response_bytes", "connect_timeout_ms", "request_timeout_ms"],
+      web_fetch: ["enabled", "max_content_chars", "max_response_bytes", "connect_timeout_ms",
+        "request_timeout_ms", "cache_ttl_seconds", "cache_max_entries"],
+      storage: ["conversation_database", "image_assets"],
+      webui: ["enabled", "bind", "port", "access_token"]
+    };
+
+    function orderedEntries(object, sectionKey) {
+      const order = sectionKey === null ? SECTION_ORDER : SECTION_KEY_ORDER[sectionKey];
+      if (!order)
+        return Object.entries(object);
+      const known = [];
+      for (const key of order)
+        if (Object.prototype.hasOwnProperty.call(object, key))
+          known.push([key, object[key]]);
+      const rest = Object.entries(object).filter(([key]) => order.indexOf(key) < 0);
+      return known.concat(rest);
+    }
 
     function hintFor(path, key) {
       return FIELD_HINTS[path] || KEY_HINTS[key] || "";
@@ -1476,7 +1511,7 @@
         const fields = document.createElement("div");
         fields.className = "fields";
         section.appendChild(fields);
-        for (const [childKey, childValue] of Object.entries(value))
+        for (const [childKey, childValue] of orderedEntries(value, key))
           renderValue(fields, childKey, childValue, path ? path + "." + childKey : childKey, false);
         parent.appendChild(section);
         return;
@@ -1573,6 +1608,12 @@
           continue;
         }
         const inner = collectFrom(pane.querySelector(".fields"));
+        if (pane.dataset.mergeInto) {
+          // 展示在独立模块、但属于原分组的字段（功能开关 → bot）
+          const target = result[pane.dataset.mergeInto] || (result[pane.dataset.mergeInto] = {});
+          Object.assign(target, inner);
+          continue;
+        }
         result[pane.dataset.key] = pane.dataset.scalar === "1"
           ? inner[pane.dataset.key] : inner;
       }
@@ -1606,6 +1647,36 @@
       showBanner(text, false);
     }
 
+    // “功能开关”模块：展示上独立成区，保存时经 mergeInto 写回 bot 分组，
+    // 配置文件结构保持不变（仍是 bot.group_chat_enabled）
+    function featureTogglesPane(bot) {
+      const pane = document.createElement("section");
+      pane.className = "pane";
+      pane.dataset.key = "features";
+      pane.dataset.mergeInto = "bot";
+      const heading = document.createElement("h2");
+      heading.textContent = SECTION_LABELS.features;
+      pane.appendChild(heading);
+      const hint = document.createElement("p");
+      hint.className = "pane-hint";
+      hint.textContent = SECTION_HINTS.features || "";
+      pane.appendChild(hint);
+      const fields = document.createElement("div");
+      fields.className = "fields";
+      pane.appendChild(fields);
+      const path = "bot.group_chat_enabled";
+      const row = rowFor(path, KEY_LABELS.group_chat_enabled || "启用群聊", hintFor(path, "group_chat_enabled"));
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      // 键缺失视为开启（与 ConfigLoader 默认一致），保存时会显式落盘
+      input.checked = bot.group_chat_enabled !== false;
+      input.dataset.kind = "bool";
+      input.dataset.path = path;
+      row.appendChild(input);
+      fields.appendChild(row);
+      return pane;
+    }
+
     async function loadConfig() {
       try {
         const response = await request("/api/config", { method: "GET" });
@@ -1621,7 +1692,7 @@
         const panes = $("panes");
         panes.textContent = "";
         let firstKey = "";
-        for (const [key, value] of Object.entries(document_)) {
+        for (const [key, value] of orderedEntries(document_, null)) {
           if (!firstKey) firstKey = key;
           nav.appendChild(navItem(key, label(key, true)));
           const pane = document.createElement("section");
@@ -1642,14 +1713,21 @@
           if (isPlainObject(value)) {
             // communication 是唯一的顶层特例：类型驱动的专用视图；
             // 结构无法识别（活动档案悬空、未知类型等）时退回通用渲染
+            // bot 分组只展示身份字段，群聊开关挪进紧随其后的“功能开关”模块
+            const skipKeys = key === "bot" ? new Set(["group_chat_enabled"]) : null;
             if (!(key === "communication" && buildCommunicationPane(pane, value)))
-              for (const [childKey, childValue] of Object.entries(value))
-                renderValue(fields, childKey, childValue, key + "." + childKey, false);
+              for (const [childKey, childValue] of orderedEntries(value, key))
+                if (!skipKeys || !skipKeys.has(childKey))
+                  renderValue(fields, childKey, childValue, key + "." + childKey, false);
           } else {
             pane.dataset.scalar = "1";
             renderValue(fields, key, value, key, false);
           }
           panes.appendChild(pane);
+          if (key === "bot" && isPlainObject(value)) {
+            nav.appendChild(navItem("features", SECTION_LABELS.features));
+            panes.appendChild(featureTogglesPane(value));
+          }
         }
         const sep = document.createElement("div");
         sep.className = "nav-sep";
