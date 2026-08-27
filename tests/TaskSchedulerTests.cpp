@@ -147,6 +147,11 @@ TEST(KeyedTaskSchedulerTest, CancelsQueuedTasksDuringShutdown)
     }
 
     auto shutdown = std::async(std::launch::async, [&]() { scheduler.shutdown(); });
+    // 先等 stopping 置位且队列被清空（submit 返回 Stopping 可观测），再放行阻塞任务；
+    // 否则 worker 可能在 shutdown 清队前取走下一个排队任务，形成时序竞态
+    ASSERT_TRUE(waitUntil([&]() {
+        return scheduler.submit(9, []() {}) == TaskSubmitResult::Stopping;
+    }));
     {
         std::lock_guard<std::mutex> lock(barrierMutex);
         release = true;
