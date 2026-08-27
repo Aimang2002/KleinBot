@@ -135,8 +135,8 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.memory.model, candidate.memory.model, "memory.model", rebuild);
     addIfChanged(diff, current.memory.batchTurns, candidate.memory.batchTurns,
                  "memory.batch_turns", rebuild);
-    addIfChanged(diff, current.memory.idleSeconds, candidate.memory.idleSeconds,
-                 "memory.idle_seconds", rebuild);
+    addIfChanged(diff, current.memory.idleMinutes, candidate.memory.idleMinutes,
+                 "memory.idle_minutes", rebuild);
     addIfChanged(diff, current.memory.recallLimit, candidate.memory.recallLimit,
                  "memory.recall_limit", rebuild);
 

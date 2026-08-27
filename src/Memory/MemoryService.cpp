@@ -62,7 +62,7 @@ MemoryService::MemoryService(const std::string &dbPath, ConversationStore &conve
     enabled = config.enabled && store.isOpen();
     batchTurns = config.batchTurns;
     recallLimit = config.recallLimit;
-    idleDelay = std::chrono::seconds(config.idleSeconds);
+    idleDelay = std::chrono::minutes(config.idleMinutes);
     if (enabled)
     {
         worker = std::thread(&MemoryService::workerLoop, this);

@@ -108,6 +108,22 @@ TEST(ConfigLoaderTest, QueueCapacityAndIdleTimeoutStayInternal)
               MessageExecutionOptions::kWorkerIdleSeconds);
 }
 
+TEST(ConfigLoaderTest, LegacyMemoryIdleSecondsKeyIsIgnoredAsUnknownField)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["memory"] = {{"enabled", true}, {"batch_turns", 5}, {"idle_seconds", 20}};
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    // idle_seconds 已更名 idle_minutes（单位改为分钟）：旧键按未知字段忽略
+    ASSERT_TRUE(result.canStart());
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "memory.idle_seconds"));
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_EQ(result.config->memory.idleMinutes, 1U);
+    EXPECT_EQ(result.config->memory.batchTurns, 5U);
+}
+
 TEST(ConfigLoaderTest, RejectsMissingActiveTransportButIgnoresUnknownFields)
 {
     nlohmann::json document = nlohmann::json::parse(validConfig);

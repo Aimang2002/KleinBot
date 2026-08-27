@@ -103,7 +103,7 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.memory.enabled,
         schema.memory.model,
         schema.memory.batchTurns,
-        schema.memory.idleSeconds,
+        schema.memory.idleMinutes,
         schema.memory.recallLimit};
     result.webSearch = {
         schema.webSearch.enabled,

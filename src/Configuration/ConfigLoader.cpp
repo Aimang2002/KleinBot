@@ -510,11 +510,11 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     const json *memory = decoder.object(document, "memory", "memory");
     if (memory != nullptr)
     {
-        decoder.unknownFields(*memory, {"enabled", "model", "batch_turns", "idle_seconds", "recall_limit"}, "memory");
+        decoder.unknownFields(*memory, {"enabled", "model", "batch_turns", "idle_minutes", "recall_limit"}, "memory");
         config.memory.enabled = decoder.boolean(*memory, "enabled", "memory.enabled", true);
         config.memory.model = decoder.string(*memory, "model", "memory.model", config.chat.defaultModel);
         config.memory.batchTurns = static_cast<std::size_t>(decoder.integer(*memory, "batch_turns", "memory.batch_turns", 3, 1, 1000));
-        config.memory.idleSeconds = static_cast<std::size_t>(decoder.integer(*memory, "idle_seconds", "memory.idle_seconds", 20, 1, 86400));
+        config.memory.idleMinutes = static_cast<std::size_t>(decoder.integer(*memory, "idle_minutes", "memory.idle_minutes", 1, 1, 1440));
         config.memory.recallLimit = static_cast<std::size_t>(decoder.integer(*memory, "recall_limit", "memory.recall_limit", 8, 1, 1000));
     }
     else

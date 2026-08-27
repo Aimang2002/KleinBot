@@ -62,7 +62,7 @@ struct MemorySchema
     bool enabled = true;
     std::string model;
     std::size_t batchTurns = 3;
-    std::size_t idleSeconds = 20;
+    std::size_t idleMinutes = 1;
     std::size_t recallLimit = 8;
 };
 

@@ -370,7 +370,7 @@ TEST(MemoryServiceRecallTest, MixesLongTermMemoryWithIndependentRawHistory)
     MemoryOptions options;
     options.enabled = true;
     options.model = "unused";
-    options.idleSeconds = 3600;
+    options.idleMinutes = 60;
     MemoryService service(databasePath, conversations, dock, models, options);
     RecallConversationTool tool(service);
     const auto schema = nlohmann::json::parse(tool.parametersSchema());
@@ -414,7 +414,7 @@ TEST(MemoryServiceRecallTest, AutomaticallyRecallsFactAndExcludesCurrentMessage)
     MemoryOptions options;
     options.enabled = true;
     options.model = "unused";
-    options.idleSeconds = 3600;
+    options.idleMinutes = 60;
     MemoryService service(databasePath, conversations, dock, models, options);
 
     const std::string result = service.recallForMessage(
