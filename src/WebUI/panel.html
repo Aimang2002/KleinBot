@@ -911,7 +911,7 @@
 
     const SECTION_LABELS = {
       bot: "机器人身份", chat: "聊天参数", models: "模型端点", voice: "语音",
-      features: "功能开关", memory: "长期记忆", web_search: "联网搜索", web_fetch: "网页抓取",
+      memory: "长期记忆", web_search: "联网搜索", web_fetch: "网页抓取",
       storage: "存储路径", network: "网络代理",
       communication: "OneBot 通信", webui: "Web 配置面板"
     };
@@ -927,7 +927,7 @@
       model: "模型", endpoint: "端点", api_key: "API Key", api_standard: "API 标准",
       host: "主机", port: "端口", bind: "绑定地址", path: "路径", access_token: "访问令牌",
       reference_audio: "参考音频", reference_text: "参考文本",
-      accessibility_chat: "无障碍聊天", batch_turns: "批处理轮数", idle_seconds: "空闲触发（秒）",
+      batch_turns: "批处理轮数", idle_seconds: "空闲触发（秒）",
       recall_limit: "召回上限", provider: "搜索 Provider", search_depth: "搜索深度",
       max_results: "最大结果数", max_content_chars: "正文最大字符数",
       max_response_bytes: "响应最大字节数", connect_timeout_ms: "连接超时（ms）",
@@ -946,7 +946,6 @@
       chat: "对话采样参数与消息处理：默认模型、温度、队列容量与工作线程。",
       models: "模型注册表路径，以及画图、视觉、Stable Diffusion 的专用端点。",
       voice: "GPT-SoVITS 语音合成配置；字段不全时语音功能会自动关闭。",
-      features: "可选的业务功能开关。",
       memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
       web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
       web_fetch: "网页抓取工具，无需第三方 Key，结果按 URL 缓存。",
@@ -1007,7 +1006,6 @@
       "voice.port": "GPT-SoVITS 服务端口。",
       "voice.reference_audio": "参考音频文件路径（音色克隆用）。",
       "voice.reference_text": "参考音频对应的文本内容。",
-      "features.accessibility_chat": "无障碍聊天模式（保存即生效）。",
       "memory.enabled": "长期记忆功能总开关。",
       "memory.model": "提取记忆所用的模型名，留空时跟随默认模型。",
       "memory.batch_turns": "每积累多少轮对话提取一次记忆。",

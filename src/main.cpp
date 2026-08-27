@@ -318,12 +318,11 @@ int main(int argc, char **argv)
 	std::unique_ptr<WebFetchAction> webFetchAction;
 	ToolRegistry tools;
 	bool globalVoice = settings.voice.enabled;
-	bool accessibilityChat = startupSnapshot->schema->accessibilityChat;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
 		{ return userSession.getModelName(userId); });
 	VoiceModeAction voiceModeAction(userSession, globalVoice);
-	AdminControlAction adminControlAction(adminComputerStatus, accessibilityChat,
+	AdminControlAction adminControlAction(adminComputerStatus,
 		globalVoice, [&configStore]()
 		{
 			ConfigReloadResult result = configStore.reload();
@@ -409,7 +408,7 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
-		globalVoice, accessibilityChat);
+		globalVoice);
 	KeyedTaskScheduler messageWorkers(
 		settings.messageExecution,
 		[](std::exception_ptr error)

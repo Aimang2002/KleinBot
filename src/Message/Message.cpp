@@ -14,12 +14,11 @@ std::mt19937 mt_rand(1000);
 Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                  MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                  CommandRegistry &registry, Voice &voice, MessageOptions options,
-                 ModelEndpointOptions visionModel, bool &globalVoice,
-                 bool &accessibilityChat)
+                 ModelEndpointOptions visionModel, bool &globalVoice)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry), voice(voice),
       options(std::move(options)), visionModel(std::move(visionModel)),
-      global_Voice(globalVoice), accessibility_chat(accessibilityChat)
+      global_Voice(globalVoice)
 {
 }
 
@@ -81,7 +80,8 @@ void Message::handleMessage(const InboundMessage &current_data)
 			}
 		}
 
-		const bool useContext = this->accessibility_chat || current_data.user_id == options.bot.managerId;
+		// 上下文模式仅管理员：普通用户无状态单轮，不写会话也不进长期记忆
+		const bool useContext = current_data.user_id == options.bot.managerId;
 		ChatReply chatReply = this->chatService.reply(
 			current_data.user_id, conversationText, useContext, std::move(currentImage));
 		if (!inboundAssetId.empty())

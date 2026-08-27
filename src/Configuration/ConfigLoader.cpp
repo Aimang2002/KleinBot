@@ -426,7 +426,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
 
     Decoder decoder(result.diagnostics);
     decoder.unknownFields(document,
-                          {"schema_version", "bot", "chat", "models", "voice", "features",
+                          {"schema_version", "bot", "chat", "models", "voice",
                            "memory", "web_search", "web_fetch", "storage",
                            "network", "communication", "webui"},
                           "$" );
@@ -509,13 +509,8 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         }
     }
 
-    const json *features = decoder.object(document, "features", "features");
-    if (features != nullptr)
-    {
-        decoder.unknownFields(*features, {"accessibility_chat"}, "features");
-        config.accessibilityChat = decoder.boolean(
-            *features, "accessibility_chat", "features.accessibility_chat", false);
-    }
+    // features 段已废弃（accessibility_chat 开关移除，上下文模式仅管理员）：
+    // 残留内容落入顶层 unknownFields 检查，仅提示后忽略
 
     const json *memory = decoder.object(document, "memory", "memory");
     if (memory != nullptr)

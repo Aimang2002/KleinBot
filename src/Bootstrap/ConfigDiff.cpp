@@ -135,9 +135,6 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.voice.referenceText, candidate.voice.referenceText,
                  "voice.reference_text", rebuild);
 
-    addIfChanged(diff, current.accessibilityChat, candidate.accessibilityChat,
-                 "features.accessibility_chat", ConfigChangeImpact::Dynamic);
-
     addIfChanged(diff, current.memory.enabled, candidate.memory.enabled, "memory.enabled", rebuild);
     addIfChanged(diff, current.memory.model, candidate.memory.model, "memory.model", rebuild);
     addIfChanged(diff, current.memory.batchTurns, candidate.memory.batchTurns,

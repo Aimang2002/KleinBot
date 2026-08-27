@@ -12,11 +12,7 @@ CommandResult AdminCommand::execute(const CommandContext &ctx)
 {
     std::string cmd = utils::trim(ctx.data.plain_text);
     nlohmann::json arguments;
-    if (cmd == "#开启无障碍聊天")
-        arguments["action"] = "enable_accessibility_chat";
-    else if (cmd == "#关闭无障碍聊天")
-        arguments["action"] = "disable_accessibility_chat";
-    else if (cmd == "#刷新配置文件")
+    if (cmd == "#刷新配置文件")
         arguments["action"] = "refresh_config";
     else if (cmd == "#激活语音")
         arguments["action"] = "activate_global_voice";

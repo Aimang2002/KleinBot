@@ -45,9 +45,6 @@
         "reference_audio": "",
         "reference_text": ""
     },
-    "features": {
-        "accessibility_chat": false
-    },
     "memory": {
         "enabled": true,
         "model": "your-chat-model",

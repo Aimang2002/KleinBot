@@ -70,7 +70,7 @@ TEST(ConfigDiffTest, ClassifiesDynamicRebuildAndRestartChanges)
 {
     SchemaConfig current;
     SchemaConfig candidate = current;
-    candidate.accessibilityChat = true;
+    candidate.bot.groupChatEnabled = false;
     candidate.voice.host = "http://127.0.0.1";
     candidate.chat.workerThreads = 8;
 
@@ -80,7 +80,7 @@ TEST(ConfigDiffTest, ClassifiesDynamicRebuildAndRestartChanges)
     EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 1U);
     EXPECT_EQ(diff.count(ConfigChangeImpact::Rebuild), 1U);
     EXPECT_EQ(diff.count(ConfigChangeImpact::Restart), 1U);
-    EXPECT_TRUE(containsChange(diff, "features.accessibility_chat",
+    EXPECT_TRUE(containsChange(diff, "bot.group_chat_enabled",
                                ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(diff, "voice.host", ConfigChangeImpact::Rebuild));
     EXPECT_TRUE(containsChange(diff, "chat.worker_threads",
@@ -95,7 +95,7 @@ TEST(ConfigSnapshotStoreTest, PublishesValidatedCandidateWithoutApplyingRuntimeO
 
     TemporaryConfigFile file;
     nlohmann::json candidate = nlohmann::json::parse(validConfig);
-    candidate["features"] = {{"accessibility_chat", true}};
+    candidate["bot"]["group_chat_enabled"] = false;
     candidate["storage"] = {{"conversation_database", "next.db"}};
     file.write(candidate.dump());
 
@@ -104,11 +104,11 @@ TEST(ConfigSnapshotStoreTest, PublishesValidatedCandidateWithoutApplyingRuntimeO
     const ConfigReloadResult reloaded = store.reload();
 
     ASSERT_TRUE(reloaded.success);
-    EXPECT_TRUE(reloaded.snapshot->schema->accessibilityChat);
+    EXPECT_FALSE(reloaded.snapshot->schema->bot.groupChatEnabled);
     EXPECT_EQ(reloaded.snapshot->runtime.storage.conversationDatabase, "next.db");
-    EXPECT_FALSE(startup->schema->accessibilityChat);
+    EXPECT_TRUE(startup->schema->bot.groupChatEnabled);
     EXPECT_NE(startup, reloaded.snapshot);
-    EXPECT_TRUE(containsChange(reloaded.diff, "features.accessibility_chat",
+    EXPECT_TRUE(containsChange(reloaded.diff, "bot.group_chat_enabled",
                                ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(reloaded.diff, "storage.conversation_database",
                                ConfigChangeImpact::Restart));

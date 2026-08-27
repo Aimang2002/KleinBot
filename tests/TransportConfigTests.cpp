@@ -61,7 +61,6 @@ TEST(ConfigLoaderTest, UsesSafeDefaultsForInvalidOptionalFields)
 {
     nlohmann::json document = nlohmann::json::parse(validConfig);
     document["chat"]["worker_threads"] = "many";
-    document["features"] = {{"accessibility_chat", "yes"}};
 
     ConfigLoader loader;
     const ConfigLoadResult result = loader.loadDocument(document);
@@ -69,9 +68,7 @@ TEST(ConfigLoaderTest, UsesSafeDefaultsForInvalidOptionalFields)
     EXPECT_TRUE(result.canStart());
     ASSERT_NE(result.config, nullptr);
     EXPECT_FALSE(result.config->chat.workerThreads.has_value());
-    EXPECT_FALSE(result.config->accessibilityChat);
     EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "chat.worker_threads"));
-    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "features.accessibility_chat"));
 }
 
 TEST(ConfigLoaderTest, UsesExplicitWorkerThreadCountAsFixedPool)

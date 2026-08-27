@@ -8,18 +8,18 @@
 class AdminControlAction : public Action
 {
 public:
-    AdminControlAction(ComputerStatus &computerStatus, bool &accessibilityChat,
+    AdminControlAction(ComputerStatus &computerStatus,
                        bool &globalVoice, std::function<std::string()> refresh)
-        : computerStatus(computerStatus), accessibilityChat(accessibilityChat),
+        : computerStatus(computerStatus),
           globalVoice(globalVoice), refresh(std::move(refresh)) {}
 
     const ActionDescriptor &descriptor() const override
     {
         static const ActionDescriptor value{
             "admin_control",
-            "执行管理员控制操作。仅管理员可以调用。支持无障碍聊天、配置刷新、全局语音和服务器网络查询。",
+            "执行管理员控制操作。仅管理员可以调用。支持配置刷新、全局语音和服务器网络查询。",
             {{"type", "object"},
-             {"properties", {{"action", {{"type", "string"}, {"enum", {"enable_accessibility_chat", "disable_accessibility_chat", "refresh_config", "activate_global_voice", "freeze_global_voice", "get_inet4", "get_inet6", "get_public_ip"}}}}}},
+             {"properties", {{"action", {{"type", "string"}, {"enum", {"refresh_config", "activate_global_voice", "freeze_global_voice", "get_inet4", "get_inet6", "get_public_ip"}}}}}},
              {"required", {"action"}}},
             true,
             true};
@@ -29,16 +29,6 @@ public:
     ActionResult execute(const nlohmann::json &arguments, const ActionContext &) override
     {
         const std::string action = arguments.value("action", "");
-        if (action == "enable_accessibility_chat")
-        {
-            accessibilityChat = true;
-            return {"无障碍聊天已开启！", {}, {}, true};
-        }
-        if (action == "disable_accessibility_chat")
-        {
-            accessibilityChat = false;
-            return {"无障碍聊天已关闭！", {}, {}, true};
-        }
         if (action == "refresh_config")
             return {refresh(), {}, {}, true};
         if (action == "activate_global_voice")
@@ -62,7 +52,6 @@ public:
 
 private:
     ComputerStatus &computerStatus;
-    bool &accessibilityChat;
     bool &globalVoice;
     std::function<std::string()> refresh;
 };

@@ -27,8 +27,7 @@ public:
 	explicit Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                      MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                      CommandRegistry &registry, Voice &voice, MessageOptions options,
-                     ModelEndpointOptions visionModel, bool &globalVoice,
-                     bool &accessibilityChat);
+                     ModelEndpointOptions visionModel, bool &globalVoice);
 
 	/**
 	 * @brief 消息过滤，对某些消息进行过滤
@@ -100,7 +99,6 @@ private:
 private:
 	std::string help_message;
 
-	bool &accessibility_chat;													 // true为开启
 	bool &global_Voice;															 // true为开启
 
 	Dock &dock;

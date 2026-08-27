@@ -143,7 +143,6 @@ struct SchemaConfig
     ChatSchema chat;
     ModelSchema models;
     VoiceSchema voice;
-    bool accessibilityChat = false;
     MemorySchema memory;
     WebSearchSchema webSearch;
     WebFetchSchema webFetch;
