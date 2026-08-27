@@ -63,6 +63,30 @@
       mask-image: radial-gradient(ellipse 100% 80% at 50% 0%, #000 20%, transparent 85%);
     }
 
+    /* 聚光层：与底层网格同图案，但用薄荷绿高亮线条；
+       由遮罩限定只在指针周围一小圈内显现，JS 写入 --mx/--my 驱动 */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(78, 217, 160, .14) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(78, 217, 160, .14) 1px, transparent 1px);
+      background-size: 36px 36px;
+      -webkit-mask-image: radial-gradient(circle 170px at var(--mx, 50%) var(--my, 40%),
+          rgba(0, 0, 0, .9), rgba(0, 0, 0, .45) 55%, transparent);
+      mask-image: radial-gradient(circle 170px at var(--mx, 50%) var(--my, 40%),
+          rgba(0, 0, 0, .9), rgba(0, 0, 0, .45) 55%, transparent);
+      opacity: 0;
+      transition: opacity .35s ease;
+    }
+
+    body.grid-live::after {
+      opacity: 1;
+    }
+
     ::selection {
       background: rgba(78, 217, 160, .3);
       color: #ecfff5;
@@ -1496,6 +1520,31 @@
     $("token").addEventListener("keydown", (event) => {
       if (event.key === "Enter") $("tokenOk").click();
     });
+
+    /* ---------- 背景网格聚光 ---------- */
+
+    // 指针坐标写入 CSS 变量，点亮 body::after 的局部网格；rAF 合帧避免高频样式更新
+    (() => {
+      let frame = 0;
+      window.addEventListener("pointermove", (event) => {
+        if (frame) return;
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          document.body.style.setProperty("--mx", event.clientX + "px");
+          document.body.style.setProperty("--my", event.clientY + "px");
+          document.body.classList.add("grid-live");
+        });
+      }, { passive: true });
+      document.documentElement.addEventListener("mouseleave", () => {
+        if (frame) { cancelAnimationFrame(frame); frame = 0; }
+        document.body.classList.remove("grid-live");
+      });
+      window.addEventListener("pointerup", (event) => {
+        // 触屏/笔抬起后指针不再存在，避免光斑滞留在最后触点
+        if (event.pointerType !== "mouse") document.body.classList.remove("grid-live");
+      });
+    })();
+
     loadConfig();
   </script>
 </body>
