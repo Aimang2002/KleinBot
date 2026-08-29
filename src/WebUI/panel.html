@@ -1320,7 +1320,6 @@
       temperature: "温度 temperature", top_p: "Top P", frequency_penalty: "频率惩罚",
       presence_penalty: "存在惩罚", max_message_tokens: "单条消息最大 token",
       worker_threads: "工作线程数", message_survival_seconds: "消息存活（秒）",
-      registry_path: "模型注册表路径",
       drawing: "画图模型", vision: "视觉模型", stable_diffusion: "Stable Diffusion",
       model: "模型", endpoint: "端点", api_key: "API Key", api_standard: "API 标准",
       host: "主机", port: "端口", bind: "绑定地址", path: "路径", access_token: "访问令牌",
@@ -1352,7 +1351,7 @@
       bot: "机器人的身份信息：QQ 号、管理员与昵称。",
       features: "机器人对外行为的开关，保存时写回 bot 分组。",
       chat: "对话采样参数与消息处理：默认模型、温度与工作线程。",
-      models: "模型注册表路径，以及画图、视觉、Stable Diffusion 的专用端点。",
+      models: "画图、视觉、Stable Diffusion 的专用端点；聊天模型在“模型供应商”页管理。",
       voice: "GPT-SoVITS 语音合成配置；字段不全时语音功能会自动关闭。",
       memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
       web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
@@ -1395,7 +1394,6 @@
       "chat.max_message_tokens": "单条消息的 token 上限，超出会提示用户精简。",
       "chat.worker_threads": "消息处理线程数；留空 = 按 CPU 核心数自动（需重启）。",
       "chat.message_survival_seconds": "消息在处理队列中的最长存活秒数。",
-      "models.registry_path": "模型注册表 JSON 的路径（相对工作目录，改动需重启）；可在“模型供应商”页编辑内容。",
       "models.drawing.model": "画图模型名（配合 #画图 命令与画图工具）。",
       "models.drawing.endpoint": "画图模型的 API 端点地址。",
       "models.drawing.api_key": "画图模型的 API Key；留空表示保持原值（掩码显示）。",
@@ -1455,7 +1453,7 @@
       bot: ["id", "manager_id", "name"],
       chat: ["default_model", "temperature", "top_p", "frequency_penalty",
         "presence_penalty", "max_message_tokens", "worker_threads", "message_survival_seconds"],
-      models: ["registry_path", "drawing", "vision", "stable_diffusion"],
+      models: ["drawing", "vision", "stable_diffusion"],
       drawing: ["model", "endpoint", "api_key", "api_standard"],
       vision: ["model", "endpoint", "api_key", "api_standard"],
       stable_diffusion: ["endpoint", "model"],
@@ -1469,15 +1467,22 @@
       webui: ["enabled", "bind", "port", "access_token"]
     };
 
+    // 已废弃字段：不渲染、保存时随收集自然消失（旧配置残留值不再显示为可编辑项）
+    const HIDDEN_KEYS = {
+      models: ["registry_path"]
+    };
+
     function orderedEntries(object, sectionKey) {
       const order = sectionKey === null ? SECTION_ORDER : SECTION_KEY_ORDER[sectionKey];
+      const hidden = HIDDEN_KEYS[sectionKey] || [];
       if (!order)
-        return Object.entries(object);
+        return Object.entries(object).filter(([key]) => hidden.indexOf(key) < 0);
       const known = [];
       for (const key of order)
-        if (Object.prototype.hasOwnProperty.call(object, key))
+        if (hidden.indexOf(key) < 0 && Object.prototype.hasOwnProperty.call(object, key))
           known.push([key, object[key]]);
-      const rest = Object.entries(object).filter(([key]) => order.indexOf(key) < 0);
+      const rest = Object.entries(object)
+        .filter(([key]) => order.indexOf(key) < 0 && hidden.indexOf(key) < 0);
       return known.concat(rest);
     }
 

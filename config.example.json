@@ -20,7 +20,6 @@
         "group_action": "send_group_msg"
     },
     "models": {
-        "registry_path": "source/ModelsName.json",
         "drawing": {
             "model": "",
             "endpoint": "",

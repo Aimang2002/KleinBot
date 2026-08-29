@@ -474,8 +474,9 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     const json *models = decoder.object(document, "models", "models", true);
     if (models != nullptr)
     {
+        // registry_path 已废弃（路径钉死为 kModelRegistryPath）：保留在白名单里
+        // 让老配置静默加载，不弹“未知字段”警告
         decoder.unknownFields(*models, {"registry_path", "drawing", "vision", "stable_diffusion"}, "models");
-        config.models.registryPath = decoder.string(*models, "registry_path", "models.registry_path", {}, true);
         config.models.drawing = decodeModelEndpoint(decoder, *models, "drawing", "models.drawing");
         config.models.vision = decodeModelEndpoint(decoder, *models, "vision", "models.vision");
         const json *stable = decoder.object(*models, "stable_diffusion", "models.stable_diffusion");

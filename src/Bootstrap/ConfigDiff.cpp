@@ -111,8 +111,6 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.chat.messageSurvivalSeconds, candidate.chat.messageSurvivalSeconds,
                  "chat.message_survival_seconds", rebuild);
 
-    addIfChanged(diff, current.models.registryPath, candidate.models.registryPath,
-                 "models.registry_path", ConfigChangeImpact::Restart);
     compareModelEndpoint(diff, current.models.drawing, candidate.models.drawing, "models.drawing");
     compareModelEndpoint(diff, current.models.vision, candidate.models.vision, "models.vision");
     addIfChanged(diff, current.models.stableDiffusionEndpoint,

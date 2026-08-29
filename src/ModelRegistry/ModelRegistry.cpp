@@ -1,6 +1,7 @@
 #include "ModelRegistry.h"
 #include "../JsonParse/JsonParse.h"
 #include "../Log/Log.h"
+#include <filesystem>
 #include <fstream>
 
 const ChatModel *ModelRegistry::find(const std::string &modelName) const
@@ -27,7 +28,12 @@ void ModelRegistry::reload()
     std::ifstream ifsJson(registryPath);
     if (!ifsJson.is_open())
     {
-        LOG_ERROR("模型配置文件打开失败！请检查该文件是否存在。");
+        // 相对路径随进程工作目录解析，打不开时给出绝对路径方便定位 cwd 漂移
+        std::error_code error;
+        const std::string absolute =
+            std::filesystem::absolute(registryPath, error).string();
+        LOG_ERROR("模型配置文件打开失败：" + absolute +
+                  "（相对工作目录 " + registryPath + "，请检查文件是否存在或工作目录是否正确）");
         return;
     }
     std::string json((std::istreambuf_iterator<char>(ifsJson)), std::istreambuf_iterator<char>());

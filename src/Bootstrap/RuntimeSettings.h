@@ -18,7 +18,6 @@
 
 struct ModelRuntimeSettings
 {
-    std::string registryPath;
     ModelEndpointOptions drawing;
     ModelEndpointOptions vision;
     std::string stableDiffusionEndpoint;

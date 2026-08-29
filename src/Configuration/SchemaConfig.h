@@ -39,9 +39,12 @@ struct ModelEndpointSchema
     }
 };
 
+// 模型注册表路径钉死为编译期常量（相对工作目录）：可配置没有真实用例，
+// 反而多一种“路径写错 → 注册表悄悄为空”的故障模式；旧 config 里的 registry_path 静默忽略
+inline constexpr const char *kModelRegistryPath = "source/Model/ModelsName.json";
+
 struct ModelSchema
 {
-    std::string registryPath;
     ModelEndpointSchema drawing;
     ModelEndpointSchema vision;
     std::string stableDiffusionEndpoint;

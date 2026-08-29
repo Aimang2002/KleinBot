@@ -229,7 +229,7 @@ std::string resolveProviderApiKey(const json &body, ConfigSnapshotStore &store)
                            : -1;
     if (index < 0)
         return {};
-    const std::string registryPath = store.current()->schema->models.registryPath;
+    const std::string registryPath = kModelRegistryPath;
     json registry;
     std::vector<ConfigDiagnostic> diagnostics;
     if (!readJsonFile(registryPath, registry, diagnostics) ||
@@ -337,7 +337,7 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
     });
 
     server->Get("/api/models", [&store](const httplib::Request &, httplib::Response &response) {
-        const std::string registryPath = store.current()->schema->models.registryPath;
+        const std::string registryPath = kModelRegistryPath;
         json document;
         std::vector<ConfigDiagnostic> diagnostics;
         if (!readJsonFile(registryPath, document, diagnostics))
@@ -376,7 +376,7 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
             return;
         }
 
-        const std::string registryPath = store.current()->schema->models.registryPath;
+        const std::string registryPath = kModelRegistryPath;
         json current = json::object();
         {
             std::vector<ConfigDiagnostic> diagnostics;

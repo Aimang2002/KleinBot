@@ -231,7 +231,7 @@ export KLEIN_WEBUI_TOKEN="自定一个强令牌"
 
 ## 模型接入
 
-模型在 `source/ModelsName.json`（路径由 `models.registry_path` 指定）中按 API 分组注册。同组内所有模型共享该组的 `api_key` 与 `api_endpoint`：
+模型在 `source/Model/ModelsName.json` 中按 API 分组注册（路径固定，不可配置）。同组内所有模型共享该组的 `api_key` 与 `api_endpoint`：
 
 ```json
 {
@@ -358,7 +358,7 @@ Klein 完整保存原始对话，并在后台从多轮对话中提取用户资�
 
 | 目录 | 作用 |
 | --- | --- |
-| `Model/` | 模型注册文件 `ModelsName.json`（实际路径由 `models.registry_path` 决定，见[模型接入](#模型接入)） |
+| `Model/` | 模型注册文件 `ModelsName.json`（路径固定，见[模型接入](#模型接入)） |
 | `soul.md` | 默认人格文本；未用 `#设置人格` 设置自定义人格的用户读取此文件，文件缺失时使用内置英文兜底 |
 | `image_assets/` | 聊天图片资产（按用户隔离，`#重置上下文` 时同步清理） |
 | `conversations.db` | 会话、记忆、提醒、图片资产元数据的 SQLite 数据库 |

@@ -88,7 +88,6 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.chat.maxMessageTokens,
         schema.chat.messageSurvivalSeconds};
     result.messageExecution = mapMessageExecution(schema.chat);
-    result.models.registryPath = schema.models.registryPath;
     result.models.drawing = mapModel(schema.models.drawing);
     result.models.vision = mapModel(schema.models.vision);
     result.models.stableDiffusionEndpoint = schema.models.stableDiffusionEndpoint;

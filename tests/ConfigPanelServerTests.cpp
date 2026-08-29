@@ -22,12 +22,13 @@
 namespace
 {
 // 反向 WS 的 access_token 用 from_env 形态，配合夹具里设置的环境变量，
-// 覆盖“掩码往返后 from_env 结构不被压扁”的关键路径；注册表路径用占位符替换为临时目录绝对路径
+// 覆盖“掩码往返后 from_env 结构不被压扁”的关键路径；注册表路径已钉死为
+// kModelRegistryPath（相对工作目录），夹具 chdir 进临时目录隔离
 const char *panelConfig = R"({
     "schema_version": 1,
     "bot": {"id": 10001, "manager_id": 10002, "name": "Klein"},
     "chat": {"default_model": "test-model"},
-    "models": {"registry_path": "@REGISTRY_PATH@"},
+    "models": {},
     "web_search": {
         "enabled": false,
         "api_key": {"literal": "sk-panel-plain-secret"}
@@ -62,19 +63,27 @@ protected:
     {
         setEnvironmentVariable("KLEIN_PANEL_TEST_TOKEN", "onebot-token");
         const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        originalCwd = std::filesystem::current_path();
         dir = std::filesystem::temp_directory_path() /
               ("kleinbot-panel-" + std::to_string(suffix));
-        std::filesystem::create_directories(dir);
+        std::filesystem::create_directories(dir / "source" / "Model");
         configPath = dir / "config.json";
-        registryPath = dir / "ModelsName.json";
+        registryPath = dir / "source" / "Model" / "ModelsName.json";
 
-        std::string content = panelConfig;
-        content.replace(content.find("@REGISTRY_PATH@"), strlen("@REGISTRY_PATH@"),
-                        registryPath.string());
-        writeFile(content);
+        writeFile(panelConfig);
+
+        // GET / 从工作目录现读 panel.html：夹具 chdir 后要在临时目录里备一份
+        std::error_code copyError;
+        std::filesystem::copy_file(originalCwd / "panel.html", dir / "panel.html",
+                                   std::filesystem::copy_options::overwrite_existing,
+                                   copyError);
+        ASSERT_FALSE(copyError) << "panel.html 未同步到测试工作目录";
+
+        // 注册表路径钉死且相对工作目录：整个用例在临时目录里运行
+        std::filesystem::current_path(dir);
 
         ConfigLoader loader;
-        const ConfigLoadResult initial = loader.loadText(content);
+        const ConfigLoadResult initial = loader.loadText(panelConfig);
         ASSERT_TRUE(initial.canStart());
         store = std::make_unique<ConfigSnapshotStore>(configPath.string(), initial.config);
 
@@ -94,6 +103,7 @@ protected:
             server->stop();
         if (serverThread != nullptr)
             serverThread->join();
+        std::filesystem::current_path(originalCwd);
         std::error_code error;
         std::filesystem::remove_all(dir, error);
     }
@@ -126,6 +136,7 @@ protected:
     }
 
     std::filesystem::path dir;
+    std::filesystem::path originalCwd;
     std::filesystem::path configPath;
     std::filesystem::path registryPath;
     std::unique_ptr<ConfigSnapshotStore> store;
@@ -261,7 +272,7 @@ TEST_F(PanelServerFixture, GetModelsReturnsSkeletonWhenFileMissing)
     ASSERT_EQ(result->status, 200);
 
     const nlohmann::json body = nlohmann::json::parse(result->body);
-    EXPECT_EQ(body["registry_path"], registryPath.string());
+    EXPECT_EQ(body["registry_path"], std::string(kModelRegistryPath));
     EXPECT_FALSE(body["exists"].get<bool>());
     EXPECT_TRUE(body["models"]["Models"].is_array());
     EXPECT_TRUE(body["models"]["Models"].empty());

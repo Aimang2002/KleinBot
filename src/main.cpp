@@ -297,7 +297,7 @@ int main(int argc, char **argv)
 	init(settings.schemaVersion);
 	const TransportConfig &transportConfig = settings.transport;
 	LOG_INFO("当前通信模式：" + transportModeName(transportConfig.mode));
-	ModelRegistry models(settings.models.registryPath);
+	ModelRegistry models(kModelRegistryPath);
 	const std::string &dbPath = settings.storage.conversationDatabase;
 	ConversationStore conversationStore(dbPath);
 	ImageAssetStore imageAssetStore(dbPath, settings.storage.imageAssets);
