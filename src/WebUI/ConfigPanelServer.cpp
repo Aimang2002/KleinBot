@@ -1,4 +1,5 @@
 #include "ConfigPanelServer.h"
+#include "ModelCatalog.h"
 #include "../Configuration/ConfigWriter.h"
 #include "../Log/Log.h"
 #include "../Network/BearerAuth.h"
@@ -86,6 +87,7 @@ std::vector<ConfigDiagnostic> validateModelRegistry(const json &document)
         }
 
         const json *names = provider.contains("ModelName") ? &provider["ModelName"] : nullptr;
+        std::set<std::string> providerNames;
         if (names == nullptr || !names->is_array() || names->empty())
         {
             diagnostics.push_back({ConfigSeverity::Error, ConfigErrorCategory::Missing,
@@ -107,6 +109,7 @@ std::vector<ConfigDiagnostic> validateModelRegistry(const json &document)
                                            base + ".ModelName",
                                            "模型名称重复：" + modelName});
                 seenNames.insert(modelName);
+                providerNames.insert(modelName);
             }
         }
 
@@ -130,6 +133,47 @@ std::vector<ConfigDiagnostic> validateModelRegistry(const json &document)
         {
             diagnostics.push_back({ConfigSeverity::Warning, ConfigErrorCategory::Security,
                                    base + ".api_key", "该供应商尚未配置 API Key，调用会失败"});
+        }
+
+        // Capabilities.vision 双形态：布尔（旧版整组开关）或字符串数组（按模型名单）；
+        // 名单出现 ModelName 之外的名称提示疑似拼写错误
+        const json *capabilities = nullptr;
+        if (provider.contains("Capabilities") && provider["Capabilities"].is_object())
+            capabilities = &provider["Capabilities"];
+        else if (provider.contains("capabilities") && provider["capabilities"].is_object())
+            capabilities = &provider["capabilities"];
+        if (capabilities != nullptr && capabilities->contains("vision"))
+        {
+            const json &vision = (*capabilities)["vision"];
+            if (vision.is_array())
+            {
+                std::set<std::string> listed;
+                for (const json &entry : vision)
+                {
+                    if (!entry.is_string() || entry.get<std::string>().empty())
+                    {
+                        diagnostics.push_back({ConfigSeverity::Error, ConfigErrorCategory::Type,
+                                               base + ".Capabilities.vision",
+                                               "vision 名单必须是非空字符串"});
+                        continue;
+                    }
+                    listed.insert(entry.get<std::string>());
+                }
+                for (const std::string &name : listed)
+                {
+                    if (providerNames.count(name) == 0)
+                        diagnostics.push_back({ConfigSeverity::Warning,
+                                               ConfigErrorCategory::Dependency,
+                                               base + ".Capabilities.vision",
+                                               "vision 名单中的模型不在 ModelName 中：" + name});
+                }
+            }
+            else if (!vision.is_boolean())
+            {
+                diagnostics.push_back({ConfigSeverity::Error, ConfigErrorCategory::Type,
+                                       base + ".Capabilities.vision",
+                                       "vision 必须是布尔或字符串数组"});
+            }
         }
     }
     return diagnostics;
@@ -168,6 +212,34 @@ bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::millisecon
     while (running.load() && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     return running.load();
+}
+
+// 供应商外呼接口共用的密钥解析：请求显式携带明文优先；
+// 掩码哨兵/缺省时按 index 回退注册表中已保存的密钥
+std::string resolveProviderApiKey(const json &body, ConfigSnapshotStore &store)
+{
+    std::string apiKey;
+    if (body.contains("api_key") && body["api_key"].is_string())
+        apiKey = body["api_key"].get<std::string>();
+    if (!apiKey.empty() && apiKey != kConfigMaskedSentinel)
+        return apiKey;
+
+    const long index = body.contains("index") && body["index"].is_number_integer()
+                           ? body["index"].get<long>()
+                           : -1;
+    if (index < 0)
+        return {};
+    const std::string registryPath = store.current()->schema->models.registryPath;
+    json registry;
+    std::vector<ConfigDiagnostic> diagnostics;
+    if (!readJsonFile(registryPath, registry, diagnostics) ||
+        !registry.contains("Models") || !registry["Models"].is_array() ||
+        index >= static_cast<long>(registry["Models"].size()))
+        return {};
+    const json &provider = registry["Models"][static_cast<std::size_t>(index)];
+    if (provider.contains("api_key") && provider["api_key"].is_string())
+        return provider["api_key"].get<std::string>();
+    return {};
 }
 }
 
@@ -317,6 +389,35 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
             }
         }
 
+        // 勾选模型会改动 ModelName，而注册表的密钥身份匹配只认数组字段相等，
+        // 会把掩码密钥错失回原条目；前端随请求带回每张卡片的原始下标，优先按位恢复。
+        // 不带 originIndexes 的旧页面仍走 restoreMaskedSecrets 的身份匹配兜底
+        if (candidate.is_object() && candidate.contains("originIndexes") &&
+            candidate["originIndexes"].is_array() && candidate.contains("Models") &&
+            candidate["Models"].is_array() &&
+            candidate["originIndexes"].size() == candidate["Models"].size())
+        {
+            const json &currentModels = current.value("Models", json::array());
+            for (std::size_t index = 0; index < candidate["Models"].size(); ++index)
+            {
+                const json &origin = candidate["originIndexes"][index];
+                json &model = candidate["Models"][index];
+                if (!origin.is_number_integer() || !model.is_object() ||
+                    !model.contains("api_key") || !model["api_key"].is_string() ||
+                    model["api_key"].get<std::string>() != kConfigMaskedSentinel)
+                    continue;
+                const long originIndex = origin.get<long>();
+                if (originIndex < 0 || originIndex >= static_cast<long>(currentModels.size()) ||
+                    !currentModels[static_cast<std::size_t>(originIndex)].is_object())
+                    continue;
+                const json &originModel =
+                    currentModels[static_cast<std::size_t>(originIndex)];
+                if (originModel.contains("api_key") && originModel["api_key"].is_string())
+                    model["api_key"] = originModel["api_key"];
+            }
+            candidate.erase("originIndexes");
+        }
+
         json merged = restoreMaskedSecrets(candidate, current);
         std::vector<ConfigDiagnostic> warnings;
         sanitizeSentinels(merged, warnings);
@@ -347,6 +448,146 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
         const json body = {{"restartRequired", true},
                            {"warnings", diagnosticsToArray(warnings)}};
         response.set_content(body.dump(), "application/json");
+    });
+
+    // 面板代为调用供应商的标准模型列表接口，浏览器直连会被 CORS 挡住；
+    // 密钥明文可由请求携带（未保存的新供应商），掩码/缺省时回退注册表中已存的密钥
+    server->Post("/api/models/available", [&store](const httplib::Request &request,
+                                                   httplib::Response &response) {
+        json body;
+        try
+        {
+            body = json::parse(request.body);
+        }
+        catch (const std::exception &error)
+        {
+            response.status = 400;
+            response.set_content(json({{"error", std::string("请求体不是有效 JSON：") + error.what()}})
+                                     .dump(),
+                                 "application/json");
+            return;
+        }
+        if (!body.is_object())
+        {
+            response.status = 400;
+            response.set_content(json({{"error", "请求体必须是对象"}}).dump(),
+                                 "application/json");
+            return;
+        }
+
+        const std::string endpoint = body.value("api_endpoint", std::string());
+        const std::string standard = body.value("APIStandard", std::string());
+        const auto reject = [&response](int status, const std::string &message) {
+            response.status = status;
+            response.set_content(json({{"error", message}}).dump(), "application/json");
+        };
+        if (endpoint.empty())
+        {
+            reject(422, "请先填写 API 端点");
+            return;
+        }
+        if (standard != "OpenAI" && standard != "Anthropic")
+        {
+            reject(422, "API 标准必须是 OpenAI 或 Anthropic");
+            return;
+        }
+
+        std::string apiKey = resolveProviderApiKey(body, store);
+        if (apiKey.empty())
+        {
+            reject(422, "该供应商尚未配置 API Key，无法拉取模型列表");
+            return;
+        }
+
+        const std::optional<std::string> modelsUrl = ModelCatalog::deriveModelsUrl(endpoint);
+        if (!modelsUrl)
+        {
+            reject(422, "无法推导模型列表地址：端点应以 /chat/completions 或 /messages 结尾");
+            return;
+        }
+
+        std::string error;
+        const std::optional<std::vector<std::string>> models =
+            ModelCatalog::fetch(*modelsUrl, apiKey, standard, 10000, error);
+        if (!models)
+        {
+            reject(502, error);
+            return;
+        }
+        response.set_content(json({{"models", *models}}).dump(), "application/json");
+    });
+
+    // 视觉能力探测：向指定模型发一条 1x1 图片 + 极短文字的多模态请求，
+    // 按响应把结论分类为 vision / no-vision / unknown（三态，失败不算“不支持”）。
+    // 恒返回 200 + result 字段，前端据此渲染，无需按 HTTP 状态区分探测结论
+    server->Post("/api/models/check-vision", [&store](const httplib::Request &request,
+                                                     httplib::Response &response) {
+        json body;
+        try
+        {
+            body = json::parse(request.body);
+        }
+        catch (const std::exception &error)
+        {
+            response.status = 400;
+            response.set_content(json({{"error", std::string("请求体不是有效 JSON：") + error.what()}})
+                                     .dump(),
+                                 "application/json");
+            return;
+        }
+        if (!body.is_object())
+        {
+            response.status = 400;
+            response.set_content(json({{"error", "请求体必须是对象"}}).dump(),
+                                 "application/json");
+            return;
+        }
+
+        const std::string endpoint = body.value("api_endpoint", std::string());
+        const std::string standard = body.value("APIStandard", std::string());
+        const std::string model = body.value("model", std::string());
+        const auto reject = [&response](int status, const std::string &message) {
+            response.status = status;
+            response.set_content(json({{"error", message}}).dump(), "application/json");
+        };
+        if (model.empty())
+        {
+            reject(422, "缺少要探测的模型名称");
+            return;
+        }
+        if (endpoint.empty())
+        {
+            reject(422, "请先填写 API 端点");
+            return;
+        }
+        if (standard != "OpenAI" && standard != "Anthropic")
+        {
+            reject(422, "API 标准必须是 OpenAI 或 Anthropic");
+            return;
+        }
+
+        const std::string apiKey = resolveProviderApiKey(body, store);
+        if (apiKey.empty())
+        {
+            reject(422, "该供应商尚未配置 API Key，无法探测");
+            return;
+        }
+
+        std::string error;
+        const std::optional<ModelCatalog::VisionProbe> outcome =
+            ModelCatalog::probeVision(endpoint, apiKey, standard, model, 15000, error);
+        if (!outcome)
+        {
+            reject(502, error);
+            return;
+        }
+        const char *result = *outcome == ModelCatalog::VisionProbe::Vision    ? "vision"
+                             : *outcome == ModelCatalog::VisionProbe::NoVision ? "no-vision"
+                                                                               : "unknown";
+        json responseBody = {{"result", result}};
+        if (!error.empty())
+            responseBody["detail"] = error;
+        response.set_content(responseBody.dump(), "application/json");
     });
 
     return server;

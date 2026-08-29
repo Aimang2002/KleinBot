@@ -378,3 +378,289 @@ TEST_F(PanelServerFixture, PostModelsRejectsMissingModelsArray)
     ASSERT_TRUE(posted != nullptr);
     EXPECT_EQ(posted->status, 422);
 }
+
+// 勾选模型改动 ModelName 后，身份匹配（只认数组字段相等）会失配；
+// 前端带回的 originIndexes 必须把掩码密钥按位恢复回去
+TEST_F(PanelServerFixture, PostModelsRestoresMaskedKeyByOriginIndex)
+{
+    httplib::Client client("127.0.0.1", port);
+    const nlohmann::json initial = nlohmann::json::parse(R"({
+        "Models": [
+            {"ModelName": ["model-a"], "api_endpoint": "https://a.example.com",
+             "api_key": "sk-a", "APIStandard": "OpenAI", "describe": "A"}
+        ]
+    })");
+    ASSERT_TRUE(client.Post("/api/models", authHeaders(), initial.dump(),
+                            "application/json") != nullptr);
+
+    const auto fetched = client.Get("/api/models", authHeaders());
+    ASSERT_TRUE(fetched != nullptr);
+    ASSERT_EQ(fetched->status, 200);
+    nlohmann::json candidate = nlohmann::json::parse(fetched->body)["models"];
+    candidate["Models"][0]["ModelName"] = nlohmann::json{"model-a2", "model-a3"};
+    candidate["Models"][0]["describe"] = "A(改名)";
+    // 与前端 collectModels 一致：带回各卡片的注册表原始下标
+    candidate["originIndexes"] = nlohmann::json{0};
+    const auto posted = client.Post("/api/models", authHeaders(),
+                                    candidate.dump(), "application/json");
+    ASSERT_TRUE(posted != nullptr);
+    ASSERT_EQ(posted->status, 200);
+
+    const nlohmann::json body = nlohmann::json::parse(posted->body);
+    EXPECT_TRUE(body["warnings"].empty());
+
+    const nlohmann::json written = nlohmann::json::parse(readRegistry());
+    EXPECT_EQ(written["Models"][0]["api_key"], "sk-a");
+    EXPECT_EQ(written["Models"][0]["ModelName"],
+              (nlohmann::json{"model-a2", "model-a3"}));
+    EXPECT_EQ(written["Models"][0]["describe"], "A(改名)");
+    // originIndexes 是请求辅助字段，不能落盘
+    EXPECT_EQ(written["Models"][0].contains("originIndexes"), false);
+    EXPECT_EQ(written.contains("originIndexes"), false);
+}
+
+// 本地 mock 供应商端点：验证面板代拉模型列表/视觉探测的全链路（含 curl 外呼与密钥回退）
+class MockProvider
+{
+public:
+    MockProvider()
+    {
+        server.Get("/v1/models", [](const httplib::Request &, httplib::Response &response) {
+            if (requestedBearer != "sk-good-key")
+            {
+                response.status = 401;
+                return;
+            }
+            response.set_content(R"({"data": [{"id": "mock-a"}, {"id": "mock-b"}]})",
+                                 "application/json");
+        });
+        // 视觉探测：按请求体里的模型名返回不同结论
+        server.Post("/v1/chat/completions",
+                    [](const httplib::Request &request, httplib::Response &response) {
+            if (request.body.find("vision-ok") != std::string::npos)
+            {
+                response.set_content(
+                    R"({"choices":[{"message":{"role":"assistant","content":"OK"}}]})",
+                    "application/json");
+                return;
+            }
+            if (request.body.find("vision-no") != std::string::npos)
+            {
+                response.status = 400;
+                response.set_content(
+                    R"({"error":{"message":"Image input is not supported for this model"}})",
+                    "application/json");
+                return;
+            }
+            if (request.body.find("vision-unknown") != std::string::npos)
+            {
+                response.status = 400;
+                response.set_content(R"({"error":{"message":"model not found"}})",
+                                     "application/json");
+                return;
+            }
+            response.status = 401;
+        });
+        server.set_pre_routing_handler([](const httplib::Request &request, httplib::Response &) {
+            if (request.has_header("Authorization"))
+                requestedBearer = request.get_header_value("Authorization").substr(7);
+            else
+                requestedBearer.clear();
+            return httplib::Server::HandlerResponse::Unhandled;
+        });
+        port = server.bind_to_any_port("127.0.0.1");
+        thread = std::thread([this]() { server.listen_after_bind(); });
+    }
+
+    ~MockProvider()
+    {
+        server.stop();
+        thread.join();
+    }
+
+    std::string chatEndpoint() const
+    {
+        return "http://127.0.0.1:" + std::to_string(port) + "/v1/chat/completions";
+    }
+
+    httplib::Server server;
+    std::thread thread;
+    int port = 0;
+    inline static std::string requestedBearer;
+};
+
+TEST_F(PanelServerFixture, AvailableModelsRejectsInvalidRequestBeforeOutboundCall)
+{
+    httplib::Client client("127.0.0.1", port);
+
+    const auto missingEndpoint = client.Post("/api/models/available", authHeaders(),
+                                             R"({"APIStandard": "OpenAI"})",
+                                             "application/json");
+    ASSERT_TRUE(missingEndpoint != nullptr);
+    EXPECT_EQ(missingEndpoint->status, 422);
+
+    const auto badStandard = client.Post("/api/models/available", authHeaders(),
+                                         R"({"api_endpoint": "https://x.example.com/v1/chat/completions",
+                                            "APIStandard": "Gemini"})",
+                                         "application/json");
+    ASSERT_TRUE(badStandard != nullptr);
+    EXPECT_EQ(badStandard->status, 422);
+
+    // 无法推导列表地址
+    const auto underivable = client.Post("/api/models/available", authHeaders(),
+                                         R"({"api_endpoint": "https://x.example.com/v1/foo",
+                                            "APIStandard": "OpenAI", "api_key": "sk-k"})",
+                                         "application/json");
+    ASSERT_TRUE(underivable != nullptr);
+    EXPECT_EQ(underivable->status, 422);
+
+    // 已存注册表也没有密钥可用
+    const auto missingKey = client.Post("/api/models/available", authHeaders(),
+                                        R"({"api_endpoint": "https://x.example.com/v1/messages",
+                                           "APIStandard": "Anthropic"})",
+                                        "application/json");
+    ASSERT_TRUE(missingKey != nullptr);
+    EXPECT_EQ(missingKey->status, 422);
+    EXPECT_NE(missingKey->body.find("API Key"), std::string::npos);
+}
+
+TEST_F(PanelServerFixture, AvailableModelsFetchesFromEndpointWithStoredKeyFallback)
+{
+    // 预存一个供应商：请求不带密钥时从注册表回退取用
+    {
+        std::ofstream output(registryPath);
+        output << R"({
+            "Models": [
+                {"ModelName": ["mock-a"], "api_key": "sk-good-key", "APIStandard": "OpenAI",
+                 "describe": "Mock 供应商"}
+            ]
+        })";
+    }
+
+    MockProvider provider;
+    const nlohmann::json payload = {
+        {"api_endpoint", provider.chatEndpoint()},
+        {"APIStandard", "OpenAI"},
+        {"index", 0},
+    };
+    httplib::Client client("127.0.0.1", port);
+    const auto result = client.Post("/api/models/available", authHeaders(),
+                                    payload.dump(), "application/json");
+
+    ASSERT_TRUE(result != nullptr);
+    ASSERT_EQ(result->status, 200);
+    const nlohmann::json fetched = nlohmann::json::parse(result->body);
+    EXPECT_EQ(fetched["models"], (nlohmann::json{"mock-a", "mock-b"}));
+    EXPECT_EQ(MockProvider::requestedBearer, "sk-good-key");
+}
+
+TEST_F(PanelServerFixture, AvailableModelsPrefersExplicitKeyAndReportsUpstreamErrors)
+{
+    MockProvider provider;
+    httplib::Client client("127.0.0.1", port);
+
+    const nlohmann::json payload = {
+        {"api_endpoint", provider.chatEndpoint()},
+        {"APIStandard", "OpenAI"},
+        {"api_key", "sk-wrong-key"},
+    };
+    const auto wrongKey = client.Post("/api/models/available", authHeaders(),
+                                      payload.dump(), "application/json");
+    ASSERT_TRUE(wrongKey != nullptr);
+    EXPECT_EQ(wrongKey->status, 502);
+    EXPECT_NE(wrongKey->body.find("401"), std::string::npos);
+    EXPECT_EQ(MockProvider::requestedBearer, "sk-wrong-key");
+}
+
+// 视觉探测端点：同一供应商的三个模型分别得出 支持/不支持/无法判定 三态
+TEST_F(PanelServerFixture, CheckVisionClassifiesProbeOutcomes)
+{
+    MockProvider provider;
+    const nlohmann::json payloadBase = {
+        {"api_endpoint", provider.chatEndpoint()},
+        {"APIStandard", "OpenAI"},
+        {"api_key", "sk-good-key"},
+    };
+    httplib::Client client("127.0.0.1", port);
+
+    const auto probe = [&](const std::string &model) {
+        nlohmann::json payload = payloadBase;
+        payload["model"] = model;
+        return client.Post("/api/models/check-vision", authHeaders(),
+                           payload.dump(), "application/json");
+    };
+
+    const auto supported = probe("vision-ok");
+    ASSERT_TRUE(supported != nullptr);
+    ASSERT_EQ(supported->status, 200);
+    EXPECT_EQ(nlohmann::json::parse(supported->body)["result"], "vision");
+
+    const auto unsupported = probe("vision-no");
+    ASSERT_TRUE(unsupported != nullptr);
+    ASSERT_EQ(unsupported->status, 200);
+    EXPECT_EQ(nlohmann::json::parse(unsupported->body)["result"], "no-vision");
+
+    const auto unknown = probe("vision-unknown");
+    ASSERT_TRUE(unknown != nullptr);
+    ASSERT_EQ(unknown->status, 200);
+    const nlohmann::json unknownBody = nlohmann::json::parse(unknown->body);
+    EXPECT_EQ(unknownBody["result"], "unknown");
+    EXPECT_FALSE(unknownBody["detail"].get<std::string>().empty());
+}
+
+TEST_F(PanelServerFixture, CheckVisionRejectsInvalidRequests)
+{
+    httplib::Client client("127.0.0.1", port);
+    const auto post = [&](const std::string &body) {
+        return client.Post("/api/models/check-vision", authHeaders(),
+                           body, "application/json");
+    };
+
+    const auto missingModel = post(R"({"api_endpoint": "https://x.example.com/v1/chat/completions",
+                                    "APIStandard": "OpenAI", "api_key": "sk-k"})");
+    ASSERT_TRUE(missingModel != nullptr);
+    EXPECT_EQ(missingModel->status, 422);
+
+    const auto badStandard = post(R"({"api_endpoint": "https://x.example.com/v1/chat/completions",
+                                    "APIStandard": "Gemini", "model": "m", "api_key": "sk-k"})");
+    ASSERT_TRUE(badStandard != nullptr);
+    EXPECT_EQ(badStandard->status, 422);
+
+    const auto missingKey = post(R"({"api_endpoint": "https://x.example.com/v1/chat/completions",
+                                  "APIStandard": "OpenAI", "model": "m"})");
+    ASSERT_TRUE(missingKey != nullptr);
+    EXPECT_EQ(missingKey->status, 422);
+}
+
+// Capabilities.vision 双形态校验：非法类型拒绝；名单含未知模型名给 Warning 放行
+TEST_F(PanelServerFixture, PostModelsValidatesVisionCapabilityForms)
+{
+    httplib::Client client("127.0.0.1", port);
+
+    const nlohmann::json badType = nlohmann::json::parse(R"({
+        "Models": [
+            {"ModelName": ["model-a"], "api_endpoint": "https://a.example.com",
+             "api_key": "sk-a", "APIStandard": "OpenAI",
+             "Capabilities": {"vision": "yes"}}
+        ]
+    })");
+    const auto rejected = client.Post("/api/models", authHeaders(),
+                                      badType.dump(), "application/json");
+    ASSERT_TRUE(rejected != nullptr);
+    EXPECT_EQ(rejected->status, 422);
+
+    const nlohmann::json withTypo = nlohmann::json::parse(R"({
+        "Models": [
+            {"ModelName": ["model-a"], "api_endpoint": "https://a.example.com",
+             "api_key": "sk-a", "APIStandard": "OpenAI",
+             "Capabilities": {"vision": ["model-a", "typo-model"]}}
+        ]
+    })");
+    const auto accepted = client.Post("/api/models", authHeaders(),
+                                      withTypo.dump(), "application/json");
+    ASSERT_TRUE(accepted != nullptr);
+    ASSERT_EQ(accepted->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(accepted->body);
+    ASSERT_FALSE(body["warnings"].empty());
+    EXPECT_NE(body["warnings"].dump().find("typo-model"), std::string::npos);
+}

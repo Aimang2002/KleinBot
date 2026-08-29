@@ -639,11 +639,6 @@
       background: var(--surface);
     }
 
-    #modelsView textarea {
-      font-family: var(--mono);
-      font-size: 13px;
-    }
-
     /* ============ 供应商 ============ */
 
     .provider {
@@ -658,12 +653,13 @@
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      padding: 12px 16px;
+      padding: 13px 14px 13px 18px;
       border-bottom: 1px solid var(--line);
       border-radius: 12px 12px 0 0;
+      background: rgba(200, 230, 215, .025);
       font-family: var(--mono);
       font-weight: 600;
-      font-size: 14.5px;
+      font-size: 15px;
       letter-spacing: .02em;
       color: var(--text);
     }
@@ -676,37 +672,381 @@
     }
 
     .remove {
-      background: rgba(248, 113, 113, .08);
-      color: var(--danger);
-      border: 1px solid rgba(248, 113, 113, .3);
+      flex: none;
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: var(--faint);
+      border: 1px solid transparent;
       border-radius: 8px;
-      padding: 4px 12px;
-      font-size: 13.5px;
+      font-size: 14px;
+      line-height: 1;
       cursor: pointer;
-      transition: background .15s;
+      transition: color .15s, background .15s, border-color .15s;
     }
 
     .remove:hover {
-      background: rgba(248, 113, 113, .18);
+      color: var(--danger);
+      background: rgba(248, 113, 113, .1);
+      border-color: rgba(248, 113, 113, .3);
     }
 
-    #addProvider {
-      background: transparent;
-      color: var(--muted);
-      border: 1px dashed var(--line-2);
-      border-radius: 10px;
-      padding: 12px 18px;
-      width: 100%;
-      font-size: 15px;
+    .models-toolbar {
+      display: flex;
+      margin-bottom: 14px;
+    }
+
+    /* 卡片头部：describe 标题 + 模型数统计 + 图标化删除 */
+    .provider-title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .provider-meta {
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .provider-count {
+      flex: none;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 400;
       letter-spacing: .05em;
+      color: var(--muted);
+      border: 1px solid var(--line-2);
+      background: rgba(200, 230, 215, .03);
+      border-radius: 999px;
+      padding: 3px 11px;
+      white-space: nowrap;
+    }
+
+    .provider-count strong {
+      color: var(--mint);
+      font-weight: 600;
+      margin-right: 1px;
+    }
+
+    .provider-count.empty {
+      color: var(--faint);
+      border-style: dashed;
+    }
+
+    /* 模型 chips：卡片的视觉主体 */
+    .model-zone {
+      position: relative;
+      min-width: 0;
+      background: rgba(200, 230, 215, .03);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 11px 12px;
+    }
+
+    .model-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .model-chips:empty::after {
+      content: "尚未选择模型";
+      font-size: 12.5px;
+      color: var(--faint);
+      border: 1px dashed var(--line-2);
+      border-radius: 8px;
+      padding: 6px 14px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: #d9f4e7;
+      background: rgba(78, 217, 160, .08);
+      border: 1px solid rgba(78, 217, 160, .3);
+      border-radius: 8px;
+      padding: 5px 6px 5px 11px;
+      max-width: 100%;
+      transition: border-color .15s, background .15s;
+    }
+
+    .chip:hover {
+      border-color: rgba(78, 217, 160, .45);
+      background: rgba(78, 217, 160, .11);
+    }
+
+    .chip>span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chip-x {
+      flex: none;
+      border: 0;
+      background: transparent;
+      color: rgba(217, 244, 231, .5);
+      font-size: 11px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 3px 5px;
+      border-radius: 50%;
+      transition: color .15s, background .15s;
+    }
+
+    .chip-x:hover {
+      color: var(--danger);
+      background: rgba(248, 113, 113, .14);
+    }
+
+    /* chip 上的视觉标注切换：◉=已标注支持视觉输入 */
+    .chip-vision {
+      flex: none;
+      border: 0;
+      background: transparent;
+      color: rgba(217, 244, 231, .4);
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 6px;
+      transition: color .15s, background .15s;
+    }
+
+    .chip-vision:hover {
+      color: #d9f4e7;
+      background: rgba(217, 244, 231, .08);
+    }
+
+    .chip-vision.on {
+      color: var(--mint);
+    }
+
+    .chip-vision.on:hover {
+      color: #8aebc2;
+    }
+
+    .model-note {
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    .model-actions {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 9px;
+    }
+
+    .mini-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      border: 1px solid var(--line-2);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-family: inherit;
+      padding: 5px 12px;
       cursor: pointer;
       transition: color .15s, border-color .15s, box-shadow .15s;
     }
 
-    #addProvider:hover {
+    .mini-btn:hover {
       color: var(--mint);
       border-color: rgba(78, 217, 160, .45);
-      box-shadow: 0 0 16px rgba(78, 217, 160, .08);
+      box-shadow: 0 0 12px rgba(78, 217, 160, .08);
+    }
+
+    .mini-btn:disabled {
+      opacity: .55;
+      cursor: default;
+      pointer-events: none;
+    }
+
+    .model-error {
+      font-size: 12.5px;
+      color: var(--danger);
+    }
+
+    .model-manual {
+      display: flex;
+      gap: 8px;
+      margin-top: 9px;
+    }
+
+    .model-manual[hidden] {
+      display: none;
+    }
+
+    .model-manual input {
+      flex: 1;
+      min-width: 0;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    /* ============ 自绘下拉与模型勾选浮层 ============ */
+
+    .combo {
+      position: relative;
+    }
+
+    .combo-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 11px;
+      border: 1px solid var(--line-2);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 15px;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .15s;
+    }
+
+    .combo-btn:hover {
+      border-color: rgba(78, 217, 160, .3);
+    }
+
+    .combo.open .combo-btn,
+    .combo-btn:focus-visible {
+      border-color: var(--mint);
+      box-shadow: 0 0 0 3px rgba(78, 217, 160, .13);
+    }
+
+    .combo-caret {
+      color: var(--faint);
+      font-size: 11px;
+      transition: transform .15s;
+    }
+
+    .combo.open .combo-caret {
+      transform: rotate(180deg);
+    }
+
+    .combo-pop,
+    .model-pick {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 60;
+      background: #1e2823;
+      border: 1px solid var(--line-2);
+      border-radius: 10px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, .5);
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-4px);
+      transition: opacity .12s ease, transform .12s ease, visibility .12s;
+    }
+
+    .combo-pop {
+      right: 0;
+      padding: 5px;
+    }
+
+    .model-pick {
+      width: max-content;
+      min-width: min(340px, 100%);
+      max-width: min(480px, calc(100vw - 120px));
+      display: flex;
+      flex-direction: column;
+      padding: 8px;
+      gap: 8px;
+    }
+
+    .combo.open .combo-pop,
+    .model-zone.open .model-pick {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
+    .combo-opt,
+    .pick-opt {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 14.5px;
+      font-family: inherit;
+      padding: 8px 10px;
+      border-radius: 7px;
+      cursor: pointer;
+      text-align: left;
+      transition: background .1s;
+    }
+
+    .combo-opt:hover,
+    .combo-opt:focus-visible,
+    .pick-opt:hover,
+    .pick-opt:focus-visible {
+      background: rgba(200, 230, 215, .06);
+      outline: none;
+    }
+
+    .combo-opt .tick,
+    .pick-opt .tick {
+      color: var(--mint);
+      font-size: 11px;
+      visibility: hidden;
+    }
+
+    .combo-opt.selected,
+    .pick-opt.selected {
+      color: var(--mint);
+    }
+
+    .combo-opt.selected .tick,
+    .pick-opt.selected .tick {
+      visibility: visible;
+    }
+
+    .pick-opt {
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .pick-opt>span:not(.tick) {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .model-pick-list {
+      max-height: 264px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .model-pick-empty {
+      padding: 14px 10px;
+      font-size: 13px;
+      color: var(--faint);
+      text-align: center;
     }
 
     .hint {
@@ -925,9 +1265,17 @@
       <div id="modelsView" style="display:none">
         <h2>模型供应商</h2>
         <p class="pane-hint">模型注册表里的每一组供应商：共享密钥的一批模型名、API 端点与协议标准。</p>
+        <div class="models-toolbar">
+          <button id="addProvider" class="btn primary" type="button">
+            <svg viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M7 2 V12 M2 7 H12" fill="none" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round" />
+            </svg>
+            添加供应商
+          </button>
+        </div>
         <div class="note" id="registryInfo">正在加载模型注册表……</div>
         <div id="providers"></div>
-        <button id="addProvider" type="button">＋ 添加供应商</button>
       </div>
       <footer>保存后立即写盘并刷新内存快照；标注“需重启”的项在机器人重启后生效。密钥字段留空表示保持原值。
         <span class="tagline">KLEIN · MOBIUS LAB TERMINAL</span>
@@ -1815,38 +2163,176 @@
       return row;
     }
 
-    function addProviderCard(provider) {
+    // 自绘下拉：原生 select 的展开列表由系统绘制，无法适配终端主题
+    function createComboSelect(options, value) {
+      const root = document.createElement("div");
+      root.className = "combo";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "combo-btn";
+      button.setAttribute("aria-haspopup", "listbox");
+      button.setAttribute("aria-expanded", "false");
+      const label = document.createElement("span");
+      const caret = document.createElement("span");
+      caret.className = "combo-caret";
+      caret.textContent = "▾";
+      button.append(label, caret);
+      const pop = document.createElement("div");
+      pop.className = "combo-pop";
+      pop.setAttribute("role", "listbox");
+
+      let current = options.includes(value) ? value : options[0];
+      const optionButtons = options.map((option) => {
+        const element = document.createElement("button");
+        element.type = "button";
+        element.className = "combo-opt";
+        element.setAttribute("role", "option");
+        const tick = document.createElement("span");
+        tick.className = "tick";
+        tick.textContent = "◈";
+        const text = document.createElement("span");
+        text.textContent = option;
+        element.append(tick, text);
+        element.addEventListener("click", () => {
+          current = option;
+          render();
+          close();
+          button.focus();
+        });
+        pop.appendChild(element);
+        return element;
+      });
+
+      function render() {
+        label.textContent = current;
+        optionButtons.forEach((element, index) => {
+          const selected = options[index] === current;
+          element.classList.toggle("selected", selected);
+          element.setAttribute("aria-selected", selected ? "true" : "false");
+        });
+      }
+
+      function close() {
+        root.classList.remove("open");
+        button.setAttribute("aria-expanded", "false");
+        document.removeEventListener("pointerdown", onOutside, true);
+      }
+
+      function open() {
+        root.classList.add("open");
+        button.setAttribute("aria-expanded", "true");
+        document.addEventListener("pointerdown", onOutside, true);
+        const active = optionButtons.find((element) => element.classList.contains("selected"));
+        (active || optionButtons[0]).focus();
+      }
+
+      function onOutside(event) {
+        if (!root.contains(event.target)) close();
+      }
+
+      button.addEventListener("click", () => root.classList.contains("open") ? close() : open());
+      root.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && root.classList.contains("open")) {
+          close();
+          button.focus();
+          return;
+        }
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        event.preventDefault();
+        if (!root.classList.contains("open")) { open(); return; }
+        const count = optionButtons.length;
+        const index = optionButtons.indexOf(document.activeElement);
+        const next = index === -1
+          ? (event.key === "ArrowDown" ? 0 : count - 1)
+          : (event.key === "ArrowDown" ? (index + 1) % count : (index - 1 + count) % count);
+        optionButtons[next].focus();
+      });
+
+      Object.defineProperty(root, "value", {
+        get() { return current; },
+        set(next) { current = options.includes(next) ? next : options[0]; render(); },
+      });
+      root.append(button, pop);
+      render();
+      return root;
+    }
+
+    let dataListSeq = 0;
+
+    function providerIndex(card) {
+      return Array.prototype.indexOf.call(
+        document.querySelectorAll("#providers .provider"), card);
+    }
+
+    function addProviderCard(provider, originalIndex) {
       const original = provider || {};
       const card = document.createElement("div");
       card.className = "provider";
       card.dataset.original = JSON.stringify(original);
+      // 保存时随请求带回，后端按位恢复掩码密钥（勾选模型会让身份匹配失配）
+      if (Number.isInteger(originalIndex))
+        card.dataset.originalIndex = String(originalIndex);
 
+      const modelNames = (original.ModelName || original.name || [])
+        .filter((name) => typeof name === "string" && name.length > 0);
+
+      // 视觉标注按模型存放；旧版布尔=整组继承，加载时展开成每个模型
+      const visionByName = new Map();
+      const baseCapabilities = original.Capabilities || original.capabilities || {};
+      if (typeof baseCapabilities.vision === "boolean") {
+        for (const name of modelNames) visionByName.set(name, baseCapabilities.vision);
+      } else if (Array.isArray(baseCapabilities.vision)) {
+        for (const name of baseCapabilities.vision)
+          if (typeof name === "string") visionByName.set(name, true);
+      }
+
+      /* 头部：describe 标题 + 模型数统计 + 图标化删除 */
       const head = document.createElement("div");
       head.className = "provider-head";
-      const names = (original.ModelName || original.name || []);
       const title = document.createElement("span");
-      title.textContent = names.length ? names.join("、") : "新供应商";
-      head.appendChild(title);
+      title.className = "provider-title";
+      const meta = document.createElement("span");
+      meta.className = "provider-meta";
+      const count = document.createElement("span");
+      count.className = "provider-count";
       const remove = document.createElement("button");
       remove.className = "remove";
       remove.type = "button";
-      remove.textContent = "删除";
+      remove.textContent = "✕";
+      remove.title = "删除该供应商";
+      remove.setAttribute("aria-label", "删除该供应商");
       remove.addEventListener("click", () => card.remove());
-      head.appendChild(remove);
+      meta.append(count, remove);
+      head.append(title, meta);
       card.appendChild(head);
 
-      const namesInput = document.createElement("textarea");
-      namesInput.dataset.field = "names";
-      namesInput.placeholder = "每行一个模型名称";
-      namesInput.value = names.join("\n");
-      card.appendChild(providerRow("模型名称", "该组共享密钥的模型名，每行一个；#切换模型 与默认模型引用这些名字。", namesInput));
+      /* 供应商名称：注册表 describe 字段，仅作展示 */
+      const describeInput = document.createElement("input");
+      describeInput.type = "text";
+      describeInput.dataset.field = "describe";
+      describeInput.value = original.describe || "";
+      describeInput.placeholder = "如：DeepSeek官方";
+      const syncHead = () => {
+        title.textContent = describeInput.value.trim() || "未命名供应商";
+        const total = modelNames.length;
+        count.classList.toggle("empty", total === 0);
+        if (total === 0) {
+          count.textContent = "无模型";
+        } else {
+          const number = document.createElement("strong");
+          number.textContent = String(total);
+          count.replaceChildren(number, " 个模型");
+        }
+      };
+      describeInput.addEventListener("input", syncHead);
+      card.appendChild(providerRow("供应商名称", "仅作展示，写入注册表 describe 字段。", describeInput));
 
       const endpointInput = document.createElement("input");
       endpointInput.type = "text";
       endpointInput.dataset.field = "endpoint";
       endpointInput.value = original.api_endpoint || "";
-      endpointInput.placeholder = "https://api.example.com/v1";
-      card.appendChild(providerRow("API 端点", "该供应商的 API 地址，如 https://api.deepseek.com/v1。", endpointInput));
+      endpointInput.placeholder = "https://api.example.com/v1/chat/completions";
+      card.appendChild(providerRow("API 端点", "完整的对话接口地址，如 https://api.deepseek.com/v1/chat/completions；模型列表从同一 base 段拉取。", endpointInput));
 
       const keyInput = document.createElement("input");
       keyInput.type = "password";
@@ -1855,37 +2341,297 @@
       keyInput.autocomplete = "new-password";
       card.appendChild(providerRow("API Key", "组内所有模型共享的密钥；留空表示保持原值（掩码显示）。", keyInput));
 
-      const standardInput = document.createElement("select");
-      standardInput.dataset.field = "standard";
-      for (const option of ["OpenAI", "Anthropic"]) {
-        const element = document.createElement("option");
-        element.value = option;
-        element.textContent = option;
-        standardInput.appendChild(element);
+      const standardSelect = createComboSelect(
+        ["OpenAI", "Anthropic"],
+        original.APIStandard === "Anthropic" ? "Anthropic" : "OpenAI");
+      standardSelect.dataset.field = "standard";
+      card.appendChild(providerRow("API 标准", "请求协议：OpenAI 兼容接口或 Anthropic 原生接口。", standardSelect));
+
+      /* 模型：chips + 端点拉取勾选 + 手动输入兜底 */
+      const modelZone = document.createElement("div");
+      modelZone.className = "model-zone";
+
+      const chips = document.createElement("div");
+      chips.className = "model-chips";
+
+      const listId = "model-names-" + (++dataListSeq);
+      const dataList = document.createElement("datalist");
+      dataList.id = listId;
+
+      const manual = document.createElement("div");
+      manual.className = "model-manual";
+      manual.hidden = true;
+      const manualInput = document.createElement("input");
+      manualInput.type = "text";
+      manualInput.placeholder = "输入模型名称，回车添加";
+      manualInput.setAttribute("list", listId);
+      const manualAdd = document.createElement("button");
+      manualAdd.type = "button";
+      manualAdd.className = "mini-btn";
+      manualAdd.textContent = "添加";
+      manual.append(manualInput, manualAdd);
+
+      const actions = document.createElement("div");
+      actions.className = "model-actions";
+      const fetchButton = document.createElement("button");
+      fetchButton.type = "button";
+      fetchButton.className = "mini-btn";
+      fetchButton.textContent = "⟳ 获取模型列表";
+      const manualToggle = document.createElement("button");
+      manualToggle.type = "button";
+      manualToggle.className = "mini-btn";
+      manualToggle.textContent = "+ 手动输入";
+      const probeButton = document.createElement("button");
+      probeButton.type = "button";
+      probeButton.className = "mini-btn";
+      probeButton.textContent = "◎ 检测视觉";
+      probeButton.title = "对已选模型逐一发送极小图片请求，自动标注是否支持视觉输入";
+      const noteLine = document.createElement("span");
+      noteLine.className = "model-note";
+      const errorLine = document.createElement("span");
+      errorLine.className = "model-error";
+      actions.append(fetchButton, manualToggle, probeButton, noteLine, errorLine);
+
+      const picker = document.createElement("div");
+      picker.className = "model-pick";
+      const search = document.createElement("input");
+      search.type = "text";
+      search.placeholder = "搜索模型…";
+      const pickList = document.createElement("div");
+      pickList.className = "model-pick-list";
+      picker.append(search, pickList);
+
+      modelZone.append(chips, actions, manual, picker, dataList);
+      card.appendChild(providerRow("模型", "优先从端点拉取实际可用的模型勾选；个别端点不提供列表接口时用“手动输入”兜底。chip 上的 ◉ 标注该模型支持视觉输入，可手动切换或用“检测视觉”自动探测。", modelZone));
+
+      function renderChips() {
+        chips.textContent = "";
+        for (const name of modelNames) {
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          const hasVision = visionByName.get(name) === true;
+          const visionToggle = document.createElement("button");
+          visionToggle.type = "button";
+          visionToggle.className = "chip-vision" + (hasVision ? " on" : "");
+          visionToggle.textContent = hasVision ? "◉" : "○";
+          visionToggle.title = hasVision ? "已标注支持视觉输入，点击取消" : "点击标注支持视觉输入";
+          visionToggle.setAttribute("aria-label", name + " 的视觉输入标注");
+          visionToggle.addEventListener("click", () => {
+            visionByName.set(name, !(visionByName.get(name) === true));
+            renderChips();
+          });
+          const text = document.createElement("span");
+          text.textContent = name;
+          const removeChip = document.createElement("button");
+          removeChip.type = "button";
+          removeChip.className = "chip-x";
+          removeChip.textContent = "✕";
+          removeChip.setAttribute("aria-label", "移除 " + name);
+          removeChip.addEventListener("click", () => {
+            modelNames.splice(modelNames.indexOf(name), 1);
+            renderChips();
+          });
+          chip.append(visionToggle, text, removeChip);
+          chips.appendChild(chip);
+        }
+        card.dataset.visionList = JSON.stringify(
+          modelNames.filter((name) => visionByName.get(name) === true));
+        syncHead();
       }
-      standardInput.value = original.APIStandard === "Anthropic" ? "Anthropic" : "OpenAI";
-      card.appendChild(providerRow("API 标准", "请求协议：OpenAI 兼容接口或 Anthropic 原生接口。", standardInput));
 
-      const visionInput = document.createElement("input");
-      visionInput.type = "checkbox";
-      visionInput.dataset.field = "vision";
-      visionInput.checked = ((original.Capabilities || original.capabilities || {}).vision) || false;
-      card.appendChild(providerRow("支持视觉输入", "勾选后这组模型可作为视觉模型接收图片输入。", visionInput));
+      function addModel(name) {
+        if (!name || modelNames.includes(name)) return false;
+        modelNames.push(name);
+        renderChips();
+        return true;
+      }
 
+      function syncDataList(extra) {
+        dataList.textContent = "";
+        for (const name of new Set([...modelNames, ...(extra || [])])) {
+          const option = document.createElement("option");
+          option.value = name;
+          dataList.appendChild(option);
+        }
+      }
+
+      let availableModels = null;
+
+      function renderPickList() {
+        pickList.textContent = "";
+        const empty = document.createElement("div");
+        empty.className = "model-pick-empty";
+        if (!availableModels || !availableModels.length) {
+          empty.textContent = "尚未获取到模型列表";
+          pickList.appendChild(empty);
+          return;
+        }
+        const query = search.value.trim().toLowerCase();
+        const shown = availableModels
+          .filter((name) => !query || name.toLowerCase().includes(query));
+        if (!shown.length) {
+          empty.textContent = "没有匹配的模型";
+          pickList.appendChild(empty);
+          return;
+        }
+        for (const name of shown) {
+          const option = document.createElement("button");
+          option.type = "button";
+          option.className = "pick-opt" + (modelNames.includes(name) ? " selected" : "");
+          const tick = document.createElement("span");
+          tick.className = "tick";
+          tick.textContent = "◈";
+          const text = document.createElement("span");
+          text.textContent = name;
+          option.append(tick, text);
+          option.addEventListener("click", () => {
+            if (!addModel(name)) {
+              modelNames.splice(modelNames.indexOf(name), 1);
+              renderChips();
+            }
+            option.classList.toggle("selected", modelNames.includes(name));
+          });
+          pickList.appendChild(option);
+        }
+      }
+
+      function onOutsidePick(event) {
+        if (!modelZone.contains(event.target)) closePicker();
+      }
+
+      function openPicker() {
+        modelZone.classList.add("open");
+        document.addEventListener("pointerdown", onOutsidePick, true);
+        renderPickList();
+      }
+
+      function closePicker() {
+        modelZone.classList.remove("open");
+        document.removeEventListener("pointerdown", onOutsidePick, true);
+      }
+
+      search.addEventListener("input", renderPickList);
+
+      fetchButton.addEventListener("click", async () => {
+        errorLine.textContent = "";
+        closePicker();
+        const endpoint = endpointInput.value.trim();
+        if (!endpoint) { errorLine.textContent = "请先填写 API 端点"; return; }
+        const payload = { api_endpoint: endpoint, APIStandard: standardSelect.value };
+        const index = providerIndex(card);
+        if (index >= 0) payload.index = index;
+        if (keyInput.value !== "") payload.api_key = keyInput.value;
+        fetchButton.disabled = true;
+        fetchButton.textContent = "拉取中…";
+        try {
+          const response = await request("/api/models/available",
+            { method: "POST", body: JSON.stringify(payload) });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            errorLine.textContent = body.error || ("拉取失败：HTTP " + response.status);
+            manual.hidden = false;
+            return;
+          }
+          availableModels = body.models || [];
+          syncDataList(availableModels);
+          if (!availableModels.length) {
+            errorLine.textContent = "端点未返回任何模型，可手动输入";
+            manual.hidden = false;
+            return;
+          }
+          openPicker();
+        } catch (error) {
+          if (error.message !== "unauthorized") {
+            errorLine.textContent = "拉取失败：" + error.message;
+            manual.hidden = false;
+          }
+        } finally {
+          fetchButton.disabled = false;
+          fetchButton.textContent = "⟳ 获取模型列表";
+        }
+      });
+
+      manualToggle.addEventListener("click", () => {
+        manual.hidden = !manual.hidden;
+        if (!manual.hidden) manualInput.focus();
+      });
+
+      // 探测已选模型的视觉能力：逐个发送极小图片请求，结论三态（失败≠不支持）
+      probeButton.addEventListener("click", async () => {
+        if (!modelNames.length) { errorLine.textContent = "请先选择要检测的模型"; return; }
+        const endpoint = endpointInput.value.trim();
+        if (!endpoint) { errorLine.textContent = "请先填写 API 端点"; return; }
+        errorLine.textContent = "";
+        noteLine.textContent = "";
+        const payloadBase = { api_endpoint: endpoint, APIStandard: standardSelect.value };
+        const index = providerIndex(card);
+        if (index >= 0) payloadBase.index = index;
+        if (keyInput.value !== "") payloadBase.api_key = keyInput.value;
+        const targets = [...modelNames];
+        probeButton.disabled = true;
+        let supported = 0;
+        let unsupported = 0;
+        const unknown = [];
+        try {
+          for (let i = 0; i < targets.length; i++) {
+            const name = targets[i];
+            noteLine.textContent = "检测中 " + (i + 1) + "/" + targets.length + "：" + name;
+            const response = await request("/api/models/check-vision",
+              { method: "POST", body: JSON.stringify({ ...payloadBase, model: name }) });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              errorLine.textContent = "检测失败：" + (body.error || ("HTTP " + response.status));
+              noteLine.textContent = "";
+              return;
+            }
+            if (body.result === "vision") { visionByName.set(name, true); supported++; }
+            else if (body.result === "no-vision") { visionByName.set(name, false); unsupported++; }
+            else unknown.push(name + (body.detail ? "（" + body.detail + "）" : ""));
+          }
+          noteLine.textContent = "检测完成：支持 " + supported + " · 不支持 " + unsupported +
+            (unknown.length ? " · 无法判定 " + unknown.length : "");
+          if (unknown.length)
+            errorLine.textContent = "无法判定：" + unknown.join("；");
+        } catch (error) {
+          if (error.message !== "unauthorized")
+            errorLine.textContent = "检测失败：" + error.message;
+          noteLine.textContent = "";
+        } finally {
+          probeButton.disabled = false;
+          renderChips();
+        }
+      });
+
+      function submitManual() {
+        if (addModel(manualInput.value.trim())) {
+          manualInput.value = "";
+          errorLine.textContent = "";
+        }
+        manualInput.focus();
+      }
+      manualAdd.addEventListener("click", submitManual);
+      manualInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") { event.preventDefault(); submitManual(); }
+      });
+
+      syncDataList();
+      renderChips();
       $("providers").appendChild(card);
+      return card;
     }
 
     function collectModels() {
       const Models = [];
+      const originIndexes = [];
       for (const card of document.querySelectorAll("#providers .provider")) {
         let base = {};
         try { base = JSON.parse(card.dataset.original || "{}"); } catch { base = {}; }
         const provider = (base !== null && typeof base === "object" && !Array.isArray(base))
           ? base : {};
 
-        const names = card.querySelector('[data-field="names"]').value
-          .split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
-        provider.ModelName = names;
+        provider.describe = card.querySelector('[data-field="describe"]').value.trim();
+        provider.ModelName = Array.from(
+          card.querySelectorAll(".model-chips .chip > span")).map((el) => el.textContent);
         provider.api_endpoint = card.querySelector('[data-field="endpoint"]').value.trim();
         const keyInput = card.querySelector('[data-field="apiKey"]');
         provider.api_key = keyInput.value === ""
@@ -1894,13 +2640,21 @@
         provider.APIStandard = card.querySelector('[data-field="standard"]').value;
         const capabilities = (provider.Capabilities && typeof provider.Capabilities === "object" &&
           !Array.isArray(provider.Capabilities)) ? provider.Capabilities : {};
-        capabilities.vision = card.querySelector('[data-field="vision"]').checked;
+        // 视觉标注物化为按模型名单；全组无标注时不留键（旧布尔形态在保存时自动迁移）
+        let visionList = [];
+        try { visionList = JSON.parse(card.dataset.visionList || "[]"); }
+        catch { visionList = []; }
+        if (visionList.length) capabilities.vision = visionList;
+        else delete capabilities.vision;
         provider.Capabilities = capabilities;
         delete provider.name;
         delete provider.capabilities;
         Models.push(provider);
+        originIndexes.push(card.dataset.originalIndex === undefined
+          ? null
+          : Number(card.dataset.originalIndex));
       }
-      return { Models };
+      return { Models, originIndexes };
     }
 
     async function loadModels() {
@@ -1915,9 +2669,9 @@
         const providers = $("providers");
         providers.textContent = "";
         const list = (body.models && body.models.Models) || [];
-        for (const provider of list) addProviderCard(provider);
+        list.forEach((provider, index) => addProviderCard(provider, index));
         if (!list.length)
-          info.textContent += " 当前没有注册任何供应商，点击下方按钮添加。";
+          info.textContent += " 当前没有注册任何供应商，点击上方按钮添加。";
         modelsLoaded = true;
         $("banner").className = "";
       } catch (error) {
@@ -1950,7 +2704,11 @@
 
     $("save").addEventListener("click", () => activePane === MODELS_KEY ? saveModels() : saveConfig());
     $("reload").addEventListener("click", () => activePane === MODELS_KEY ? loadModels() : loadConfig());
-    $("addProvider").addEventListener("click", () => addProviderCard(null));
+    $("addProvider").addEventListener("click", () => {
+      const card = addProviderCard(null);
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      card.querySelector('[data-field="describe"]').focus();
+    });
     function setLoginError(text) {
       $("loginError").textContent = text;
       if (!text) return;
