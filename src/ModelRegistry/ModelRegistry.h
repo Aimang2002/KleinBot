@@ -3,6 +3,7 @@
 
 #include "ChatModel.h"
 #include <string>
+#include <vector>
 
 class ModelRegistry
 {

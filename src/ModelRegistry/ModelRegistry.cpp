@@ -72,13 +72,25 @@ void ModelRegistry::reload()
             cm.api_key = model.value("api_key", "");
             cm.endpoint = model.value("api_endpoint", "");
             cm.api_standard = model.value("APIStandard", "");
+            // 能力标注双形态：布尔=旧版整组继承，展开成全组名单；数组=按模型正向名单。
+            // 其它类型宽容忽略——绝不因能力字段抛异常导致整份注册表加载失败
             const nlohmann::json *capabilities = nullptr;
             if (model.contains("Capabilities") && model["Capabilities"].is_object())
                 capabilities = &model["Capabilities"];
             else if (model.contains("capabilities") && model["capabilities"].is_object())
                 capabilities = &model["capabilities"];
-            if (capabilities != nullptr)
-                cm.capabilities.vision = capabilities->value("vision", false);
+            if (capabilities != nullptr && capabilities->contains("vision"))
+            {
+                const nlohmann::json &vision = (*capabilities)["vision"];
+                if (vision.is_boolean() && vision.get<bool>())
+                    cm.visionModels = cm.modelList;
+                else if (vision.is_array())
+                {
+                    for (const nlohmann::json &entry : vision)
+                        if (entry.is_string())
+                            cm.visionModels.insert(entry.get<std::string>());
+                }
+            }
             chatModels.push_back(cm);
         }
     }

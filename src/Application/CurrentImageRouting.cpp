@@ -4,11 +4,12 @@
 #include <utility>
 
 CurrentImageRoute routeCurrentImage(ChatRequest &request, const ChatModel &model,
+                                    const std::string &modelName,
                                     std::optional<ChatImageContent> image)
 {
     if (!image.has_value())
         return CurrentImageRoute::None;
-    if (!model.capabilities.vision || image->base64_data.empty())
+    if (!model.hasVision(modelName) || image->base64_data.empty())
         return CurrentImageRoute::ToolFallback;
 
     for (auto iterator = request.history.rbegin(); iterator != request.history.rend(); ++iterator)

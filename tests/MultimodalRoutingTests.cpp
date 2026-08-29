@@ -21,13 +21,26 @@ TEST(CurrentImageRoutingTest, AttachesCurrentImageWhenModelSupportsVision)
     ChatRequest request;
     request.history.push_back({"user", "看一下这张图片\n[image asset_id=asset-1 source=inbound]"});
     ChatModel model;
-    model.capabilities.vision = true;
+    model.visionModels = {"vision-model"};
 
-    EXPECT_EQ(routeCurrentImage(request, model, sampleImage()),
+    EXPECT_EQ(routeCurrentImage(request, model, "vision-model", sampleImage()),
               CurrentImageRoute::NativeMultimodal);
     ASSERT_EQ(request.history.back().images.size(), 1U);
     EXPECT_EQ(request.history.back().images.front().asset_id, "asset-1");
     EXPECT_EQ(request.history.back().images.front().mime_type, "image/png");
+}
+
+TEST(CurrentImageRoutingTest, VisionIsPerModelInsideSharedGroup)
+{
+    ChatRequest request;
+    request.history.push_back({"user", "看一下这张图片\n[image asset_id=asset-1 source=inbound]"});
+    ChatModel model;
+    model.visionModels = {"vision-model"};
+
+    // 同组内的无视觉模型不得继承标注
+    EXPECT_EQ(routeCurrentImage(request, model, "text-model", sampleImage()),
+              CurrentImageRoute::ToolFallback);
+    EXPECT_TRUE(request.history.back().images.empty());
 }
 
 TEST(CurrentImageRoutingTest, LeavesRequestTextOnlyForToolFallback)
@@ -36,7 +49,7 @@ TEST(CurrentImageRoutingTest, LeavesRequestTextOnlyForToolFallback)
     request.history.push_back({"user", "看一下这张图片\n[image asset_id=asset-1 source=inbound]"});
     ChatModel model;
 
-    EXPECT_EQ(routeCurrentImage(request, model, sampleImage()),
+    EXPECT_EQ(routeCurrentImage(request, model, "any-model", sampleImage()),
               CurrentImageRoute::ToolFallback);
     EXPECT_TRUE(request.history.back().images.empty());
 }
@@ -46,10 +59,10 @@ TEST(CurrentImageRoutingTest, FallsBackWhenCurrentImageCannotBeRead)
     ChatRequest request;
     request.history.push_back({"user", "看一下这张图片"});
     ChatModel model;
-    model.capabilities.vision = true;
+    model.visionModels = {"vision-model"};
     ChatImageContent unreadableImage{"asset-1", "image/png", {}};
 
-    EXPECT_EQ(routeCurrentImage(request, model, unreadableImage),
+    EXPECT_EQ(routeCurrentImage(request, model, "vision-model", unreadableImage),
               CurrentImageRoute::ToolFallback);
     EXPECT_TRUE(request.history.back().images.empty());
 }
@@ -395,7 +408,7 @@ TEST(AnthropicStandardTest, ParsesPlainTextResponseWithoutToolCalls)
     EXPECT_TRUE(response.tool_calls.empty());
 }
 
-TEST(ModelRegistryTest, ReadsOptionalVisionCapabilityWithoutBreakingLegacyEntries)
+TEST(ModelRegistryTest, ReadsVisionCapabilityInLegacyAndPerModelForms)
 {
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() / "kleinbot-model-capabilities.json";
@@ -404,29 +417,47 @@ TEST(ModelRegistryTest, ReadsOptionalVisionCapabilityWithoutBreakingLegacyEntrie
         output << R"({
             "Models": [
                 {
-                    "ModelName": ["vision-model"],
+                    "ModelName": ["legacy-a", "legacy-b"],
                     "api_key": "key",
                     "api_endpoint": "https://example.test/chat",
                     "APIStandard": "OpenAI",
                     "Capabilities": {"vision": true}
                 },
                 {
-                    "ModelName": ["text-model"],
+                    "ModelName": ["array-vision", "array-text"],
                     "api_key": "key",
                     "api_endpoint": "https://example.test/chat",
-                    "APIStandard": "OpenAI"
+                    "APIStandard": "OpenAI",
+                    "Capabilities": {"vision": ["array-vision"]}
+                },
+                {
+                    "ModelName": ["plain-model"],
+                    "api_key": "key",
+                    "api_endpoint": "https://example.test/chat",
+                    "APIStandard": "OpenAI",
+                    "Capabilities": {"vision": "yes"}
                 }
             ]
         })";
     }
 
     ModelRegistry registry(path.string());
-    const ChatModel *visionModel = registry.find("vision-model");
-    const ChatModel *textModel = registry.find("text-model");
 
-    ASSERT_NE(visionModel, nullptr);
-    ASSERT_NE(textModel, nullptr);
-    EXPECT_TRUE(visionModel->capabilities.vision);
-    EXPECT_FALSE(textModel->capabilities.vision);
+    // 旧版布尔：整组继承
+    const ChatModel *legacy = registry.find("legacy-a");
+    ASSERT_NE(legacy, nullptr);
+    EXPECT_TRUE(legacy->hasVision("legacy-a"));
+    EXPECT_TRUE(legacy->hasVision("legacy-b"));
+
+    // 新版数组：按模型标注，同组未列出的不带视觉
+    const ChatModel *perModel = registry.find("array-text");
+    ASSERT_NE(perModel, nullptr);
+    EXPECT_TRUE(perModel->hasVision("array-vision"));
+    EXPECT_FALSE(perModel->hasVision("array-text"));
+
+    // 非法类型宽容处理：按无视觉加载，不影响整份注册表
+    const ChatModel *plain = registry.find("plain-model");
+    ASSERT_NE(plain, nullptr);
+    EXPECT_FALSE(plain->hasVision("plain-model"));
     std::filesystem::remove(path);
 }

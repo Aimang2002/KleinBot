@@ -38,7 +38,7 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
     }
 
     const CurrentImageRoute imageRoute = routeCurrentImage(
-        bundle.request, bundle.model, std::move(currentImage));
+        bundle.request, bundle.model, bundle.model_name, std::move(currentImage));
 
     // 3. 塞入可用工具
     bundle.request.tools = this->tools.allSchemas();
