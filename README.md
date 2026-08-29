@@ -107,7 +107,7 @@ KleinBot 使用 Schema 化 JSON 配置，运行时读取当前工作目录的 `c
 | `schema_version` | 配置结构版本，当前必须为 `1` |
 | `bot` | Bot ID、管理员、名称和群聊策略 |
 | `chat` | 默认模型、采样参数、消息限制和 OneBot action 名称 |
-| `models` | 模型注册文件、绘图、视觉和 Stable Diffusion 配置 |
+| `models` | 模型注册文件、绘图和视觉配置 |
 | `voice` | TTS 开关、服务地址和参考音频（音频写入系统临时目录） |
 | `features` | 可选业务功能开关 |
 | `memory` | 长期记忆模型、批次和召回限制 |

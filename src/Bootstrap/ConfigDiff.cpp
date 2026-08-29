@@ -113,12 +113,6 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
 
     compareModelEndpoint(diff, current.models.drawing, candidate.models.drawing, "models.drawing");
     compareModelEndpoint(diff, current.models.vision, candidate.models.vision, "models.vision");
-    addIfChanged(diff, current.models.stableDiffusionEndpoint,
-                 candidate.models.stableDiffusionEndpoint,
-                 "models.stable_diffusion.endpoint", rebuild);
-    addIfChanged(diff, current.models.stableDiffusionModel,
-                 candidate.models.stableDiffusionModel,
-                 "models.stable_diffusion.model", rebuild);
 
     addIfChanged(diff, current.voice.enabled, candidate.voice.enabled,
                  "voice.enabled", ConfigChangeImpact::Dynamic);

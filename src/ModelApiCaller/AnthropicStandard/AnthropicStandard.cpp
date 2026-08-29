@@ -92,7 +92,7 @@ ImageResponse AnthropicStandard::request_image(const ChatModel &model, const std
     // Anthropic 原生 API 不支持图像生成
     ImageResponse response;
     response.code = -1;
-    response.error_message = "Anthropic API 不支持图像生成，请改用 OpenAI 标准（如 DALL·E）或本地 Stable Diffusion";
+    response.error_message = "Anthropic API 不支持图像生成，请改用 OpenAI 标准的图像接口";
     LOG_WARNING("调用 AnthropicStandard::request_image 但 Anthropic 不支持图像生成");
     return response;
 }

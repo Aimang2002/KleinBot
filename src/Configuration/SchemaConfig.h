@@ -47,8 +47,6 @@ struct ModelSchema
 {
     ModelEndpointSchema drawing;
     ModelEndpointSchema vision;
-    std::string stableDiffusionEndpoint;
-    std::string stableDiffusionModel;
 };
 
 struct VoiceSchema

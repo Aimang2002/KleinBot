@@ -31,10 +31,6 @@
             "endpoint": "",
             "api_key": {"from_env": "KLEIN_VISION_API_KEY"},
             "api_standard": "OpenAI"
-        },
-        "stable_diffusion": {
-            "endpoint": "",
-            "model": ""
         }
     },
     "voice": {

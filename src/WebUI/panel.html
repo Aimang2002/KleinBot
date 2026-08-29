@@ -1268,8 +1268,7 @@
         <div class="models-toolbar">
           <button id="addProvider" class="btn primary" type="button">
             <svg viewBox="0 0 14 14" aria-hidden="true">
-              <path d="M7 2 V12 M2 7 H12" fill="none" stroke="currentColor" stroke-width="1.6"
-                stroke-linecap="round" />
+              <path d="M7 2 V12 M2 7 H12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
             </svg>
             添加供应商
           </button>
@@ -1320,7 +1319,7 @@
       temperature: "温度 temperature", top_p: "Top P", frequency_penalty: "频率惩罚",
       presence_penalty: "存在惩罚", max_message_tokens: "单条消息最大 token",
       worker_threads: "工作线程数", message_survival_seconds: "消息存活（秒）",
-      drawing: "画图模型", vision: "视觉模型", stable_diffusion: "Stable Diffusion",
+      drawing: "画图模型", vision: "视觉模型",
       model: "模型", endpoint: "端点", api_key: "API Key", api_standard: "API 标准",
       host: "主机", port: "端口", bind: "绑定地址", path: "路径", access_token: "访问令牌",
       reference_audio: "参考音频", reference_text: "参考文本",
@@ -1351,7 +1350,7 @@
       bot: "机器人的身份信息：QQ 号、管理员与昵称。",
       features: "机器人对外行为的开关，保存时写回 bot 分组。",
       chat: "对话采样参数与消息处理：默认模型、温度与工作线程。",
-      models: "画图、视觉、Stable Diffusion 的专用端点；聊天模型在“模型供应商”页管理。",
+      models: "画图、视觉的专用端点；聊天模型在“模型供应商”页管理。",
       voice: "GPT-SoVITS 语音合成配置；字段不全时语音功能会自动关闭。",
       memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
       web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
@@ -1402,8 +1401,6 @@
       "models.vision.endpoint": "视觉模型的 API 端点地址。",
       "models.vision.api_key": "视觉模型的 API Key；留空表示保持原值（掩码显示）。",
       "models.vision.api_standard": "视觉模型的请求协议标准。",
-      "models.stable_diffusion.endpoint": "本地 Stable Diffusion WebUI 地址，如 http://127.0.0.1:7860。",
-      "models.stable_diffusion.model": "本地 SD 使用的 checkpoint 名称。",
       "voice.enabled": "语音功能总开关（保存即生效）。",
       "voice.host": "GPT-SoVITS 服务地址。",
       "voice.port": "GPT-SoVITS 服务端口。",
@@ -1453,10 +1450,9 @@
       bot: ["id", "manager_id", "name"],
       chat: ["default_model", "temperature", "top_p", "frequency_penalty",
         "presence_penalty", "max_message_tokens", "worker_threads", "message_survival_seconds"],
-      models: ["drawing", "vision", "stable_diffusion"],
+      models: ["drawing", "vision"],
       drawing: ["model", "endpoint", "api_key", "api_standard"],
       vision: ["model", "endpoint", "api_key", "api_standard"],
-      stable_diffusion: ["endpoint", "model"],
       voice: ["enabled", "host", "port", "reference_audio", "reference_text"],
       memory: ["enabled", "model", "batch_turns", "idle_minutes", "recall_limit"],
       web_search: ["enabled", "provider", "endpoint", "api_key", "search_depth", "max_results",
@@ -1469,7 +1465,7 @@
 
     // 已废弃字段：不渲染、保存时随收集自然消失（旧配置残留值不再显示为可编辑项）
     const HIDDEN_KEYS = {
-      models: ["registry_path"]
+      models: ["registry_path", "stable_diffusion"]
     };
 
     function orderedEntries(object, sectionKey) {

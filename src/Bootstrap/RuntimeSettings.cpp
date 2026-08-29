@@ -90,8 +90,6 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
     result.messageExecution = mapMessageExecution(schema.chat);
     result.models.drawing = mapModel(schema.models.drawing);
     result.models.vision = mapModel(schema.models.vision);
-    result.models.stableDiffusionEndpoint = schema.models.stableDiffusionEndpoint;
-    result.models.stableDiffusionModel = schema.models.stableDiffusionModel;
     result.voice = {
         schema.voice.enabled,
         schema.voice.host,

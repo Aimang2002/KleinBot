@@ -233,8 +233,6 @@ PS: The above only lists some major model platforms. Some local model inference 
 
 Open-source projects can be utilized via API calls or running internally on the server. Supported projects include:
 
-[Stable Diffusion ]()
-
 [GPT-SoVIST ](https://github.com/RVC-Boss/GPT-SoVITS)
 
 [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)

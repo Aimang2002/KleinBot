@@ -20,8 +20,6 @@ struct ModelRuntimeSettings
 {
     ModelEndpointOptions drawing;
     ModelEndpointOptions vision;
-    std::string stableDiffusionEndpoint;
-    std::string stableDiffusionModel;
 };
 
 struct StorageRuntimeSettings
