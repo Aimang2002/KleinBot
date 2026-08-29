@@ -235,8 +235,6 @@ Open-source projects can be utilized via API calls or running internally on the 
 
 [GPT-SoVIST ](https://github.com/RVC-Boss/GPT-SoVITS)
 
-[Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
-
 
 
 
