@@ -38,6 +38,15 @@ public:
     // 设置/归零上下文起点；起点只影响 loadFrom，不删除任何历史行
     void setContextStartId(uint64_t user_id, int64_t startId);
 
+    // 读取某用户持久化的人格（#设置人格 写入），无记录返回空串
+    std::string loadPersona(uint64_t user_id);
+
+    // 写入/覆盖人格；clearUser 与 #重置上下文 不触碰人格行
+    void savePersona(uint64_t user_id, const std::string &prompt);
+
+    // 删除人格记录（#人格还原 回退到 soul.md 默认人格）
+    void clearPersona(uint64_t user_id);
+
     // 单关键词兼容接口，内部使用多查询检索，结果按 id 升序。
     std::vector<TimestampedMessage> search(uint64_t user_id, const std::string &keyword);
 

@@ -42,12 +42,8 @@
         "enabled": false,
         "host": "http://127.0.0.1",
         "port": "9880",
-        "output_directory": "source/voice",
         "reference_audio": "",
         "reference_text": ""
-    },
-    "features": {
-        "accessibility_chat": false
     },
     "memory": {
         "enabled": true,
@@ -80,11 +76,6 @@
     "storage": {
         "conversation_database": "source/conversations.db",
         "image_assets": "source/image_assets"
-    },
-    "resources": {
-        "personality_directory": "source/personality/",
-        "help_file": "source/help.txt",
-        "image_download_directory": "source/images"
     },
     "network": {
         "proxy": ""

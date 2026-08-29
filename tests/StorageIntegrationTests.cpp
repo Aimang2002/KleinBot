@@ -265,6 +265,95 @@ TEST(UserSessionWindowTest, HeavyResetClearsBoundaryAndAllHistory)
     EXPECT_TRUE(bundle->request.history.empty());
 }
 
+TEST(ConversationStoreIntegrationTest, PersonaRoundTripPerUser)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+
+    EXPECT_TRUE(store.loadPersona(10).empty());
+    store.savePersona(10, "第一人格");
+    EXPECT_EQ(store.loadPersona(10), "第一人格");
+    store.savePersona(10, "第二人格");
+    EXPECT_EQ(store.loadPersona(10), "第二人格");
+    EXPECT_TRUE(store.loadPersona(20).empty());
+
+    // clearUser 只清对话历史，人格行保留
+    store.clearUser(10);
+    EXPECT_EQ(store.loadPersona(10), "第二人格");
+
+    store.clearPersona(10);
+    EXPECT_TRUE(store.loadPersona(10).empty());
+}
+
+TEST(UserSessionWindowTest, PersonaPersistsAcrossRestartAndResetRestoresSoulFile)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+
+    const std::string soulPath = temporaryDirectory.path() + "/soul.md";
+    {
+        std::ofstream output(soulPath);
+        output << "  默认人格正文  \n";
+    }
+
+    // 无持久化人格时回退 soul.md（首尾空白被裁掉）
+    {
+        UserSessionService session(registry, store, bot, options, soulPath);
+        EXPECT_EQ(session.getUserConfig(10).system_prompt, "默认人格正文");
+    }
+
+    // #设置人格 落库，重启后恢复
+    {
+        UserSessionService session(registry, store, bot, options, soulPath);
+        session.setPersonality(10, "自定义人格");
+        EXPECT_EQ(session.getUserConfig(10).system_prompt, "自定义人格");
+    }
+    {
+        UserSessionService restarted(registry, store, bot, options, soulPath);
+        EXPECT_EQ(restarted.getUserConfig(10).system_prompt, "自定义人格");
+    }
+
+    // #人格还原 清掉持久化并重读 soul.md
+    {
+        UserSessionService session(registry, store, bot, options, soulPath);
+        session.resetPersonality(10);
+        EXPECT_EQ(session.getUserConfig(10).system_prompt, "默认人格正文");
+    }
+    EXPECT_TRUE(store.loadPersona(10).empty());
+
+    // 彻底重置删历史但保留人格
+    {
+        UserSessionService session(registry, store, bot, options, soulPath);
+        session.setPersonality(10, "保留我");
+        session.appendMessage(10, "user", "内容");
+        session.resetContext(10);
+        EXPECT_EQ(session.getUserConfig(10).system_prompt, "保留我");
+    }
+    {
+        UserSessionService restarted(registry, store, bot, options, soulPath);
+        EXPECT_EQ(restarted.getUserConfig(10).system_prompt, "保留我");
+    }
+}
+
+TEST(UserSessionWindowTest, MissingSoulFileFallsBackToBuiltinDefault)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+
+    UserSessionService session(registry, store, bot, options,
+                               temporaryDirectory.path() + "/no-such-soul.md");
+    EXPECT_EQ(session.getUserConfig(10).system_prompt,
+              "You are my assistant, your name is Klein");
+}
+
 TEST(ResetCommandsIntegrationTest, MapsTriggersToLightAndHeavyResets)
 {
     TemporaryDirectory temporaryDirectory;

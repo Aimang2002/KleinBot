@@ -1,14 +1,11 @@
 #include "HelpCommand.h"
-#include <fstream>
+#include "HelpText.h"
+#include "KleinVersion.h"
 
 CommandResult HelpCommand::execute(const CommandContext &ctx)
 {
-    std::ifstream ifs(helpPath);
-    if (!ifs.is_open())
-    {
-        return {TextMessage{"帮助文件读取失败！"}};
-    }
-    std::string helpContent = std::string(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
-    ifs.close();
-    return {TextMessage{helpContent}};
+    return {TextMessage{std::string(kHelpText) +
+                        "\n\n当前克莱茵版本:" + KLEINBOT_VERSION_STRING +
+                        " (" + KLEINBOT_GIT_HASH + ")" +
+                        "\nCreate:@埃芒"}};
 }

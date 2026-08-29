@@ -17,7 +17,6 @@ std::string baseConfigWith(const std::string &extra)
         "bot": {"id": 1},
         "chat": {"default_model": "test"},
         "models": {"registry_path": "models.json"},
-        "resources": {"personality_directory": "source/personality", "help_file": "source/help.txt"},
         )" + extra + R"(
         "communication": {
             "protocol": {"type": "onebot"},

@@ -4,15 +4,19 @@
 #include "../Persistence/ConversationStore.h"
 #include "../Memory/MemoryService.h"
 #include "../Asset/ImageAssetStore.h"
+#include "../utils/Utils.hpp"
 
 #include <algorithm>
+#include <fstream>
+#include <sstream>
 
 UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store,
-                                       const BotIdentity &bot, const ChatOptions &chat)
+                                       const BotIdentity &bot, const ChatOptions &chat,
+                                       const std::string &soulFile)
     : registry(mr), botIdentity(bot), chatOptions(chat),
       default_personality("You are my assistant, your name is " + bot.name),
       user_messages(std::make_unique<std::unordered_map<uint64_t, Person>>()),
-      store(store)
+      soul_file(soulFile), store(store)
 {
 }
 
@@ -31,7 +35,10 @@ void UserSessionService::setImageAssetStore(ImageAssetStore *store)
 Person UserSessionService::createDefaultPerson(const uint64_t user_id)
 {
     Person person;
-    person.system_prompt = this->default_personality;
+    // 优先恢复持久化的人格（#设置人格），没有记录再回退 soul.md 默认人格
+    person.system_prompt = this->store.loadPersona(user_id);
+    if (person.system_prompt.empty())
+        person.system_prompt = this->loadSoulFallback();
     person.current_model = chatOptions.defaultModel;
     person.isOpenVoiceMode = false;
     person.temperature = chatOptions.temperature;
@@ -39,6 +46,25 @@ Person UserSessionService::createDefaultPerson(const uint64_t user_id)
     person.presence_penalty = chatOptions.presencePenalty;
 
     return person;
+}
+
+std::string UserSessionService::loadSoulFallback()
+{
+    std::ifstream input(this->soul_file);
+    if (!input.is_open())
+    {
+        LOG_WARNING("默认人格文件缺失：" + this->soul_file + "，使用内置默认人格");
+        return this->default_personality;
+    }
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    const std::string soul = utils::trim(buffer.str());
+    if (soul.empty())
+    {
+        LOG_WARNING("默认人格文件为空：" + this->soul_file + "，使用内置默认人格");
+        return this->default_personality;
+    }
+    return soul;
 }
 
 void UserSessionService::ensureUserExistsUnlock(const uint64_t user_id)
@@ -105,6 +131,7 @@ void UserSessionService::setPersonality(const uint64_t user_id, const std::strin
     this->ensureUserExistsUnlock(user_id);
     auto user = this->user_messages->find(user_id);
     user->second.system_prompt = Personality;
+    this->store.savePersona(user_id, Personality);
 }
 
 void UserSessionService::resetPersonality(const uint64_t user_id)
@@ -112,7 +139,9 @@ void UserSessionService::resetPersonality(const uint64_t user_id)
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     auto user = this->user_messages->find(user_id);
-    user->second.system_prompt = this->default_personality;
+    this->store.clearPersona(user_id);
+    // 每次重读 soul.md：管理员改默认人格后，#人格还原 无需重启即可生效
+    user->second.system_prompt = this->loadSoulFallback();
 }
 
 void UserSessionService::switchModel(const uint64_t user_id, const std::string &newModel)

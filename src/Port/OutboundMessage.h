@@ -1,6 +1,7 @@
 #ifndef OUTBOUND_MESSAGE_H
 #define OUTBOUND_MESSAGE_H
 
+#include <optional>
 #include <string>
 #include <variant>
 
@@ -44,5 +45,13 @@ using OutboundMessage = std::variant<
     ImageMessage,
     MusicMessage,
     VoiceMessage>;
+
+// 消息携带语音附件时返回其本地路径，供 transport 在发送落定后清理临时文件
+inline std::optional<std::string> voiceAttachmentPath(const OutboundMessage &message)
+{
+    if (const auto *voice = std::get_if<VoiceMessage>(&message))
+        return voice->audio_path;
+    return std::nullopt;
+}
 
 #endif // OUTBOUND_MESSAGE_H

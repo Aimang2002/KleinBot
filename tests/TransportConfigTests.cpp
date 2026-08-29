@@ -13,10 +13,6 @@ const char *validConfig = R"({
     "bot": {"id": 10001, "manager_id": 10002, "name": "Klein"},
     "chat": {"default_model": "test-model"},
     "models": {"registry_path": "ModelsName.json"},
-    "resources": {
-        "personality_directory": "source/personality/",
-        "help_file": "source/help.txt"
-    },
     "communication": {
         "protocol": {"type": "onebot"},
         "active_transport": "local",
@@ -65,7 +61,6 @@ TEST(ConfigLoaderTest, UsesSafeDefaultsForInvalidOptionalFields)
 {
     nlohmann::json document = nlohmann::json::parse(validConfig);
     document["chat"]["worker_threads"] = "many";
-    document["features"] = {{"accessibility_chat", "yes"}};
 
     ConfigLoader loader;
     const ConfigLoadResult result = loader.loadDocument(document);
@@ -73,17 +68,13 @@ TEST(ConfigLoaderTest, UsesSafeDefaultsForInvalidOptionalFields)
     EXPECT_TRUE(result.canStart());
     ASSERT_NE(result.config, nullptr);
     EXPECT_FALSE(result.config->chat.workerThreads.has_value());
-    EXPECT_FALSE(result.config->accessibilityChat);
     EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "chat.worker_threads"));
-    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "features.accessibility_chat"));
 }
 
 TEST(ConfigLoaderTest, UsesExplicitWorkerThreadCountAsFixedPool)
 {
     nlohmann::json document = nlohmann::json::parse(validConfig);
     document["chat"]["worker_threads"] = 6;
-    document["chat"]["max_pending_messages"] = 2048;
-    document["chat"]["worker_idle_seconds"] = 45;
 
     ConfigLoader loader;
     const ConfigLoadResult result = loader.loadDocument(document);
@@ -95,8 +86,42 @@ TEST(ConfigLoaderTest, UsesExplicitWorkerThreadCountAsFixedPool)
     EXPECT_FALSE(runtime.messageExecution.dynamicScaling);
     EXPECT_EQ(runtime.messageExecution.initialWorkerThreads, 6U);
     EXPECT_EQ(runtime.messageExecution.maxWorkerThreads, 6U);
-    EXPECT_EQ(runtime.messageExecution.maxPendingMessages, 2048U);
-    EXPECT_EQ(runtime.messageExecution.workerIdleSeconds, 45U);
+}
+
+TEST(ConfigLoaderTest, QueueCapacityAndIdleTimeoutStayInternal)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["chat"]["max_pending_messages"] = 2048;
+    document["chat"]["worker_idle_seconds"] = 45;
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    // 历史配置中的键不再被识别：按未知字段忽略并回落到程序内部定值
+    ASSERT_TRUE(result.canStart());
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "chat.max_pending_messages"));
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "chat.worker_idle_seconds"));
+    const RuntimeSettings runtime = buildRuntimeSettings(*result.config);
+    EXPECT_EQ(runtime.messageExecution.maxPendingMessages,
+              MessageExecutionOptions::kMaxPendingMessages);
+    EXPECT_EQ(runtime.messageExecution.workerIdleSeconds,
+              MessageExecutionOptions::kWorkerIdleSeconds);
+}
+
+TEST(ConfigLoaderTest, LegacyMemoryIdleSecondsKeyIsIgnoredAsUnknownField)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["memory"] = {{"enabled", true}, {"batch_turns", 5}, {"idle_seconds", 20}};
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    // idle_seconds 已更名 idle_minutes（单位改为分钟）：旧键按未知字段忽略
+    ASSERT_TRUE(result.canStart());
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning, "memory.idle_seconds"));
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_EQ(result.config->memory.idleMinutes, 1U);
+    EXPECT_EQ(result.config->memory.batchTurns, 5U);
 }
 
 TEST(ConfigLoaderTest, RejectsMissingActiveTransportButIgnoresUnknownFields)

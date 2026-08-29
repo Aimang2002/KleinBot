@@ -56,7 +56,7 @@ private:
     bool enabled = true;
     std::size_t batchTurns = 3;
     std::size_t recallLimit = 8;
-    std::chrono::seconds idleDelay{20};
+    std::chrono::seconds idleDelay{std::chrono::minutes{1}};
 
     std::thread worker;
     std::mutex queueMutex;

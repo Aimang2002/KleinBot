@@ -355,6 +355,17 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
 void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
                             ConfigSnapshotStore &store, const std::atomic<bool> &running)
 {
+    // 页面是面板唯一入口：缺失时报错并放弃启动，不起一个只会回 500 的空服务；
+    // 运行中文件被删的场景仍由 GET / 的 500 分支兜底
+    std::ifstream page(kPanelPagePath);
+    if (!page.is_open())
+    {
+        LOG_ERROR(std::string("Web 配置面板未启动：") + kPanelPagePath +
+                  " 缺失（应与可执行文件同目录，构建时自动同步），请补回文件后重启");
+        return;
+    }
+    page.close();
+
     LOG_INFO("Web 配置面板已启动：http://" + settings.bind + ":" +
              std::to_string(settings.port) + "/（访问令牌来自 webui.access_token）");
     while (running.load())

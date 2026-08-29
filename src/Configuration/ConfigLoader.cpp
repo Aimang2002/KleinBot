@@ -426,8 +426,8 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
 
     Decoder decoder(result.diagnostics);
     decoder.unknownFields(document,
-                          {"schema_version", "bot", "chat", "models", "voice", "features",
-                           "memory", "web_search", "web_fetch", "storage", "resources",
+                          {"schema_version", "bot", "chat", "models", "voice",
+                           "memory", "web_search", "web_fetch", "storage",
                            "network", "communication", "webui"},
                           "$" );
 
@@ -451,8 +451,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         decoder.unknownFields(*chat,
                               {"default_model", "temperature", "top_p", "frequency_penalty",
                                "presence_penalty", "max_message_tokens", "worker_threads",
-                               "max_pending_messages", "worker_idle_seconds",
-                               "message_survival_seconds", "private_action", "group_action"},
+                               "message_survival_seconds"},
                               "chat");
         config.chat.defaultModel = decoder.string(*chat, "default_model", "chat.default_model", {}, true);
         config.chat.temperature = decoder.number(*chat, "temperature", "chat.temperature", 1.0, 0.0, 2.0);
@@ -468,14 +467,8 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
             if (workerThreads >= 1)
                 config.chat.workerThreads = static_cast<std::size_t>(workerThreads);
         }
-        config.chat.maxPendingMessages = static_cast<std::size_t>(decoder.integer(
-            *chat, "max_pending_messages", "chat.max_pending_messages", 1024, 1, 1000000));
-        config.chat.workerIdleSeconds = static_cast<std::size_t>(decoder.integer(
-            *chat, "worker_idle_seconds", "chat.worker_idle_seconds", 30, 1, 3600));
         config.chat.messageSurvivalSeconds = decoder.integer(
             *chat, "message_survival_seconds", "chat.message_survival_seconds", 3600, 1, std::numeric_limits<int>::max());
-        config.chat.privateAction = decoder.string(*chat, "private_action", "chat.private_action", "send_private_msg");
-        config.chat.groupAction = decoder.string(*chat, "group_action", "chat.group_action", "send_group_msg");
     }
 
     const json *models = decoder.object(document, "models", "models", true);
@@ -497,14 +490,13 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     const json *voice = decoder.object(document, "voice", "voice");
     if (voice != nullptr)
     {
-        decoder.unknownFields(*voice, {"enabled", "host", "port", "output_directory", "reference_audio", "reference_text"}, "voice");
+        decoder.unknownFields(*voice, {"enabled", "host", "port", "reference_audio", "reference_text"}, "voice");
         config.voice.enabled = decoder.boolean(*voice, "enabled", "voice.enabled", false);
         config.voice.host = decoder.string(*voice, "host", "voice.host");
         config.voice.port = decoder.string(*voice, "port", "voice.port");
-        config.voice.outputDirectory = decoder.string(*voice, "output_directory", "voice.output_directory");
         config.voice.referenceAudioPath = decoder.string(*voice, "reference_audio", "voice.reference_audio");
         config.voice.referenceText = decoder.string(*voice, "reference_text", "voice.reference_text");
-        if (config.voice.enabled && (config.voice.host.empty() || config.voice.port.empty() || config.voice.outputDirectory.empty()))
+        if (config.voice.enabled && (config.voice.host.empty() || config.voice.port.empty()))
         {
             config.voice.enabled = false;
             decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Dependency,
@@ -512,22 +504,17 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         }
     }
 
-    const json *features = decoder.object(document, "features", "features");
-    if (features != nullptr)
-    {
-        decoder.unknownFields(*features, {"accessibility_chat"}, "features");
-        config.accessibilityChat = decoder.boolean(
-            *features, "accessibility_chat", "features.accessibility_chat", false);
-    }
+    // features 段已废弃（accessibility_chat 开关移除，上下文模式仅管理员）：
+    // 残留内容落入顶层 unknownFields 检查，仅提示后忽略
 
     const json *memory = decoder.object(document, "memory", "memory");
     if (memory != nullptr)
     {
-        decoder.unknownFields(*memory, {"enabled", "model", "batch_turns", "idle_seconds", "recall_limit"}, "memory");
+        decoder.unknownFields(*memory, {"enabled", "model", "batch_turns", "idle_minutes", "recall_limit"}, "memory");
         config.memory.enabled = decoder.boolean(*memory, "enabled", "memory.enabled", true);
         config.memory.model = decoder.string(*memory, "model", "memory.model", config.chat.defaultModel);
         config.memory.batchTurns = static_cast<std::size_t>(decoder.integer(*memory, "batch_turns", "memory.batch_turns", 3, 1, 1000));
-        config.memory.idleSeconds = static_cast<std::size_t>(decoder.integer(*memory, "idle_seconds", "memory.idle_seconds", 20, 1, 86400));
+        config.memory.idleMinutes = static_cast<std::size_t>(decoder.integer(*memory, "idle_minutes", "memory.idle_minutes", 1, 1, 1440));
         config.memory.recallLimit = static_cast<std::size_t>(decoder.integer(*memory, "recall_limit", "memory.recall_limit", 8, 1, 1000));
     }
     else
@@ -630,14 +617,8 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         config.storage.imageAssets = decoder.string(*storage, "image_assets", "storage.image_assets", "source/image_assets");
     }
 
-    const json *resources = decoder.object(document, "resources", "resources", true);
-    if (resources != nullptr)
-    {
-        decoder.unknownFields(*resources, {"personality_directory", "help_file", "image_download_directory"}, "resources");
-        config.resources.personalityDirectory = decoder.string(*resources, "personality_directory", "resources.personality_directory", {}, true);
-        config.resources.helpFile = decoder.string(*resources, "help_file", "resources.help_file", {}, true);
-        config.resources.imageDownloadDirectory = decoder.string(*resources, "image_download_directory", "resources.image_download_directory");
-    }
+    // resources 段已废弃（help 内置、图片下载功能移除）：残留内容落入顶层
+    // unknownFields 检查，仅提示后忽略
 
     const json *network = decoder.object(document, "network", "network");
     if (network != nullptr)

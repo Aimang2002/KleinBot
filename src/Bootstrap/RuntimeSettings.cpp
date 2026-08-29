@@ -6,7 +6,7 @@
 
 namespace
 {
-ModelEndpointOptions mapModel(const ModelEndpointSchema &schema)
+    ModelEndpointOptions mapModel(const ModelEndpointSchema &schema)
     {
         return {schema.model, schema.endpoint, schema.apiKey, schema.apiStandard};
     }
@@ -42,11 +42,11 @@ ModelEndpointOptions mapModel(const ModelEndpointSchema &schema)
             result.http.apiAuthToken = profile.apiAccessToken;
             result.http.eventBindHost = profile.eventBindHost;
             result.http.eventBindPort = profile.eventBindPort;
-        result.http.eventPath = profile.eventPath;
-        result.http.eventAuthToken = profile.eventAccessToken;
-        result.http.eventSignatureSecret = profile.eventSecret.empty()
-            ? profile.eventAccessToken
-            : profile.eventSecret;
+            result.http.eventPath = profile.eventPath;
+            result.http.eventAuthToken = profile.eventAccessToken;
+            result.http.eventSignatureSecret = profile.eventSecret.empty()
+                                                   ? profile.eventAccessToken
+                                                   : profile.eventSecret;
         }
         return result;
     }
@@ -54,9 +54,8 @@ ModelEndpointOptions mapModel(const ModelEndpointSchema &schema)
 
 MessageExecutionOptions mapMessageExecution(const ChatSchema &chat)
 {
+    // 队列容量与空闲超时使用 MessageExecutionOptions 的内部定值，仅线程数来自配置
     MessageExecutionOptions result;
-    result.maxPendingMessages = chat.maxPendingMessages;
-    result.workerIdleSeconds = chat.workerIdleSeconds;
     if (chat.workerThreads.has_value())
     {
         result.initialWorkerThreads = *chat.workerThreads;
@@ -87,9 +86,7 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.chat.frequencyPenalty,
         schema.chat.presencePenalty,
         schema.chat.maxMessageTokens,
-        schema.chat.messageSurvivalSeconds,
-        schema.chat.privateAction,
-        schema.chat.groupAction};
+        schema.chat.messageSurvivalSeconds};
     result.messageExecution = mapMessageExecution(schema.chat);
     result.models.registryPath = schema.models.registryPath;
     result.models.drawing = mapModel(schema.models.drawing);
@@ -100,14 +97,13 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.voice.enabled,
         schema.voice.host,
         schema.voice.port,
-        schema.voice.outputDirectory,
         schema.voice.referenceAudioPath,
         schema.voice.referenceText};
     result.memory = {
         schema.memory.enabled,
         schema.memory.model,
         schema.memory.batchTurns,
-        schema.memory.idleSeconds,
+        schema.memory.idleMinutes,
         schema.memory.recallLimit};
     result.webSearch = {
         schema.webSearch.enabled,
@@ -135,10 +131,6 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.bot.groupChatEnabled};
     result.dock.proxy = schema.proxy;
     result.storage = {schema.storage.conversationDatabase, schema.storage.imageAssets};
-    result.resources = {
-        schema.resources.personalityDirectory,
-        schema.resources.helpFile,
-        schema.resources.imageDownloadDirectory};
     result.transport = mapTransport(schema.communication);
     result.webUi = {schema.webUi.enabled, schema.webUi.bind,
                     schema.webUi.port, schema.webUi.accessToken};

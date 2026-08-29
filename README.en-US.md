@@ -21,6 +21,7 @@
     <a href="#compatibility"><img src="https://img.shields.io/badge/protocol-OneBot%2011-green" alt="OneBot 11"></a>
     <a href="#agent-runtime-and-tools"><img src="https://img.shields.io/badge/Agent-tool%20calling-purple" alt="Agent tool calling"></a>
     <a href="#features"><img src="https://img.shields.io/badge/multimodal-application%20layer-orange" alt="Application-layer multimodal"></a>
+    <a href="#license"><img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License"></a>
   </p>
 
 
@@ -161,10 +162,11 @@ All built-in commands start with "#". They are primarily used to control various
 |     Command      |                           Description                           | Example                                                         |
 | :-----------: | :----------------------------------------------------------: | ------------------------------------------------------------ |
 | `#帮助` | Introduces the available operations | `#帮助` |
-| `#重置对话` | Clears the user's context, personality, and long-term memory | `#重置对话` |
+| `#重置对话` | Clears the current conversation window for a fresh topic; history and long-term memory are kept and still recallable | `#重置对话` |
+| `#重置上下文` | Completely deletes all conversation history, long-term memory, and images | `#重置上下文` |
 | `#删除上条对话` | Rewinds the most recent conversation turn (`#rewind` / `#undo` are aliases) | `#删除上条对话` |
-| `#设置人格` | Sets a custom personality description | `#设置人格:你是一个傲娇猫娘` |
-| `#人格还原` | Restores the default personality | `#人格还原` |
+| `#设置人格` | Sets a custom personality description, persisted to SQLite across restarts | `#设置人格:你是一个傲娇猫娘` |
+| `#人格还原` | Clears the custom personality and restores the `source/soul.md` default | `#人格还原` |
 | `#切换模型` | Switches to a registered model | `#切换模型:deepseek-chat` |
 | `#查询当前模型` | Shows the model currently in use | `#查询当前模型` |
 | `#模型列表` | Lists all registered models | `#模型列表` |
@@ -181,7 +183,7 @@ Some public capabilities can also be triggered with natural language, without th
 | Generate an image | “Draw a cyberpunk city for me” |
 | Set, list, or cancel reminders | “Remind me to attend the meeting at 9 tomorrow morning” / “What reminders do I have?” |
 
-Natural-language triggering depends on the model's ability and the relevant feature configuration. Commands such as `#重置对话`, `#设置人格`, `#人格还原`, and `#切换模型` still require the explicit command format.
+Natural-language triggering depends on the model's ability and the relevant feature configuration. Commands such as `#重置对话`, `#重置上下文`, `#设置人格`, `#人格还原`, and `#切换模型` still require the explicit command format.
 
 
 
@@ -242,62 +244,16 @@ Open-source projects can be utilized via API calls or running internally on the 
 
 # Configuration File
 
-Below is an explanation of the configuration file parameters:
+KleinBot reads `config.json` from the working directory at startup. On first run a placeholder skeleton is generated automatically (the Web panel comes up with it and its access token is printed in the startup log); the committed `config.example.json` is a complete template without secrets.
 
-| Parameter Name                        | Description                                            |
-| ----------------------------- | --------------------------------------------------- |
-| CONTEXT_MAX                   | Maximum number of tokens for context; recommended range is 1000~99999         |
-| MODEL_SIGLE_TOKEN_MAX         | Maximum number of tokens sent to the model per request; recommended range is 100~4999 |
-| GLOBAL_VOICE                  | Whether to enable voice inference (true/false)                      |
-| ACCESSIBLITY_CHAT             | Whether to enable accessibility chat (true/false)                    |
-| CONFIG_VERSION                | Configuration file version                                        |
-| GROUP_API                     | Generally, it is not recommended to modify this                              |
-| PRIVATE_API                   | Generally, it is not recommended to modify this                              |
-| QBOT_NAME                     | Bot name, customizable                                |
-| OPEN_GROUPCHAT_MESSAGE        | Whether to enable group chat (true/false)                          |
-| MANAGER_QQ                    | Administrator QQ ID                                            |
-| BOT_QQ                        | Bot QQ ID                                            |
-| WEBSOCKET_MESSAGE_IP          | Forward WebSocket IP address                                       |
-| WEBSOCKET_MESSAGE_PORT        | Forward WebSocket Port                                         |
-| REVERSEWEBSOCKET_MESSAGE_IP   | Reverse WebSocket IP address                                       |
-| REVERSEWEBSOCKET_MESSAGE_PORT | Reverse WebSocket Port                                         |
-| WYY_SONGID_PATH               | NetEase Cloud Music ID file path                                |
-| HELP_PATH                     | #help text file path                                  |
-| HELP_PERSONALITY_PATH         | #personality_help text file path                              |
-| PERSONALITY_PATH              | Personality directory path                                        |
-| CHATMODELS_PATH               | Model name registration path                                    |
-| temperature                   | "Temperature" hyperparameter, defaults to 1                               |
-| top_p                         | Nucleus sampling, defaults to 1                                      |
-| frequency_penalty             | Frequency penalty, defaults to 0                                   |
-| presence_penalty              | Presence penalty, defaults to 0                                   |
-| MESSAGE_SURVIVAL_TIME         | Context survival time, unit is seconds                            |
-| IMAGE_DOWNLOAD_PATH           | Image download storage path, used for image analysis                |
-| XXX_MODEL_API_KEY             | API KEY for requesting the model                                   |
-| XXX_MODEL_ENDPOINT            | Request endpoint for the model                                  |
-| XXX_DEFAULT_MODEL             | Requested model name                                          |
-| XXX_MODEL_APISTANDARD         | API standard used by the model                                   |
-| STABLEDIFFUSION_ENDPOINT      | Request endpoint for Stable Diffusion                         |
-| DEFAULT_MODEL                 | Default model for Stable Diffusion, leave empty for now               |
-| VIST_API_URL                  | IP address for GPT-SoVIST API                                  |
-| VIST_API_PORT                 | Port for GPT-SoVIST API                                |
-| VIST_REFERVOICE_PATH          | Reference audio for GPT-SoVIST                               |
-| VIST_REFERVOICE_TEXT          | Reference audio text for GPT-SoVIST                           |
-| VIST_FILE_SAVE_PATH           | Storage location for audio files after GPT-SoVIST inference                 |
-| REALESGAN_PATH                | Path to the Real-ESRGAN project                                 |
-| REALESGAN_MODEL               | Restoration model used by Real-ESRGAN                             |
-| IMAGE_DOWNLOAD_PATH           | Location for downloaded images (for Real-ESRGAN use)                   |
+The root object is divided by responsibility: `bot`, `chat`, `models`, `features`, `memory`, `web_search`, `web_fetch`, `storage`, `network`, `communication`, and `webui`. Secret fields (API keys, tokens) accept either a local literal or an environment variable via `from_env`; the latter is recommended.
 
+See `README.md` (Chinese) for the full parameter reference.
 
 
 # Source Directory Introduction
 
-+ help
-
-  + Contains the text for the `#帮助` command.
-
-+ image
-
-  + None.
+The `#帮助` text is hard-coded in `src/Command/HelpText.h` and compiled into the executable (the content is final; when it does change, only that single file needs editing). TTS audio is written to the system temp directory (`/tmp/kleinbot/` on Linux, `%TEMP%\kleinbot\` on Windows) and deleted after being sent.
 
 + Model
 
@@ -335,31 +291,9 @@ Below is an explanation of the configuration file parameters:
     
     
 
-+ personality
++ soul.md
 
-  + Stores various personality files. By default, `personality.txt` exists. The writing specification for other personality files is as follows:
-
-    ~~~
-    Rersonality:{Personality Description}
-    
-    Temperture:{1}
-    
-    Top_p:{1}
-    
-    Frequency_penalty:{0}
-    
-    Presence_penalty:{0}
-    ~~~
-
-    Strictly adhere to this format. Personality files can be added indefinitely, allowing you to create various personalities and adjust hyperparameters. However, note that hyperparameter adjustments should only be made if you understand their effects; otherwise, use the default values.
-
-+ Song
-
-  + Folder storing NetEase Cloud Music IDs
-
-+ voice
-
-  + None
+  + Plain-text default persona. Users without a custom personality set via `#设置人格` get this file as their system prompt. If the file is missing, a built-in English fallback is used.
 
 
 
@@ -372,3 +306,7 @@ Below is an explanation of the configuration file parameters:
 + [curl](https://curl.se/)
 + [SQLite](https://www.sqlite.org/)
 + [GoogleTest](https://github.com/google/googletest)
+
+# License
+
+This project is released under the [MIT License](LICENSE). Third-party dependencies shipped in the repository (nlohmann/json, Boost headers, cpp-httplib, etc.) retain their original licenses. Release packages must include third-party license notices and must not contain user data or secrets.

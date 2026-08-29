@@ -8,7 +8,7 @@
 
 *KleinBot 是一个以 QQ 为交互载体、在应用层实现多模态感知、工具调用与任务编排的对话式 Agent*
 
-[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)](#快速开始) [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)](#快速开始) [![OneBot](https://img.shields.io/badge/protocol-OneBot%2011-green)](#简介) [![Agent](https://img.shields.io/badge/Agent-tool%20calling-purple)](#核心特性) [![Multimodal](https://img.shields.io/badge/multimodal-application%20layer-orange)](#核心特性)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)](#快速开始) [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)](#快速开始) [![OneBot](https://img.shields.io/badge/protocol-OneBot%2011-green)](#简介) [![Agent](https://img.shields.io/badge/Agent-tool%20calling-purple)](#核心特性) [![Multimodal](https://img.shields.io/badge/multimodal-application%20layer-orange)](#核心特性) [![License](https://img.shields.io/badge/license-MIT-yellow)](#开源协议)
 
 </div>
 
@@ -30,6 +30,7 @@
 - [运行资源目录](#运行资源目录)
 - [开发与测试](#开发与测试)
 - [鸣谢](#鸣谢)
+- [开源协议](#开源协议)
 
 ## 简介
 
@@ -46,6 +47,7 @@ KleinBot（下文简称 **Klein**）是一个使用 C++17 开发、以 QQ 为交
 | **Agent Loop** | 模型自主决定调用哪些工具、调用几轮，直到给出回答；应用层负责工具执行、结果回灌和边界控制；对产生畸形参数的第三方网关做了兼容 |
 | **联网能力** | `klein_web_search` 关键词检索（Tavily，时间策略由模型参数表达）+ `klein_web_fetch` 抓取指定链接正文（超长内容自动按问题摘要） |
 | **长期记忆** | 无向量检索的用户资料、偏好与事实记忆，后台自动提取、按需召回，`#重置上下文` 一并清除 |
+| **Web 配置面板** | 浏览器中表单化编辑全部配置：Klein 主题控制台界面、密钥掩码显示、保存即校验并原子写回、按影响等级报告变更 |
 | **多模态** | 支持视觉的模型直接读图，其余模型自动走独立视觉模型；图片按用户隔离存储为可复用资产 |
 | **语音回复** | 对接 [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) 的文字转语音 |
 | **定时提醒** | 自然语言注册（模型解析为结构化时间）、SQLite 持久化、每天/每周重复，重启后 24 小时内漏触发的提醒会补发 |
@@ -69,7 +71,7 @@ cmake --preset linux-release
 cmake --build --preset linux-release
 ```
 
-产物：`build/linux-release/KleinQBot2.4.0`
+产物：`build/linux-release/KleinBot`（文件名不含版本号，版本与构建信息用 `--version` 查看）
 
 ### Windows
 
@@ -80,7 +82,7 @@ cmake --preset windows-mingw-release
 cmake --build --preset windows-mingw-release
 ```
 
-产物：`build/windows-mingw-release/KleinQBot2.4.0.exe`（默认静态链接 MinGW 运行时，仅依赖 Windows 系统 DLL）
+产物：`build/windows-mingw-release/KleinBot.exe`（默认静态链接 MinGW 运行时，仅依赖 Windows 系统 DLL）
 
 > 若 CMake 报错 `POSIX thread support`，说明当前 MinGW 使用 win32 线程模型，请更换为带 POSIX 线程支持的工具链。
 
@@ -89,6 +91,12 @@ cmake --build --preset windows-mingw-release
 1. 首次运行：工作目录下没有 `config.json` 时会自动生成一份占位骨架（Web 面板同时启用，访问令牌打印在启动日志中），也可以手动复制 `config.example.json` 为 `config.json`；
 2. 准备一个 OneBot 协议端（如 [LLOneBot](https://github.com/LLOneBot/LLOneBot)）并建立通信；
 3. 运行可执行文件，向机器人私聊或群内 @ 它即可对话。
+
+查看构建信息（版本号、git 提交、构建时间、构建类型、编译器、libc 版本、架构）：
+
+```bash
+./KleinBot --version   # 或简写 -V
+```
 
 ## 配置
 
@@ -100,13 +108,12 @@ KleinBot 使用 Schema 化 JSON 配置，运行时读取当前工作目录的 `c
 | `bot` | Bot ID、管理员、名称和群聊策略 |
 | `chat` | 默认模型、采样参数、消息限制和 OneBot action 名称 |
 | `models` | 模型注册文件、绘图、视觉和 Stable Diffusion 配置 |
-| `voice` | TTS 开关、服务地址、输出目录和参考音频 |
+| `voice` | TTS 开关、服务地址和参考音频（音频写入系统临时目录） |
 | `features` | 可选业务功能开关 |
 | `memory` | 长期记忆模型、批次和召回限制 |
 | `web_search` | Tavily 联网搜索、超时和单次结果裁剪配置 |
 | `web_fetch` | 网页抓取工具的正文上限、超时和缓存配置 |
 | `storage` | SQLite 与图片资源目录 |
-| `resources` | 人格、帮助文件和下载目录 |
 | `network` | 公共代理配置 |
 | `communication` | 协议、活动传输 Profile 和网络默认值 |
 | `webui` | Web 配置面板开关、绑定地址、端口和访问令牌 |
@@ -209,9 +216,9 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 export KLEIN_WEBUI_TOKEN="自定一个强令牌"
 ```
 
-启动后访问 `http://127.0.0.1:55346/`，首次打开输入访问令牌即可。面板行为：
+启动后访问 `http://127.0.0.1:55346/`，首次打开输入访问令牌即可（输错会有即时提示）。面板为侧边导航的控制台布局，深色 Klein 主题，左侧按配置模块分区导航，右侧编辑对应分区。面板行为：
 
-- 页面文件 `panel.html` 位于可执行文件旁（构建时自动从 `src/WebUI/panel.html` 同步），改动后刷新浏览器即可生效；
+- 页面文件 `panel.html` 位于可执行文件旁（构建时自动从 `src/WebUI/panel.html` 同步），改动后刷新浏览器即可生效；文件缺失时 Web 面板不会启动（启动日志报 error 级提示），补回文件后重启即可恢复；
 - 表单化编辑全部配置节（含未知字段），保存时先跑与启动一致的完整校验，不合法直接拒绝并逐字段提示，不会写坏文件；
 - 字段标签和分区标题悬停会显示用途说明，包括取值范围与生效方式（保存即生效 / 需重启）；
 - “模型供应商”页管理 `source/ModelsName.json`：添加/删除供应商、批量填写模型名称、选择 API 标准，注册表保存后需重启机器人加载；
@@ -268,8 +275,8 @@ export KLEIN_WEBUI_TOKEN="自定一个强令牌"
 | `#重置对话` | 清空当前对话上下文、换个话题重新开始；历史记录与长期记忆保留，旧话题仍可召回 | `#重置对话` |
 | `#重置上下文` | 彻底删除该用户全部对话历史、长期记忆与图片资源 | `#重置上下文` |
 | `#删除上条对话` | 回退最近一轮对话（别名 `#rewind` / `#undo`） | `#删除上条对话` |
-| `#设置人格` | 设置自定义人格描述 | `#设置人格:你是一个傲娇猫娘` |
-| `#人格还原` | 恢复默认人格 | `#人格还原` |
+| `#设置人格` | 设置自定义人格描述，持久化到 SQLite，重启后保留 | `#设置人格:你是一个傲娇猫娘` |
+| `#人格还原` | 清除自定义人格，恢复 `source/soul.md` 默认人格 | `#人格还原` |
 | `#切换模型` | 切换到已注册的模型 | `#切换模型:deepseek-chat` |
 | `#查询当前模型` | 查询当前使用的模型 | `#查询当前模型` |
 | `#模型列表` | 列出所有已注册模型 | `#模型列表` |
@@ -294,7 +301,6 @@ export KLEIN_WEBUI_TOKEN="自定一个强令牌"
 
 | 命令 | 说明 |
 | --- | --- |
-| `#开启无障碍聊天` / `#关闭无障碍聊天` | 开关普通用户的上下文聊天 |
 | `#激活语音` / `#冻结语音` | 全局允许 / 禁止语音回复 |
 | `#刷新配置文件` | 重新校验并加载配置（见[配置校验与热刷新](#配置校验与热刷新)） |
 | `#获取服务器inet4` / `#获取服务器inet6` | 获取本机所有 IPv4 / IPv6 地址 |
@@ -321,7 +327,7 @@ export KLEIN_WEBUI_TOKEN="自定一个强令牌"
 | `cancel_reminder` | 取消指定编号的提醒 | 「把提醒取消了」 |
 | `get_current_model` | 查询当前使用的模型 | 「你现在是什么模型」 |
 | `set_voice_mode` | 开关当前用户的语音回复 | 「用语音回复我」 |
-| `admin_control` | 管理员控制（无障碍聊天、语音开关、刷新配置等） | 管理员命令对应 |
+| `admin_control` | 管理员控制（语音开关、刷新配置、服务器网络查询） | 管理员命令对应 |
 | `get_time` | 获取当前时间 | 时间相关问题 |
 
 工具循环为标准 agent loop：模型请求工具 → Klein 执行并把结果回灌 → 模型继续，直到给出文本回答或达到轮次上限（达到上限时基于已收集的证据收尾作答）。联网相关两个工具默认关闭，启用方式见[配置](#配置)。
@@ -341,7 +347,7 @@ Klein 完整保存原始对话，并在后台从多轮对话中提取用户资�
 - **Agent 运行时**：`ChatService` 负责一次任务的运行时编排，`ToolRegistry` 暴露可用工具，`ToolContext` 传递用户、消息和会话上下文；这一层也承担 Harness 的职责：模型负责意图判断与工具选择，应用层负责执行边界与结果整合。
 - **Agent Loop**：模型请求工具 → Klein 校验权限并执行 → 工具结果与出站消息回灌 → 模型继续规划，直到返回最终回答、工具产生终止消息或达到轮次上限。
 - **消息调度**：按 `user_id` 分片的 `KeyedTaskScheduler`——同一用户严格串行，不同用户并行。未配置 `chat.worker_threads` 时初始线程数为 CPU 逻辑核心数、最大 4 倍，空闲自动缩减。
-- **背压**：待处理消息默认最多 1024 条（`chat.max_pending_messages`），达到上限时拒绝新消息并返回繁忙提示。
+- **背压**：待处理消息最多 1024 条（程序内部定值），达到上限时拒绝新消息并返回繁忙提示。
 - **优雅退出**：所有线程共享运行状态，收到 `SIGINT` / `SIGTERM` 后停止重连、等待任务结束并依次回收资源；日志线程退出前排空日志队列。
 - **定时提醒**：后台线程每 3 秒轮询到期提醒，经模型渲染后私聊送达（模型失败时兜底直发原文）；提醒持久化于 SQLite（`reminders` 表），重启后 24 小时内漏触发的补发、超窗的滚动到下一轮或丢弃。
 - **图片资产**：聊天图片按用户隔离存储，上下文中以 `asset_id` 占位；`#重置上下文` 会同步清理关联图片文件。
@@ -352,12 +358,12 @@ Klein 完整保存原始对话，并在后台从多轮对话中提取用户资�
 
 | 目录 | 作用 |
 | --- | --- |
-| `help/` | `#帮助` 的文本（`help.txt`、`help_personality.txt`） |
 | `Model/` | 模型注册文件 `ModelsName.json`（实际路径由 `models.registry_path` 决定，见[模型接入](#模型接入)） |
-| `personality/` | 人格文件，默认 `personality.txt`，可无限扩展 |
-| `Song/` | 网易云音乐曲库 ID |
-| `image/` | 图片下载目录 |
-| `voice/` | TTS 音频输出目录 |
+| `soul.md` | 默认人格文本；未用 `#设置人格` 设置自定义人格的用户读取此文件，文件缺失时使用内置英文兜底 |
+| `image_assets/` | 聊天图片资产（按用户隔离，`#重置上下文` 时同步清理） |
+| `conversations.db` | 会话、记忆、提醒、图片资产元数据的 SQLite 数据库 |
+
+`#帮助` 的文本硬编码于 `src/Command/HelpText.h` 并编译进可执行文件（内容定稿后不常改，调整时只改该文件）；TTS 生成的语音写入系统临时目录（Linux `/tmp/kleinbot/`、Windows `%TEMP%\kleinbot\`），发送成功后自动删除。
 
 ## 开发与测试
 
@@ -382,6 +388,10 @@ ctest --preset linux-debug
 - [curl](https://curl.se/)
 - [SQLite](https://www.sqlite.org/)
 - [GoogleTest](https://github.com/google/googletest)
+
+## 开源协议
+
+本项目以 [MIT License](LICENSE) 开源。随仓库分发的第三方依赖（nlohmann/json、Boost 头文件、cpp-httplib 等）保留其原始许可证；发布包须附带第三方许可声明，且不得包含用户数据与密钥。
 
 ---
 

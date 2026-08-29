@@ -53,11 +53,6 @@ nlohmann::json CloudMusicID::searchSong(const std::string songName)
     std::string params = "s=" + songName + "&type=1&limit=1";
     std::string request = urlEncode(url + "?" + params);
 
-#if defined(__WIN32) || defined(__WIN64)
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(curl, CURLOPT_CAINFO, "cacert.pem");
-#endif
     curl_easy_setopt(curl, CURLOPT_URL, request.c_str());
 
     struct curl_slist *headers = NULL;

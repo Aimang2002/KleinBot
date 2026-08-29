@@ -31,13 +31,6 @@ struct StorageRuntimeSettings
     std::string imageAssets;
 };
 
-struct ResourceRuntimeSettings
-{
-    std::string personalityDirectory;
-    std::string helpFile;
-    std::string imageDownloadDirectory;
-};
-
 struct WebUiSettings
 {
     bool enabled = false;
@@ -60,7 +53,6 @@ struct RuntimeSettings
     MessageExecutionOptions messageExecution;
     DockOptions dock;
     StorageRuntimeSettings storage;
-    ResourceRuntimeSettings resources;
     TransportConfig transport;
     WebUiSettings webUi;
 };

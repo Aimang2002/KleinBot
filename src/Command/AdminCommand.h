@@ -20,7 +20,7 @@ public:
 
 private:
     Action &action;
-    std::unordered_set<std::string> cmds = {"#开启无障碍聊天", "#关闭无障碍聊天", "#刷新配置文件", "#激活语音", "#冻结语音", "#获取服务器inet4", "#获取服务器inet6", "#获取服务器公网IP"};
+    std::unordered_set<std::string> cmds = {"#刷新配置文件", "#激活语音", "#冻结语音", "#获取服务器inet4", "#获取服务器inet6", "#获取服务器公网IP"};
 };
 
 #endif // ADMINCOMMAND_H

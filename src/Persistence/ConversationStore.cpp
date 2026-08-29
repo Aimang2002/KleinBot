@@ -58,6 +58,13 @@ ConversationStore::ConversationStore(const std::string &dbPath)
         " user_id INTEGER PRIMARY KEY,"
         " context_start_id INTEGER NOT NULL DEFAULT 0);",
         nullptr, nullptr, nullptr);
+    // 用户人格表：#设置人格 的持久化，重启后还原；clearUser 不动这张表，
+    // #重置上下文 删历史但保留人格的语义由调用方保证
+    sqlite3_exec(db,
+        "CREATE TABLE IF NOT EXISTS user_persona ("
+        " user_id INTEGER PRIMARY KEY,"
+        " prompt TEXT NOT NULL);",
+        nullptr, nullptr, nullptr);
 }
 
 ConversationStore::~ConversationStore()
@@ -196,6 +203,69 @@ void ConversationStore::setContextStartId(uint64_t user_id, int64_t startId)
     sqlite3_bind_int64(stmt, 2, static_cast<sqlite3_int64>(startId));
     if (sqlite3_step(stmt) != SQLITE_DONE)
         LOG_ERROR("setContextStartId step 失败：" + std::string(sqlite3_errmsg(db)));
+    sqlite3_finalize(stmt);
+}
+
+std::string ConversationStore::loadPersona(uint64_t user_id)
+{
+    std::lock_guard<std::mutex> lock(dbMutex);
+    if (!db)
+        return {};
+    const char *sql = "SELECT prompt FROM user_persona WHERE user_id=?;";
+    sqlite3_stmt *stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    {
+        LOG_ERROR("loadPersona prepare 失败：" + std::string(sqlite3_errmsg(db)));
+        return {};
+    }
+    std::string prompt;
+    sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(user_id));
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        const unsigned char *text = sqlite3_column_text(stmt, 0);
+        if (text != nullptr)
+            prompt = reinterpret_cast<const char *>(text);
+    }
+    sqlite3_finalize(stmt);
+    return prompt;
+}
+
+void ConversationStore::savePersona(uint64_t user_id, const std::string &prompt)
+{
+    std::lock_guard<std::mutex> lock(dbMutex);
+    if (!db)
+        return;
+    const char *sql =
+        "INSERT INTO user_persona (user_id, prompt) VALUES (?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET prompt=excluded.prompt;";
+    sqlite3_stmt *stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    {
+        LOG_ERROR("savePersona prepare 失败：" + std::string(sqlite3_errmsg(db)));
+        return;
+    }
+    sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(user_id));
+    sqlite3_bind_text(stmt, 2, prompt.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) != SQLITE_DONE)
+        LOG_ERROR("savePersona step 失败：" + std::string(sqlite3_errmsg(db)));
+    sqlite3_finalize(stmt);
+}
+
+void ConversationStore::clearPersona(uint64_t user_id)
+{
+    std::lock_guard<std::mutex> lock(dbMutex);
+    if (!db)
+        return;
+    const char *sql = "DELETE FROM user_persona WHERE user_id=?;";
+    sqlite3_stmt *stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    {
+        LOG_ERROR("clearPersona prepare 失败：" + std::string(sqlite3_errmsg(db)));
+        return;
+    }
+    sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(user_id));
+    if (sqlite3_step(stmt) != SQLITE_DONE)
+        LOG_ERROR("clearPersona step 失败：" + std::string(sqlite3_errmsg(db)));
     sqlite3_finalize(stmt);
 }
 

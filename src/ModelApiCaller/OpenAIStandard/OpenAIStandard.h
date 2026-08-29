@@ -40,9 +40,6 @@ private:
     // Response json 合法性验证
     //  std::string ResponseJsonVerify(std::string str, std::string sub = "}}");
 
-    // 证证书合法性(windows下)
-    void VerifyCertificate(CURL *curl);
-
 private:
     std::string proxy;
     const std::atomic<bool> *running;

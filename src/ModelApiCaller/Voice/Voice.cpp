@@ -22,21 +22,46 @@ std::string Voice::toAudio(const std::string &text)
      * 目前文本转语音仅支持中文
      */
 
-    // 创建语音文件
-    auto now = std::chrono::system_clock::now();
-    std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
-    std::filesystem::path filePath = config.outputDirectory;
-    filePath /= std::to_string(timestamp) + ".wav";
+    // 语音文件写入系统临时目录（Linux /tmp、Windows %TEMP%）下的专用子目录，
+    // 发送成功后由 transport 层删除；文件名带毫秒时间戳 + 进程内序号，
+    // 避免多个 worker 线程同一秒合成时互相覆盖
+    std::error_code pathError;
+    const std::filesystem::path voiceDir =
+        std::filesystem::temp_directory_path(pathError) / "kleinbot";
+    if (pathError)
+    {
+        LOG_ERROR("无法定位系统临时目录：" + pathError.message());
+        return "系统提示：无法创建输出文件";
+    }
+    std::error_code dirError;
+    std::filesystem::create_directories(voiceDir, dirError);
+    if (dirError)
+    {
+        LOG_ERROR("无法创建语音输出目录：" + voiceDir.string() + "，" + dirError.message());
+        return "系统提示：无法创建输出文件";
+    }
+
+    static std::atomic<uint64_t> fileSequence{0};
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch());
+    std::filesystem::path filePath = voiceDir /
+        (std::to_string(nowMs.count()) + "_" +
+         std::to_string(fileSequence.fetch_add(1)) + ".wav");
 
     LOG_DEBUG("语音文件：" + filePath.string());
 
-    // 创建文件用来保存音频数据
+    // 创建文件用来保存音频数据；请求失败时删除半成品，不留空文件
     std::ofstream audioFile(filePath, std::ios::binary);
     if (!audioFile.is_open())
     {
         LOG_ERROR("无法创建输出文件");
         return "系统提示：无法创建输出文件";
     }
+    const auto discardFile = [&audioFile, &filePath]() {
+        audioFile.close();
+        std::error_code removeError;
+        std::filesystem::remove(filePath, removeError);
+    };
 
     CURL *curl;
     CURLcode res;
@@ -80,9 +105,11 @@ std::string Voice::toAudio(const std::string &text)
             if (CurlRequestControl::wasCancelled(res, running))
             {
                 LOG_INFO("语音请求已因程序停止而取消");
+                discardFile();
                 return {};
             }
             LOG_ERROR("请求失败: " + std::string(curl_easy_strerror(res)));
+            discardFile();
             return "系统提示：请求失败。";
         }
         else
@@ -93,6 +120,7 @@ std::string Voice::toAudio(const std::string &text)
             return filePath.string();
         }
     }
+    discardFile();
     return {};
 }
 

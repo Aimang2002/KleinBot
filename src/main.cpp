@@ -23,6 +23,7 @@
 #include "MessageSender/QueuedMessageSender.h"
 #include "MessageQueue/OutboundMessageQueue.h"
 #include "Port/OutboundMessage.h"
+#include "Version/VersionInfo.h"
 #include "Protocol/OneBot/OneBotMessageEncoder.h"
 #include "Protocol/OneBot/OneBotEventDecoder.h"
 #include "ChatService/ChatService.h"
@@ -59,8 +60,7 @@
 #include "Asset/ImageAssetStore.h"
 #include "Memory/MemoryService.h"
 #include "utils/KeyedTaskScheduler.h"
-
-#define __KLEIN_VERSION__ "v2.4.0"
+#include "KleinVersion.h"
 
 namespace
 {
@@ -235,7 +235,7 @@ void init(int schemaVersion)
 			  << Klein_logo << "\n"
 			  << "\033[0m" << std::endl; // 显示logo
 
-	LOG_INFO("当前Klein版本：" + std::string(__KLEIN_VERSION__));
+	LOG_INFO("当前Klein版本：" + std::string(KLEINBOT_VERSION_STRING));
 	LOG_INFO("当前配置Schema版本：" + std::to_string(schemaVersion));
 }
 
@@ -250,7 +250,12 @@ int main(int argc, char **argv)
 	for (int index = 1; index < argc; ++index)
 	{
 		const std::string argument = argv[index];
-		if (argument == "--check-config")
+		if (argument == "--version" || argument == "-V")
+		{
+			std::cout << VersionInfo::summary() << std::endl;
+			return 0;
+		}
+		else if (argument == "--check-config")
 			checkConfigOnly = true;
 		else if (argument == "--config" && index + 1 < argc)
 			configPath = argv[++index];
@@ -299,7 +304,9 @@ int main(int argc, char **argv)
 	ReminderStore reminderStore(dbPath);
 	// 构造即重建内存队列：24 小时内漏触发的提醒会补发，超窗的滚动或丢弃
 	ReminderService reminderService(reminderStore);
-	UserSessionService userSession(models, conversationStore, settings.bot, settings.chat);
+	// 默认人格来自 source/soul.md，用户人格持久化在会话库 user_persona 表
+	UserSessionService userSession(models, conversationStore, settings.bot, settings.chat,
+	                                "source/soul.md");
 	Dock dock(settings.dock, &running);
 	MemoryService memoryService(dbPath, conversationStore, dock, models, settings.memory);
 	userSession.setMemoryService(&memoryService);
@@ -311,12 +318,11 @@ int main(int argc, char **argv)
 	std::unique_ptr<WebFetchAction> webFetchAction;
 	ToolRegistry tools;
 	bool globalVoice = settings.voice.enabled;
-	bool accessibilityChat = startupSnapshot->schema->accessibilityChat;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
 		{ return userSession.getModelName(userId); });
 	VoiceModeAction voiceModeAction(userSession, globalVoice);
-	AdminControlAction adminControlAction(adminComputerStatus, accessibilityChat,
+	AdminControlAction adminControlAction(adminComputerStatus,
 		globalVoice, [&configStore]()
 		{
 			ConfigReloadResult result = configStore.reload();
@@ -385,11 +391,10 @@ int main(int argc, char **argv)
 	OutboundMessageQueue outboundQueue;
 	QueuedMessageSender messageSender(outboundQueue);
 	OneBotEventDecoder oneBotEventDecoder;
-	OneBotMessageEncoder oneBotMessageEncoder(
-		settings.chat.privateAction, settings.chat.groupAction);
+	OneBotMessageEncoder oneBotMessageEncoder;
 	Voice voice(settings.voice, &running);
 	CommandRegistry commandRegistry(settings.bot.managerId);
-	commandRegistry.registryCommand(std::make_unique<HelpCommand>(settings.resources.helpFile));
+	commandRegistry.registryCommand(std::make_unique<HelpCommand>());
 	commandRegistry.registryCommand(std::make_unique<ModelListCommand>(models));
 	commandRegistry.registryCommand(std::make_unique<SearchSongsCommand>());
 	commandRegistry.registryCommand(std::make_unique<QueryModelCommand>(getCurrentModelAction));
@@ -403,7 +408,7 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
-		globalVoice, accessibilityChat);
+		globalVoice);
 	KeyedTaskScheduler messageWorkers(
 		settings.messageExecution,
 		[](std::exception_ptr error)

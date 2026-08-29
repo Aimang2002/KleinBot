@@ -69,7 +69,7 @@ int main(int argc, char **argv)
     OutboundMessageQueue outboundQueue;
     QueuedMessageSender sender(outboundQueue);
     OneBotEventDecoder eventDecoder;
-    OneBotMessageEncoder messageEncoder("send_private_msg", "send_group_msg");
+    OneBotMessageEncoder messageEncoder;
     std::atomic<bool> running{true};
 
     sender.send_private(42, TextMessage{"contract-outbound"});

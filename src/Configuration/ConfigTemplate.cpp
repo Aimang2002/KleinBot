@@ -43,10 +43,6 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
         "bot": {"id": 123456789, "manager_id": 0, "name": "Klein", "group_chat_enabled": true},
         "chat": {"default_model": "your-chat-model"},
         "models": {"registry_path": "source/ModelsName.json"},
-        "resources": {
-            "personality_directory": "source/personality/",
-            "help_file": "source/help.txt"
-        },
         "communication": {
             "protocol": {"type": "onebot", "options": {}},
             "active_transport": "onebot-reverse",

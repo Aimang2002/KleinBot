@@ -154,7 +154,6 @@ std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, c
         std::string header_auth = "Authorization: Bearer " + key;
         headers = curl_slist_append(headers, "Content-Type: application/json");
         headers = curl_slist_append(headers, header_auth.c_str());
-        VerifyCertificate(curl);
         curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.c_str());
@@ -402,16 +401,6 @@ size_t OpenAIStandard::write_callback_chat(char *ptr, size_t size, size_t nmemb,
         return 0;
     }
     return newLength;
-}
-
-void OpenAIStandard::VerifyCertificate(CURL *curl)
-{
-#if defined(__WIN32) || defined(__WIN64)
-    // 设置SSL证书验证
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);   // 开启SSL证书验证
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);   // 验证证书中的主机名
-    curl_easy_setopt(curl, CURLOPT_CAINFO, "cacert.pem"); // 指定CA根证书
-#endif
 }
 
 // API和端点修正

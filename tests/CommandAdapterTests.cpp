@@ -2,8 +2,11 @@
 
 #include "Action/Action.h"
 #include "Command/AdminCommand.h"
+#include "Command/HelpCommand.h"
+#include "Command/HelpText.h"
 #include "Command/QueryModelCommand.h"
 #include "Command/VoiceSwitchCommand.h"
+#include "KleinVersion.h"
 
 namespace
 {
@@ -100,4 +103,27 @@ TEST(AdminCommandTest, PreservesAdminRequirementAndMapsOperation)
     EXPECT_EQ(action.lastArguments.at("action"), "refresh_config");
     EXPECT_EQ(action.lastContext.user_id, 999U);
     EXPECT_EQ(textContent(result), "action-result");
+}
+
+// 帮助正文硬编码于 HelpText.h，版本行由 HelpCommand 从 CMake 生成的版本宏拼接
+TEST(HelpCommandTest, ReturnsHardCodedHelpTextWithGeneratedVersion)
+{
+    HelpCommand command;
+    InboundMessage data;
+    auto context = makeContext(data, 123);
+
+    EXPECT_TRUE(command.canHandle("#帮助"));
+    EXPECT_TRUE(command.canHandle("help"));
+    EXPECT_FALSE(command.canHandle("#帮助一下"));
+
+    const auto result = command.execute(context);
+
+    const std::string &content = textContent(result);
+    EXPECT_EQ(content, std::string(kHelpText) +
+                          "\n\n当前克莱茵版本:" + KLEINBOT_VERSION_STRING +
+                          " (" + KLEINBOT_GIT_HASH + ")" +
+                          "\nCreate:@埃芒");
+    EXPECT_NE(content.find("欢迎使用克莱茵QQ机器人"), std::string::npos);
+    EXPECT_NE(content.find("当前克莱茵版本:" + std::string(KLEINBOT_VERSION_STRING)),
+              std::string::npos);
 }
