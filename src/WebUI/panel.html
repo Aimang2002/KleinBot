@@ -1301,6 +1301,8 @@
     "use strict";
     const SENTINEL = "__KLEIN_MASKED__";
     const SECRET_KEYS = new Set(["api_key", "access_token", "secret"]);
+    // 与 Dock 注册的协议适配器一一对应，大小写敏感；其他值调用时会报“并未支持”
+    const API_STANDARDS = ["OpenAI", "Anthropic"];
     const TOKEN_STORAGE = "klein_webui_token";
     const MODELS_KEY = "__models__";
     let activePane = "";
@@ -1895,7 +1897,7 @@
       const row = rowFor(path, label(key, false), hintFor(path, key));
       let input;
       if (path === "communication.active_transport") {
-        // 唯一的字段特例：传输形态是"从 transports 集合中选一个"，下拉避免拼写错误
+        // 字段特例：传输形态是"从 transports 集合中选一个"，下拉避免拼写错误
         input = document.createElement("select");
         const current = value === null || value === undefined ? "" : String(value);
         for (const option of transportSelectOptions(current)) {
@@ -1906,6 +1908,12 @@
             element.selected = true;
           input.appendChild(element);
         }
+      } else if (key === "api_standard" && API_STANDARDS.includes(value)) {
+        // 字段特例：合法值只有 OpenAI/Anthropic（与模型供应商页一致用自绘下拉）；
+        // 留空或非法值仍走文本框，保留原样可编辑，不做静默改写
+        input = createComboSelect(API_STANDARDS, value);
+        input.dataset.kind = "null";
+        input.dataset.original = String(value);
       } else if (Array.isArray(value)) {
         input = document.createElement("textarea");
         input.value = JSON.stringify(value, null, 2);
@@ -1968,7 +1976,8 @@
           result[child.dataset.key] = collectFrom(child.querySelector(".fields"));
           continue;
         }
-        const input = child.querySelector("input, textarea, select");
+        // .combo 是自绘下拉（无 input 元素），暴露同名 .value，收集逻辑与输入框一致
+        const input = child.querySelector("input, textarea, select, .combo");
         if (!input || !input.dataset.path) continue;
         result[input.dataset.path.split(".").pop()] = valueFromInput(input);
       }
