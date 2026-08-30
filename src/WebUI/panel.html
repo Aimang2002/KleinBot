@@ -317,7 +317,7 @@
     }
 
     /* 配置版本只读标识：模型供应商下方展示，纯状态芯片、不可点击
-       （改动请直接编辑 config.json，面板保存时会原样写回该值） */
+       （改动请直接编辑 .config.json，面板保存时会原样写回该值） */
     .nav-version {
       margin: 10px 6px 2px;
       padding: 8px 12px;
@@ -1310,7 +1310,7 @@
     let loadedSchemaVersion; // 原样保留的 schema_version：面板不提供编辑，保存时写回原值
 
     const SECTION_LABELS = {
-      bot: "机器人身份", features: "功能开关", chat: "聊天参数", models: "模型端点", voice: "语音",
+      bot: "机器人身份", features: "功能开关", chat: "消息处理", models: "模型设置", voice: "语音",
       memory: "长期记忆", web_search: "联网搜索", web_fetch: "网页抓取",
       storage: "存储路径", network: "网络代理",
       communication: "OneBot 通信", webui: "Web 配置面板"
@@ -1351,8 +1351,8 @@
     const SECTION_HINTS = {
       bot: "机器人的身份信息：QQ 号、管理员与昵称。",
       features: "机器人对外行为的开关，保存时写回 bot 分组。",
-      chat: "对话采样参数与消息处理：默认模型、温度与工作线程。",
-      models: "画图、视觉的专用端点；聊天模型在“模型供应商”页管理。",
+      chat: "消息处理参数：单条消息 token 上限、工作线程数与消息存活时间。",
+      models: "对话模型的默认模型与采样参数，画图/视觉的专用端点；模型本体在“模型供应商”页管理。",
       voice: "GPT-SoVITS 语音合成配置；字段不全时语音功能会自动关闭。",
       memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
       web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
@@ -1448,10 +1448,13 @@
     // 未列出的键（新版本新增或历史遗留）按文件原序排在最后兜底
     const SECTION_ORDER = ["bot", "chat", "models", "voice", "memory",
       "web_search", "web_fetch", "storage", "network", "communication", "webui"];
+    // 从“消息处理”（原聊天参数）归入“模型设置”模块展示的字段：
+    // 配置里仍在 chat 分组，data-path 不变，保存时写回 chat
+    const CHAT_MODEL_FIELDS = ["default_model", "temperature", "top_p",
+      "frequency_penalty", "presence_penalty"];
     const SECTION_KEY_ORDER = {
       bot: ["id", "manager_id", "name"],
-      chat: ["default_model", "temperature", "top_p", "frequency_penalty",
-        "presence_penalty", "max_message_tokens", "worker_threads", "message_survival_seconds"],
+      chat: ["max_message_tokens", "worker_threads", "message_survival_seconds"],
       models: ["drawing", "vision"],
       drawing: ["model", "endpoint", "api_key", "api_standard"],
       vision: ["model", "endpoint", "api_key", "api_standard"],
@@ -1993,6 +1996,17 @@
           result[pane.dataset.key] = collectCommunicationPane(pane);
           continue;
         }
+        if (pane.dataset.custom === "models") {
+          // “模型设置”模块的双分组收集：对话模型区写回 chat，画图/视觉区写回 models
+          const chatFields = pane.querySelector('[data-group="chat"]');
+          if (chatFields) {
+            const target = result.chat || (result.chat = {});
+            Object.assign(target, collectFrom(chatFields));
+          }
+          const modelFields = pane.querySelector('[data-group="models"]');
+          result[pane.dataset.key] = modelFields ? collectFrom(modelFields) : {};
+          continue;
+        }
         const inner = collectFrom(pane.querySelector(".fields"));
         if (pane.dataset.mergeInto) {
           // 展示在独立模块、但属于原分组的字段（功能开关 → bot）
@@ -2063,6 +2077,39 @@
       return pane;
     }
 
+    // “模型设置”模块：对话模型参数（配置里在 chat 分组）与画图/视觉端点合并展示；
+    // 字段的 data-path 仍指向原分组，保存时分别写回 chat 与 models（见 collectConfig）
+    function buildModelsPane(pane, models, document_) {
+      pane.dataset.custom = "models";
+      const chat = isPlainObject(document_) ? document_.chat : null;
+      const fields = pane.querySelector(".fields");
+      if (isPlainObject(chat) &&
+          CHAT_MODEL_FIELDS.some((key) => Object.prototype.hasOwnProperty.call(chat, key))) {
+        const chatSection = document.createElement("details");
+        chatSection.className = "section";
+        chatSection.open = true;
+        const summary = document.createElement("summary");
+        summary.textContent = "对话模型";
+        summary.dataset.hint = "默认对话模型与采样参数；模型本体在“模型供应商”页管理。";
+        chatSection.appendChild(summary);
+        const chatFields = document.createElement("div");
+        chatFields.className = "fields";
+        chatFields.dataset.group = "chat";
+        chatSection.appendChild(chatFields);
+        for (const key of CHAT_MODEL_FIELDS)
+          if (Object.prototype.hasOwnProperty.call(chat, key))
+            renderValue(chatFields, key, chat[key], "chat." + key, false);
+        fields.appendChild(chatSection);
+      }
+      const modelFields = document.createElement("div");
+      modelFields.className = "fields";
+      modelFields.dataset.group = "models";
+      for (const [childKey, childValue] of orderedEntries(models, "models"))
+        renderValue(modelFields, childKey, childValue, "models." + childKey, false);
+      fields.appendChild(modelFields);
+      return true;
+    }
+
     async function loadConfig() {
       try {
         const response = await request("/api/config", { method: "GET" });
@@ -2079,7 +2126,7 @@
         panes.textContent = "";
         let firstKey = "";
         // schema_version 不是可编辑项：不生成分区，只在侧边导航底部展示原值，
-        // 保存时由 collectConfig 写回（改版本号请直接编辑 config.json）
+        // 保存时由 collectConfig 写回（改版本号请直接编辑 .config.json）
         loadedSchemaVersion = typeof document_.schema_version === "number"
           ? document_.schema_version : undefined;
         for (const [key, value] of orderedEntries(document_, null)) {
@@ -2105,8 +2152,11 @@
             // communication 是唯一的顶层特例：类型驱动的专用视图；
             // 结构无法识别（活动档案悬空、未知类型等）时退回通用渲染
             // bot 分组只展示身份字段，群聊开关挪进紧随其后的“功能开关”模块
-            const skipKeys = key === "bot" ? new Set(["group_chat_enabled"]) : null;
-            if (!(key === "communication" && buildCommunicationPane(pane, value)))
+            // chat 分组只展示消息处理字段，模型相关参数挪进“模型设置”模块
+            const skipKeys = key === "bot" ? new Set(["group_chat_enabled"])
+              : key === "chat" ? new Set(CHAT_MODEL_FIELDS) : null;
+            if (!(key === "communication" && buildCommunicationPane(pane, value)) &&
+                !(key === "models" && buildModelsPane(pane, value, document_)))
               for (const [childKey, childValue] of orderedEntries(value, key))
                 if (!skipKeys || !skipKeys.has(childKey))
                   renderValue(fields, childKey, childValue, key + "." + childKey, false);
