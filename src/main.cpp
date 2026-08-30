@@ -245,7 +245,7 @@ int main(int argc, char **argv)
 	std::signal(SIGTERM, signalHandler);
 	std::atomic<bool> running{true};
 
-	std::string configPath = "config.json";
+	std::string configPath = ".config.json";
 	bool checkConfigOnly = false;
 	for (int index = 1; index < argc; ++index)
 	{

@@ -69,7 +69,7 @@
         "cache_max_entries": 32
     },
     "storage": {
-        "conversation_database": "source/conversations.db",
+        "conversation_database": "source/.conversations.db",
         "image_assets": "source/image_assets"
     },
     "network": {

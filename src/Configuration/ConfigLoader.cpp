@@ -607,7 +607,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     if (storage != nullptr)
     {
         decoder.unknownFields(*storage, {"conversation_database", "image_assets"}, "storage");
-        config.storage.conversationDatabase = decoder.string(*storage, "conversation_database", "storage.conversation_database", "source/conversations.db");
+        config.storage.conversationDatabase = decoder.string(*storage, "conversation_database", "storage.conversation_database", "source/.conversations.db");
         config.storage.imageAssets = decoder.string(*storage, "image_assets", "storage.image_assets", "source/image_assets");
     }
 

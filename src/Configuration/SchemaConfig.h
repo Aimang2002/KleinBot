@@ -94,7 +94,8 @@ struct WebFetchSchema
 
 struct StorageSchema
 {
-    std::string conversationDatabase = "source/conversations.db";
+    // 数据库与配置文件默认以点前缀隐藏（ls 默认不显示）；老路径无自动迁移，升级需手动改名
+    std::string conversationDatabase = "source/.conversations.db";
     std::string imageAssets = "source/image_assets";
 };
 

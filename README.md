@@ -88,7 +88,7 @@ cmake --build --preset windows-mingw-release
 
 ### 运行
 
-1. 首次运行：工作目录下没有 `config.json` 时会自动生成一份占位骨架（Web 面板同时启用，访问令牌打印在启动日志中），也可以手动复制 `config.example.json` 为 `config.json`；
+1. 首次运行：工作目录下没有 `.config.json` 时会自动生成一份占位骨架（Web 面板同时启用，访问令牌打印在启动日志中），也可以手动复制 `config.example.json` 为 `.config.json`（点前缀隐藏文件；从旧版本升级请把原 `config.json` 改名，或用 `--config` 指定旧路径）；
 2. 准备一个 OneBot 协议端（如 [LLOneBot](https://github.com/LLOneBot/LLOneBot)）并建立通信；
 3. 运行可执行文件，向机器人私聊或群内 @ 它即可对话。
 
@@ -100,7 +100,7 @@ cmake --build --preset windows-mingw-release
 
 ## 配置
 
-KleinBot 使用 Schema 化 JSON 配置，运行时读取当前工作目录的 `config.json`，仓库中的 `config.example.json` 是不含密钥的完整模板。根节点按职责划分：
+KleinBot 使用 Schema 化 JSON 配置，运行时读取当前工作目录的 `.config.json`，仓库中的 `config.example.json` 是不含密钥的完整模板。根节点按职责划分：
 
 | 节点 | 作用 |
 | --- | --- |
@@ -201,7 +201,7 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 
 ### Web 配置面板（可选）
 
-在浏览器中编辑 `config.json`，替代手工改文件：
+在浏览器中编辑 `.config.json`，替代手工改文件：
 
 ```json
 "webui": {
@@ -225,7 +225,7 @@ export KLEIN_WEBUI_TOKEN="自定一个强令牌"
 - 密钥字段（`api_key` / `access_token` / `secret`）以掩码显示，浏览器永远拿不到明文；留空表示保持原值，`from_env` 引用原样保留；
 - 保存经临时文件原子替换并收紧文件权限为 0600，随后自动刷新内存快照，并报告各变更的影响等级（动态 / 需重建 / 需重启）——需重启的项重启机器人后才生效。
 
-首次运行没有 `config.json` 时会自动生成占位骨架配置，Web 面板随之启用：绑定 `127.0.0.1`、端口 55346，访问令牌随机生成并打印在启动日志中，按日志提示在面板里补全机器人 QQ、默认模型和通信配置后重启即可。
+首次运行没有 `.config.json` 时会自动生成占位骨架配置，Web 面板随之启用：绑定 `127.0.0.1`、端口 55346，访问令牌随机生成并打印在启动日志中，按日志提示在面板里补全机器人 QQ、默认模型和通信配置后重启即可。
 
 安全边界：`enabled: true` 但令牌缺失时面板自动关闭；默认只绑定回环地址，绑定非回环地址会产生安全警告。如需远程访问，请由反向代理提供 TLS 后再暴露，不要直接把端口暴露到公网。
 
@@ -361,7 +361,7 @@ Klein 完整保存原始对话，并在后台从多轮对话中提取用户资�
 | `Model/` | 模型注册文件 `ModelsName.json`（路径固定，见[模型接入](#模型接入)） |
 | `soul.md` | 默认人格文本；未用 `#设置人格` 设置自定义人格的用户读取此文件，文件缺失时使用内置英文兜底 |
 | `image_assets/` | 聊天图片资产（按用户隔离，`#重置上下文` 时同步清理） |
-| `conversations.db` | 会话、记忆、提醒、图片资产元数据的 SQLite 数据库 |
+| `.conversations.db` | 会话、记忆、提醒、图片资产元数据的 SQLite 数据库（点前缀隐藏，改名前请先停止机器人） |
 
 `#帮助` 的文本硬编码于 `src/Command/HelpText.h` 并编译进可执行文件（内容定稿后不常改，调整时只改该文件）；TTS 生成的语音写入系统临时目录（Linux `/tmp/kleinbot/`、Windows `%TEMP%\kleinbot\`），发送成功后自动删除。
 
@@ -378,7 +378,7 @@ ctest --preset linux-debug
 
 第三方依赖：[curl](https://github.com/curl/curl)、[Boost](https://github.com/boostorg/boost)（仅最小 Asio/Beast 头文件，随仓库提供）、[SQLite](https://www.sqlite.org/)、[nlohmann/json](https://github.com/nlohmann/json)（随仓库提供）、[cpp-httplib](https://github.com/yhirose/cpp-httplib)（v0.53.1 单头文件，随仓库提供，用于 Web 配置面板）、[GoogleTest](https://github.com/google/googletest)（仅测试构建）。Windows 构建会自动下载固定版本的 curl 和 SQLite 并校验哈希。
 
-> 注意：本地 `build/config.json`、API Key、Token、QQ ID、数据库和生成媒体不得提交到仓库。
+> 注意：本地 `build/.config.json`、API Key、Token、QQ ID、数据库和生成媒体不得提交到仓库。
 
 ## 鸣谢
 

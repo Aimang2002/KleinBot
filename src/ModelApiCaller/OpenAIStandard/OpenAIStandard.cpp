@@ -162,7 +162,7 @@ std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, c
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
         CurlRequestControl::configure(curl, running);
 
-        // 可选 HTTP 代理：config.json 配置 "proxy" 非空时生效
+        // 可选 HTTP 代理：.config.json 配置 "proxy" 非空时生效
         if (!proxy.empty())
         {
             curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
