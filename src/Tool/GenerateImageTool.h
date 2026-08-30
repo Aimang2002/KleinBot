@@ -30,6 +30,10 @@ public:
     {
         try
         {
+            const std::string readiness = modelEndpointReadinessText(model, "生图", "models.drawing");
+            if (!readiness.empty())
+                return {readiness, {}, {}};
+
             const auto arguments = parseToolArguments(args);
             const std::string prompt = arguments.value("prompt", "");
             if (prompt.empty())
@@ -43,7 +47,12 @@ public:
             if (response.cancelled)
                 return {{}, {}, {}, false, true};
             if (response.code >= 400 || response.image_base64.empty())
-                return {"错误：图片生成失败。", {}, {}};
+            {
+                const std::string reason = response.error_message.empty()
+                                               ? std::string("接口未返回具体原因")
+                                               : response.error_message;
+                return {"错误：图片生成失败：" + reason + "。", {}, {}};
+            }
 
             auto asset = assetStore.saveBase64(ctx.user_id, response.image_base64,
                                                 "generated", prompt, ctx.user_message_id);

@@ -29,6 +29,10 @@ public:
     {
         try
         {
+            const std::string readiness = modelEndpointReadinessText(model, "视觉", "models.vision");
+            if (!readiness.empty())
+                return {readiness, {}, {}};
+
             const auto arguments = parseToolArguments(args);
             const std::string question = arguments.value("question", "请详细分析这张图片");
             const auto asset = resolveImageAsset(assetStore, ctx.user_id, arguments);
@@ -47,7 +51,12 @@ public:
             if (response.cancelled)
                 return {{}, {}, {}, false, true};
             if (response.code != 200)
-                return {"错误：视觉模型调用失败。", {}, {}};
+            {
+                const std::string reason = response.error_message.empty()
+                                               ? std::string("接口未返回具体原因")
+                                               : response.error_message;
+                return {"错误：视觉模型调用失败：" + reason + "。", {}, {}};
+            }
 
             return {"图片视觉分析结果：\n" + response.content, {}, {}};
         }
