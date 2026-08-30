@@ -29,7 +29,7 @@
 - [运行时架构](#运行时架构)
 - [运行资源目录](#运行资源目录)
 - [开发与测试](#开发与测试)
-- [鸣谢](#鸣谢)
+- [使用了第三方工具](#使用了第三方工具)
 - [开源协议](#开源协议)
 
 ## 简介
@@ -380,7 +380,7 @@ ctest --preset linux-debug
 
 > 注意：本地 `build/.config.json`、API Key、Token、QQ ID、数据库和生成媒体不得提交到仓库。
 
-## 鸣谢
+## 使用了第三方工具
 
 - [nlohmann/json](https://github.com/nlohmann/json)
 - [cpp-httplib](https://github.com/yhirose/cpp-httplib)
@@ -388,6 +388,8 @@ ctest --preset linux-debug
 - [curl](https://curl.se/)
 - [SQLite](https://www.sqlite.org/)
 - [GoogleTest](https://github.com/google/googletest)
+
+KleinBot 本身只是一个采用 MIT 许可证开源的 C++ 项目。然而，它的构建、运行、测试与文档编写等工作都使用了大量的第三方工具和服务。非常感谢！
 
 ## 开源协议
 
