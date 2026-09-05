@@ -126,8 +126,8 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 	if (data.message_type == "group")
 	{
 		delivery.target = GroupMessageTarget{std::to_string(data.group_id)};
-		// 指向性回复：被 @ 才 @ 回发起人（quoteReply 再叠加引用卡片）
-		delivery.reply = buildReplyContext(data, options.bot, options.humanizeQuoteReply);
+		// 指向性回复：被 @ 才引用+@ 回发起人（固定行为，无配置开关）
+		delivery.reply = buildReplyContext(data, options.bot);
 	}
 	else
 	{

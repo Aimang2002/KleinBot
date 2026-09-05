@@ -428,7 +428,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     decoder.unknownFields(document,
                           {"schema_version", "bot", "chat", "models", "voice",
                            "memory", "web_search", "web_fetch", "storage",
-                           "persona", "network", "communication", "webui"},
+                           "network", "communication", "webui"},
                           "$" );
 
     SchemaConfig config;
@@ -609,20 +609,6 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         decoder.unknownFields(*storage, {"conversation_database", "image_assets"}, "storage");
         config.storage.conversationDatabase = decoder.string(*storage, "conversation_database", "storage.conversation_database", "source/.conversations.db");
         config.storage.imageAssets = decoder.string(*storage, "image_assets", "storage.image_assets", "source/image_assets");
-    }
-
-    // persona 可选节：v2.4.1 起承载拟人化行为开关，缺失时全部走默认值
-    const json *persona = decoder.object(document, "persona", "persona");
-    if (persona != nullptr)
-    {
-        decoder.unknownFields(*persona, {"humanize"}, "persona");
-        const json *humanize = decoder.object(*persona, "humanize", "persona.humanize");
-        if (humanize != nullptr)
-        {
-            decoder.unknownFields(*humanize, {"quote_reply"}, "persona.humanize");
-            config.persona.humanize.quoteReply = decoder.boolean(
-                *humanize, "quote_reply", "persona.humanize.quote_reply", true);
-        }
     }
 
     // resources 段已废弃（help 内置、图片下载功能移除）：残留内容落入顶层

@@ -19,28 +19,16 @@ InboundMessage groupMessageFrom(std::uint64_t sender, std::vector<std::uint64_t>
 }
 }
 
-TEST(ReplyContextRoutingTest, MentionedBotGetsAtAndQuoteByDefault)
+TEST(ReplyContextRoutingTest, MentionedBotGetsQuoteAndAt)
 {
     const BotIdentity bot{10086, 10002, "Klein"};
     const InboundMessage data = groupMessageFrom(20001, {10086});
 
-    const std::optional<ReplyContext> reply = buildReplyContext(data, bot, true);
+    const std::optional<ReplyContext> reply = buildReplyContext(data, bot);
 
     ASSERT_TRUE(reply.has_value());
     EXPECT_EQ(reply->at_user_id, "20001");
     EXPECT_EQ(reply->message_id, 5566);
-}
-
-TEST(ReplyContextRoutingTest, QuoteDisabledDegradesToAtOnly)
-{
-    const BotIdentity bot{10086, 10002, "Klein"};
-    const InboundMessage data = groupMessageFrom(20001, {10086});
-
-    const std::optional<ReplyContext> reply = buildReplyContext(data, bot, false);
-
-    ASSERT_TRUE(reply.has_value());
-    EXPECT_EQ(reply->at_user_id, "20001");
-    EXPECT_EQ(reply->message_id, 0); // 不引用
 }
 
 TEST(ReplyContextRoutingTest, UnmentionedMessageGetsNoReplyContext)
@@ -49,15 +37,15 @@ TEST(ReplyContextRoutingTest, UnmentionedMessageGetsNoReplyContext)
 
     // 没指向 bot：接话/观察路径的裸消息语义（v2.4.2 起有消费场景）
     const InboundMessage unmentioned = groupMessageFrom(20001, {30001});
-    EXPECT_FALSE(buildReplyContext(unmentioned, bot, true).has_value());
+    EXPECT_FALSE(buildReplyContext(unmentioned, bot).has_value());
 
     // @ 的是别人
     const InboundMessage others = groupMessageFrom(20001, {});
-    EXPECT_FALSE(buildReplyContext(others, bot, true).has_value());
+    EXPECT_FALSE(buildReplyContext(others, bot).has_value());
 
     // bot 自身消息的回声不指向自己
     const InboundMessage selfEcho = groupMessageFrom(10086, {10086});
-    EXPECT_FALSE(buildReplyContext(selfEcho, bot, true).has_value());
+    EXPECT_FALSE(buildReplyContext(selfEcho, bot).has_value());
 }
 
 TEST(OneBotEventDecoderMentionTest, ParsesAtSegmentsInBothIdForms)

@@ -125,8 +125,7 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.proxy};
     result.message = {
         result.bot,
-        schema.bot.groupChatEnabled,
-        schema.persona.humanize.quoteReply};
+        schema.bot.groupChatEnabled};
     result.dock.proxy = schema.proxy;
     result.storage = {schema.storage.conversationDatabase, schema.storage.imageAssets};
     result.transport = mapTransport(schema.communication);

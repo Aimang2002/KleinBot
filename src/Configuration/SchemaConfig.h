@@ -99,18 +99,6 @@ struct StorageSchema
     std::string imageAssets = "source/image_assets";
 };
 
-// 拟人化行为开关（v2.4.1 起逐步扩充：延迟/输入状态/戳一戳参数随各自工作项加入）
-struct HumanizeSchema
-{
-    // 群聊回复默认引用原消息并 @ 发起人；关闭后退回纯文本
-    bool quoteReply = true;
-};
-
-struct PersonaSchema
-{
-    HumanizeSchema humanize;
-};
-
 struct TransportProfileSchema
 {
     std::string type;
@@ -159,7 +147,6 @@ struct SchemaConfig
     WebSearchSchema webSearch;
     WebFetchSchema webFetch;
     StorageSchema storage;
-    PersonaSchema persona;
     std::string proxy;
     CommunicationSchema communication;
     WebUiSchema webUi;
