@@ -2725,7 +2725,7 @@
         const info = $("registryInfo");
         info.textContent = "注册表文件：" + body.registry_path +
           (body.exists ? "" : "（文件尚不存在，首次保存时将创建）") +
-          "。保存后需重启机器人，新注册表才会被加载。";
+          "。保存后机器人进程内即时生效，无需重启。";
         const providers = $("providers");
         providers.textContent = "";
         const list = (body.models && body.models.Models) || [];
@@ -2751,7 +2751,9 @@
           return;
         }
         if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
-        let text = "模型注册表已保存。需重启机器人后新配置才会生效。";
+        let text = body.hotReloaded
+          ? "模型注册表已保存并即时生效。"
+          : "模型注册表已保存，但进程内热重载失败，需重启机器人后生效。";
         if ((body.warnings || []).length) text += "\n警告：\n" + diagnosticsText(body.warnings);
         showBanner(text, false);
         await loadModels();

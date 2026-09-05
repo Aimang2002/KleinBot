@@ -8,8 +8,7 @@ CommandResult SwitchModelCommand::execute(const CommandContext &ctx)
         return {TextMessage{"请提供需要切换的模型！"}};
     }
     modelName = utils::trim(modelName);
-    const ChatModel *m = this->chatModels.find(modelName);
-    if (!m)
+    if (!this->chatModels.find(modelName))
     {
         return {TextMessage{"未找到模型名称！"}};
     }

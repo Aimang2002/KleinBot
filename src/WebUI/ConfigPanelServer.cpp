@@ -2,6 +2,7 @@
 #include "ModelCatalog.h"
 #include "../Configuration/ConfigWriter.h"
 #include "../Log/Log.h"
+#include "../ModelRegistry/ModelRegistry.h"
 #include "../Network/BearerAuth.h"
 #include "../../Library/httplib/httplib.h"
 
@@ -245,7 +246,8 @@ std::string resolveProviderApiKey(const json &body, ConfigSnapshotStore &store)
 
 std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSettings &settings,
                                                                 const std::string &configPath,
-                                                                ConfigSnapshotStore &store)
+                                                                ConfigSnapshotStore &store,
+                                                                ModelRegistry &models)
 {
     auto server = std::make_unique<httplib::Server>();
     const std::shared_ptr<ConfigWriter> writer = std::make_shared<ConfigWriter>();
@@ -361,7 +363,8 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
         response.set_content(body.dump(), "application/json");
     });
 
-    server->Post("/api/models", [&store](const httplib::Request &request, httplib::Response &response) {
+    server->Post("/api/models", [configPath, &store, &models, writer](const httplib::Request &request,
+                                                                      httplib::Response &response) {
         json candidate;
         try
         {
@@ -443,9 +446,13 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
             return;
         }
 
+        // 注册表写盘成功后立即热重载进程内副本：聊天/命令线程即刻可见新模型，
+        // 无需重启；重载失败（理论上仅权限竞态）保留旧表，如实回报前端
+        const bool hotReloaded = models.reload();
+
         for (const ConfigDiagnostic &diagnostic : validation)
             warnings.push_back(diagnostic);
-        const json body = {{"restartRequired", true},
+        const json body = {{"hotReloaded", hotReloaded},
                            {"warnings", diagnosticsToArray(warnings)}};
         response.set_content(body.dump(), "application/json");
     });
@@ -594,7 +601,8 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
 }
 
 void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
-                            ConfigSnapshotStore &store, const std::atomic<bool> &running)
+                            ConfigSnapshotStore &store, ModelRegistry &models,
+                            const std::atomic<bool> &running)
 {
     // 页面是面板唯一入口：缺失时报错并放弃启动，不起一个只会回 500 的空服务；
     // 运行中文件被删的场景仍由 GET / 的 500 分支兜底
@@ -611,7 +619,7 @@ void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
              std::to_string(settings.port) + "/（访问令牌来自 webui.access_token）");
     while (running.load())
     {
-        std::unique_ptr<httplib::Server> server = buildServer(settings, configPath, store);
+        std::unique_ptr<httplib::Server> server = buildServer(settings, configPath, store, models);
         std::atomic<bool> serverActive{true};
         // 看门狗：running 置假后调 stop() 让阻塞中的 listen() 返回
         std::thread watchdog([&running, &serverActive, &server]() {

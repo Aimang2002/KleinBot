@@ -9,6 +9,7 @@ add_executable(kleinbot_tests
     MemoryRecallTests.cpp
     ModelCatalogTests.cpp
     ModelReadinessTests.cpp
+    ModelRegistryTests.cpp
     MultimodalRoutingTests.cpp
     NetworkAuthTests.cpp
     OutboundInfrastructureTests.cpp

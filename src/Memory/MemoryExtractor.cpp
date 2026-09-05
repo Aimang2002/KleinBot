@@ -26,8 +26,8 @@ std::vector<MemoryMutation> MemoryExtractor::extract(uint64_t user_id,
     if (turns.empty())
         return {};
 
-    const ChatModel *model = models.find(modelName);
-    if (model == nullptr)
+    const std::optional<ChatModel> model = models.find(modelName);
+    if (!model)
     {
         LOG_ERROR("长期记忆模型未注册：" + modelName);
         return {};

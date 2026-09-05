@@ -293,8 +293,8 @@ std::string ChatService::replyOneShot(const std::string &prompt)
 {
     const std::string &modelName = chatConfig.defaultModel;
 
-    const ChatModel *modelPtr = this->models.find(modelName);
-    if (modelPtr == nullptr)
+    const std::optional<ChatModel> model = this->models.find(modelName);
+    if (!model)
     {
         LOG_ERROR("DEFAULT_MODEL 未在 ModelsName.json 注册：" + modelName);
         return "系统提示：默认模型未配置";
@@ -307,7 +307,7 @@ std::string ChatService::replyOneShot(const std::string &prompt)
     request.system_prompt = "你是人工助手";
     request.history.push_back({"user", prompt});
 
-    ChatResponse response = this->dock.RequestChat(*modelPtr, modelName, request);
+    ChatResponse response = this->dock.RequestChat(*model, modelName, request);
 
     if (response.cancelled)
         return {};

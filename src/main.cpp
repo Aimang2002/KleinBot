@@ -347,16 +347,16 @@ int main(int argc, char **argv)
 		const std::string distillModel = settings.chat.defaultModel;
 		webFetchAction = std::make_unique<WebFetchAction>(
 			settings.webFetch, &running, WebFetchAction::HttpGet{},
-			[&dock, &models, distillModel](const std::string &prompt)
-			{
-				const ChatModel *modelPtr = models.find(distillModel);
-				if (modelPtr == nullptr)
-					return std::string{};
-				ChatRequest request;
-				request.system_prompt = "你是网页内容提取器，只输出与问题相关的原文摘录。";
-				request.history.push_back({"user", prompt});
-				const ChatResponse response =
-					dock.RequestChat(*modelPtr, distillModel, request);
+				[&dock, &models, distillModel](const std::string &prompt)
+				{
+					const std::optional<ChatModel> modelPtr = models.find(distillModel);
+					if (!modelPtr)
+						return std::string{};
+					ChatRequest request;
+					request.system_prompt = "你是网页内容提取器，只输出与问题相关的原文摘录。";
+					request.history.push_back({"user", prompt});
+					const ChatResponse response =
+						dock.RequestChat(*modelPtr, distillModel, request);
 				if (response.cancelled || response.code != 200)
 					return std::string{};
 				return response.content;
@@ -467,7 +467,7 @@ int main(int argc, char **argv)
 	{
 		panelThread = std::thread(
 			ConfigPanelServer::run,
-			settings.webUi, configPath, std::ref(configStore), std::cref(running));
+			settings.webUi, configPath, std::ref(configStore), std::ref(models), std::cref(running));
 	}
 
 	while (running.load())

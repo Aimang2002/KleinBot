@@ -232,15 +232,15 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     Person &p = this->user_messages->find(user_id)->second;
 
     // 模型查找：找不到直接返回 nullopt，让上层报错
-    const ChatModel *modelPtr = registry.find(p.current_model);
-    if (modelPtr == nullptr)
+    std::optional<ChatModel> model = registry.find(p.current_model);
+    if (!model)
     {
         LOG_ERROR("模型未注册：" + p.current_model);
         return std::nullopt;
     }
 
     ChatCallBundle result;
-    result.model = *modelPtr;
+    result.model = std::move(*model);
     result.model_name = p.current_model;
 
     // 超参数 + system_prompt 直接拷贝

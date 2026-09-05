@@ -444,20 +444,20 @@ TEST(ModelRegistryTest, ReadsVisionCapabilityInLegacyAndPerModelForms)
     ModelRegistry registry(path.string());
 
     // 旧版布尔：整组继承
-    const ChatModel *legacy = registry.find("legacy-a");
-    ASSERT_NE(legacy, nullptr);
+    const std::optional<ChatModel> legacy = registry.find("legacy-a");
+    ASSERT_TRUE(legacy.has_value());
     EXPECT_TRUE(legacy->hasVision("legacy-a"));
     EXPECT_TRUE(legacy->hasVision("legacy-b"));
 
     // 新版数组：按模型标注，同组未列出的不带视觉
-    const ChatModel *perModel = registry.find("array-text");
-    ASSERT_NE(perModel, nullptr);
+    const std::optional<ChatModel> perModel = registry.find("array-text");
+    ASSERT_TRUE(perModel.has_value());
     EXPECT_TRUE(perModel->hasVision("array-vision"));
     EXPECT_FALSE(perModel->hasVision("array-text"));
 
     // 非法类型宽容处理：按无视觉加载，不影响整份注册表
-    const ChatModel *plain = registry.find("plain-model");
-    ASSERT_NE(plain, nullptr);
+    const std::optional<ChatModel> plain = registry.find("plain-model");
+    ASSERT_TRUE(plain.has_value());
     EXPECT_FALSE(plain->hasVision("plain-model"));
     std::filesystem::remove(path);
 }

@@ -13,17 +13,22 @@ namespace httplib
 class Server;
 }
 
+class ModelRegistry;
+
 class ConfigPanelServer
 {
 public:
-    // 构建带完整路由与鉴权的面板服务器；测试可自行 bind 到临时端口
+    // 构建带完整路由与鉴权的面板服务器；测试可自行 bind 到临时端口。
+    // models 用于模型注册表保存后的进程内热重载
     static std::unique_ptr<httplib::Server> buildServer(const WebUiSettings &settings,
                                                         const std::string &configPath,
-                                                        ConfigSnapshotStore &store);
+                                                        ConfigSnapshotStore &store,
+                                                        ModelRegistry &models);
 
     // main 侧线程入口；监听失败每 10 秒重试，running 置假后退出
     static void run(WebUiSettings settings, std::string configPath,
-                    ConfigSnapshotStore &store, const std::atomic<bool> &running);
+                    ConfigSnapshotStore &store, ModelRegistry &models,
+                    const std::atomic<bool> &running);
 };
 
 #endif

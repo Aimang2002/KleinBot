@@ -3,6 +3,7 @@
 #include "Bootstrap/ConfigSnapshotStore.h"
 #include "Configuration/ConfigLoader.h"
 #include "Configuration/ConfigWriter.h"
+#include "ModelRegistry/ModelRegistry.h"
 #include "WebUI/ConfigPanelServer.h"
 #include "../Library/httplib/httplib.h"
 
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -81,6 +83,7 @@ protected:
 
         // 注册表路径钉死且相对工作目录：整个用例在临时目录里运行
         std::filesystem::current_path(dir);
+        registry = std::make_unique<ModelRegistry>(std::string(kModelRegistryPath));
 
         ConfigLoader loader;
         const ConfigLoadResult initial = loader.loadText(panelConfig);
@@ -91,7 +94,7 @@ protected:
         settings.bind = "127.0.0.1";
         settings.port = 0;
 
-        server = ConfigPanelServer::buildServer(settings, configPath.string(), *store);
+        server = ConfigPanelServer::buildServer(settings, configPath.string(), *store, *registry);
         port = server->bind_to_any_port("127.0.0.1");
         ASSERT_GT(port, 0);
         serverThread = std::make_unique<std::thread>([this]() { server->listen_after_bind(); });
@@ -140,6 +143,7 @@ protected:
     std::filesystem::path configPath;
     std::filesystem::path registryPath;
     std::unique_ptr<ConfigSnapshotStore> store;
+    std::unique_ptr<ModelRegistry> registry;
     WebUiSettings settings;
     std::unique_ptr<httplib::Server> server;
     std::unique_ptr<std::thread> serverThread;
@@ -295,7 +299,7 @@ TEST_F(PanelServerFixture, ModelsPostCreatesFileAndMaskedRoundtripKeepsKey)
     ASSERT_TRUE(created != nullptr);
     ASSERT_EQ(created->status, 200);
     const nlohmann::json createdBody = nlohmann::json::parse(created->body);
-    EXPECT_TRUE(createdBody["restartRequired"].get<bool>());
+    EXPECT_TRUE(createdBody["hotReloaded"].get<bool>());
     ASSERT_TRUE(std::filesystem::exists(registryPath));
 
     // GET 掩码：明文不出网
@@ -319,6 +323,29 @@ TEST_F(PanelServerFixture, ModelsPostCreatesFileAndMaskedRoundtripKeepsKey)
     EXPECT_EQ(written["Models"][0]["api_endpoint"], "https://api2.example.com/v1");
     EXPECT_EQ(written["Models"][0]["api_key"], "sk-models-secret");
     EXPECT_EQ(written["Models"][0]["Capabilities"]["vision"], true);
+}
+
+TEST_F(PanelServerFixture, PostModelsHotReloadsInProcessRegistry)
+{
+    httplib::Client client("127.0.0.1", port);
+    EXPECT_FALSE(registry->find("gpt-hot").has_value());
+
+    const nlohmann::json creation = nlohmann::json::parse(R"({
+        "Models": [
+            {"ModelName": ["gpt-hot"], "api_endpoint": "https://api.example.com/v1",
+             "api_key": "sk-hot", "APIStandard": "OpenAI"}
+        ]
+    })");
+    const auto created = client.Post("/api/models", authHeaders(),
+                                     creation.dump(), "application/json");
+    ASSERT_TRUE(created != nullptr);
+    ASSERT_EQ(created->status, 200);
+
+    // 写盘成功后进程内副本即时可见，无需重启
+    const std::optional<ChatModel> model = registry->find("gpt-hot");
+    ASSERT_TRUE(model.has_value());
+    EXPECT_EQ(model->api_key, "sk-hot");
+    EXPECT_EQ(model->endpoint, "https://api.example.com/v1");
 }
 
 TEST_F(PanelServerFixture, PostModelsRejectsDuplicatesAndKeepsFile)
