@@ -2,7 +2,9 @@
 #include "../submodules/CloudMusicID/CloudMusicID.h"
 #include "../utils/Utils.hpp"
 #include "../Asset/ImageAssetStore.h"
+#include "../Application/ReplyContextRouting.h"
 #include "Message.h"
+#include <algorithm>
 #include <iomanip>
 #include <thread>
 #include <chrono>
@@ -124,16 +126,8 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 	if (data.message_type == "group")
 	{
 		delivery.target = GroupMessageTarget{std::to_string(data.group_id)};
-		// 群聊回复自带引用+@：多人群聊里让人知道在跟谁说话；
-		// 自身消息的回声不 @ 自己
-		if (options.humanizeQuoteReply && data.user_id != options.bot.id)
-		{
-			ReplyContext reply;
-			reply.message_id = data.message_id;
-			reply.message_id_raw = data.message_id_raw;
-			reply.at_user_id = std::to_string(data.user_id);
-			delivery.reply = std::move(reply);
-		}
+		// 指向性回复：被 @ 才 @ 回发起人（quoteReply 再叠加引用卡片）
+		delivery.reply = buildReplyContext(data, options.bot, options.humanizeQuoteReply);
 	}
 	else
 	{
@@ -200,27 +194,29 @@ void Message::sendError(const InboundMessage &current_data, const std::string &t
 	dispatch(current_data, TextMessage{text});
 }
 
-bool Message::messageFilter(std::string message_type, std::string message)
+bool Message::messageFilter(const InboundMessage &data)
 {
-	// 过滤策略
-	if (message_type.size() < 4)
+	// 只处理 message 事件（notice/request 已在 workingThread 分流，此处防御）
+	if (data.post_type != "message")
 	{
 		return false;
 	}
 
-	if (!strcmp(message_type.c_str(), "group"))
+	if (data.message_type == "group")
 	{
 		if (!options.groupChatEnabled)
 		{
 			return false; // 群消息是否开启
 		}
 
-		if (message.find("CQ:at") == message.npos || message.find(std::to_string(options.bot.id)) == message.npos)
+		// 触发门槛：消息段里明确 @ 了 bot（@全体成员是广播，解码器不记录）
+		if (std::find(data.mentioned_ids.begin(), data.mentioned_ids.end(),
+					  options.bot.id) == data.mentioned_ids.end())
 		{
-			return false; // 过滤非AT消息
+			return false;
 		}
 	}
-	// 检查CQ码，不对转发内容进行
+	// 私聊直接放行
 	return true;
 }
 

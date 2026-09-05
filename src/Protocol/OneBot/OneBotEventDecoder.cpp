@@ -69,6 +69,24 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
             {
                 message.message_data_url = segment["data"].value("url", "");
             }
+            else if (type == "at")
+            {
+                // qq 可能是数字或字符串；"all"（@全体成员）是广播不是点名，不记录
+                const auto &qq = segment["data"].at("qq");
+                if (qq.is_number_unsigned())
+                {
+                    message.mentioned_ids.push_back(qq.get<std::uint64_t>());
+                }
+                else if (qq.is_string())
+                {
+                    const std::string value = qq.get<std::string>();
+                    if (value != "all" && !value.empty() &&
+                        value.find_first_not_of("0123456789") == std::string::npos)
+                    {
+                        message.mentioned_ids.push_back(std::stoull(value));
+                    }
+                }
+            }
         }
     }
 

@@ -30,13 +30,17 @@ public:
                      ModelEndpointOptions visionModel, bool &globalVoice);
 
 	/**
-	 * @brief 消息过滤，对某些消息进行过滤
+	 * @brief 消息过滤：群聊触发门槛与私聊放行
 	 *
-	 * @param message_type 	消息类型
-	 * @param message	具体消息
+	 * 群消息必须显式 @ bot 才处理（成本与防骚扰的闸门）；
+	 * 判断基于解码器解析的 mentioned_ids 结构化字段（v2.4.1 起替代
+	 * 旧版 raw_message 的 CQ:at 字符串匹配，顺带消除"正文含 bot
+	 * QQ 号数字即误触发"的缺陷）；私聊直接放行
+	 *
+	 * @param data 入站消息
 	 *
 	 */
-	bool messageFilter(std::string message_type, std::string message);
+	bool messageFilter(const InboundMessage &data);
 
 	// 处理一条入站消息：分类 → 命令 / Vision / 普通对话，结果直接经由 sender 发出
 	void handleMessage(const InboundMessage &current_data);

@@ -178,7 +178,7 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 	if (data.payload_size_bytes >
 		(maxMessageTokens * 3))
 	{
-		if (data.message_type == "group" && !messageClass.messageFilter(data.message_type, data.raw_message))
+		if (data.message_type == "group" && !messageClass.messageFilter(data))
 		{
 			LOG_INFO("群消息且非AT消息触发的错误警告，该消息将会不会被处理和发送...");
 			return;
@@ -187,7 +187,7 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 		return;
 	}
 
-	if (!messageClass.messageFilter(data.message_type, data.raw_message))
+	if (!messageClass.messageFilter(data))
 	{
 		return;
 	}
@@ -510,7 +510,7 @@ int main(int argc, char **argv)
 			if (submitResult == TaskSubmitResult::Full)
 			{
 				LOG_WARNING("消息执行队列已满，拒绝新的入站消息");
-				if (messageClass.messageFilter(message->message_type, message->raw_message))
+				if (messageClass.messageFilter(*message))
 					messageClass.sendError(*message, "系统繁忙，请稍后重试。");
 			}
 		}

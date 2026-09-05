@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 struct InboundMessage
 {
@@ -18,6 +19,10 @@ struct InboundMessage
     std::string raw_message;
     std::string plain_text;
     std::string message_data_url;
+
+    // 入站 @ 的结构化记录：at 段的 qq 列表（"all" 广播不含 bot 个人，不记录）。
+    // 替代旧 raw_message 的 CQ:at 字符串匹配——群聊触发门槛与指向性回复都以它为准
+    std::vector<std::uint64_t> mentioned_ids;
 
     std::int64_t message_id = 0;
     // 个别实现端（如 Lagrange 部分 API）消息 ID 为字符串：原样保存供 reply 段回填
