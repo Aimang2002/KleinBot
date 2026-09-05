@@ -6,6 +6,7 @@
 #include "Network/MyWebSocket.h"
 #include "Network/OneBotHttpTransport.h"
 #include "Network/TransportConfig.h"
+#include "Network/WebSocketApiChannel.h"
 #include "Protocol/OneBot/OneBotEventDecoder.h"
 #include "Protocol/OneBot/OneBotMessageEncoder.h"
 
@@ -70,6 +71,7 @@ int main(int argc, char **argv)
     QueuedMessageSender sender(outboundQueue);
     OneBotEventDecoder eventDecoder;
     OneBotMessageEncoder messageEncoder;
+    WebSocketApiChannel apiChannel;
     std::atomic<bool> running{true};
 
     sender.send_private(42, TextMessage{"contract-outbound"});
@@ -80,12 +82,12 @@ int main(int argc, char **argv)
         case TransportMode::ForwardWebSocket:
             MyWebSocket::connectWebSocket(
                 config.forwardWebSocket, inboundQueue, outboundQueue,
-                eventDecoder, messageEncoder, running);
+                apiChannel, eventDecoder, messageEncoder, running);
             break;
         case TransportMode::ReverseWebSocket:
             MyReverseWebSocket::connectReverseWebSocket(
                 config.reverseWebSocket, inboundQueue, outboundQueue,
-                eventDecoder, messageEncoder, running);
+                apiChannel, eventDecoder, messageEncoder, running);
             break;
         case TransportMode::Http:
             OneBotHttpTransport::run(

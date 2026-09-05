@@ -17,6 +17,7 @@
 #include "src/Network/MyWebSocket.h"
 #include "Network/OneBotHttpTransport.h"
 #include "Network/TransportConfig.h"
+#include "Network/WebSocketApiChannel.h"
 #include "WebUI/ConfigPanelServer.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
@@ -392,6 +393,9 @@ int main(int argc, char **argv)
 	QueuedMessageSender messageSender(outboundQueue);
 	OneBotEventDecoder oneBotEventDecoder;
 	OneBotMessageEncoder oneBotMessageEncoder;
+	// WS 模式的 API 通道（echo 关联）；HTTP 模式由 HttpApiChannel 承担，
+	// 随 T2 能力探测接入统一消费点
+	WebSocketApiChannel webSocketApiChannel;
 	Voice voice(settings.voice, &running);
 	CommandRegistry commandRegistry(settings.bot.managerId);
 	commandRegistry.registryCommand(std::make_unique<HelpCommand>());
@@ -441,6 +445,7 @@ int main(int argc, char **argv)
 			MyWebSocket::connectWebSocket,
 			std::cref(transportConfig.forwardWebSocket),
 			std::ref(inboundQueue), std::ref(outboundQueue),
+			std::ref(webSocketApiChannel),
 			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
 			std::cref(running));
 		break;
@@ -449,6 +454,7 @@ int main(int argc, char **argv)
 			MyReverseWebSocket::connectReverseWebSocket,
 			std::cref(transportConfig.reverseWebSocket),
 			std::ref(inboundQueue), std::ref(outboundQueue),
+			std::ref(webSocketApiChannel),
 			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
 			std::cref(running));
 		break;

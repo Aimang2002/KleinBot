@@ -12,6 +12,7 @@ add_executable(kleinbot_tests
     ModelRegistryTests.cpp
     MultimodalRoutingTests.cpp
     NetworkAuthTests.cpp
+    OneBotApiCallerTests.cpp
     OutboundInfrastructureTests.cpp
     ReminderTests.cpp
     StorageIntegrationTests.cpp

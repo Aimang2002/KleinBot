@@ -57,3 +57,22 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
     message.message_timestamp = document.value("time", 0LL);
     return message;
 }
+
+std::optional<OneBotApiResult> OneBotEventDecoder::decodeResponse(const std::string &payload) const
+{
+    const nlohmann::json document = nlohmann::json::parse(payload);
+    if (!document.is_object() || document.contains("post_type") || !document.contains("echo"))
+    {
+        return std::nullopt;
+    }
+
+    OneBotApiResult result;
+    result.echo = document.value("echo", 0LL);
+    result.status = document.value("status", "");
+    result.retcode = document.value("retcode", 0LL);
+    if (document.contains("data"))
+    {
+        result.data = document["data"];
+    }
+    return result;
+}

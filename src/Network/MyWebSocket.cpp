@@ -19,6 +19,7 @@ void MyWebSocket::connectWebSocket(
     const ForwardWebSocketConfig &config,
     InboundMessageQueue &inboundQueue,
     OutboundMessageQueue &outboundQueue,
+    WebSocketApiChannel &apiChannel,
     const OneBotEventDecoder &eventDecoder,
     const OneBotMessageEncoder &messageEncoder,
     const std::atomic<bool> &running)
@@ -54,7 +55,7 @@ void MyWebSocket::connectWebSocket(
             LOG_INFO("正向WebSocket连接成功！");
 
             runOneBotWebSocketSession(
-                ws, ioc, inboundQueue, outboundQueue, eventDecoder, messageEncoder, running);
+                ws, ioc, inboundQueue, outboundQueue, apiChannel, eventDecoder, messageEncoder, running);
         }
         catch (std::exception const &e)
         {

@@ -19,6 +19,7 @@ void MyReverseWebSocket::connectReverseWebSocket(
     const ReverseWebSocketConfig &config,
     InboundMessageQueue &inboundQueue,
     OutboundMessageQueue &outboundQueue,
+    WebSocketApiChannel &apiChannel,
     const OneBotEventDecoder &eventDecoder,
     const OneBotMessageEncoder &messageEncoder,
     const std::atomic<bool> &running)
@@ -128,7 +129,7 @@ void MyReverseWebSocket::connectReverseWebSocket(
             LOG_INFO("反向WebSocket连接成功!");
 
             runOneBotWebSocketSession(
-                ws, ioc, inboundQueue, outboundQueue, eventDecoder, messageEncoder, running);
+                ws, ioc, inboundQueue, outboundQueue, apiChannel, eventDecoder, messageEncoder, running);
         }
         catch (beast::system_error const &se)
         {
