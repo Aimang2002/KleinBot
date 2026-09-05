@@ -32,6 +32,25 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
     message.post_type = postType;
     message.raw_message = document.value("raw_message", "");
 
+    // notice/request 事件：通用字段之上补齐事件专属字段后直接返回
+    if (postType == "notice")
+    {
+        message.notice_type = document.value("notice_type", "");
+        message.sub_type = document.value("sub_type", "");
+        message.target_id = document.value("target_id", 0ULL);
+        message.operator_id = document.value("operator_id", 0ULL);
+        message.message_timestamp = document.value("time", 0LL);
+        return message;
+    }
+    if (postType == "request")
+    {
+        message.request_type = document.value("request_type", "");
+        message.comment = document.value("comment", "");
+        message.flag = document.value("flag", "");
+        message.message_timestamp = document.value("time", 0LL);
+        return message;
+    }
+
     if (document.contains("message") && document["message"].is_array())
     {
         for (const auto &segment : document["message"])

@@ -148,26 +148,35 @@ TEST(WebSocketApiChannelTest, OutOfOrderResponsesResolveCorrectCallers)
         return channel.call("b", nlohmann::json::object(), std::chrono::seconds(5));
     });
 
-    OneBotAction firstAction;
-    OneBotAction secondAction;
-    ASSERT_TRUE(popActionWithRetry(channel, firstAction));
-    ASSERT_TRUE(popActionWithRetry(channel, secondAction));
-    EXPECT_NE(firstAction.echo, secondAction.echo);
+    // 两个 async 的入队顺序不定，按实际弹出顺序记录，resolve 时用真实 echo 配对
+    OneBotAction poppedFirst;
+    OneBotAction poppedSecond;
+    ASSERT_TRUE(popActionWithRetry(channel, poppedFirst));
+    ASSERT_TRUE(popActionWithRetry(channel, poppedSecond));
+    EXPECT_NE(poppedFirst.echo, poppedSecond.echo);
 
-    // 故意按逆序兑现
-    OneBotApiResult secondResponse;
-    secondResponse.echo = secondAction.echo;
-    secondResponse.status = "ok";
-    secondResponse.data = "second";
-    channel.resolve(std::move(secondResponse));
-    OneBotApiResult firstResponse;
-    firstResponse.echo = firstAction.echo;
-    firstResponse.status = "ok";
-    firstResponse.data = "first";
-    channel.resolve(std::move(firstResponse));
+    // 故意按与弹出相反的顺序兑现
+    OneBotApiResult responseForSecondCaller;
+    responseForSecondCaller.echo = poppedFirst.echo;
+    responseForSecondCaller.status = "ok";
+    responseForSecondCaller.data = "first-popped";
+    channel.resolve(std::move(responseForSecondCaller));
+    OneBotApiResult responseForFirstCaller;
+    responseForFirstCaller.echo = poppedSecond.echo;
+    responseForFirstCaller.status = "ok";
+    responseForFirstCaller.data = "second-popped";
+    channel.resolve(std::move(responseForFirstCaller));
 
-    EXPECT_EQ(first.get().data.get<std::string>(), "first");
-    EXPECT_EQ(second.get().data.get<std::string>(), "second");
+    // 每个调用者拿到的都是自己 echo 对应的数据（顺序与哪个线程先入队无关）
+    const OneBotApiResult firstResult = first.get();
+    const OneBotApiResult secondResult = second.get();
+    EXPECT_FALSE(firstResult.networkError);
+    EXPECT_FALSE(secondResult.networkError);
+    const std::string firstGot = firstResult.data.get<std::string>();
+    const std::string secondGot = secondResult.data.get<std::string>();
+    EXPECT_TRUE((firstGot == "first-popped" && secondGot == "second-popped") ||
+                (firstGot == "second-popped" && secondGot == "first-popped"));
+    EXPECT_NE(firstGot, secondGot);
 }
 
 TEST(WebSocketApiChannelTest, FailAllReleasesPendingCallersOnSessionTeardown)

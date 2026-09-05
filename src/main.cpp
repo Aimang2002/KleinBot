@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <csignal>
 #include "JsonParse/JsonParse.h"
+#include "Application/EventRouter.h"
 #include "Bootstrap/ConfigSnapshotStore.h"
 #include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
@@ -161,8 +162,16 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 }
 
 // 子线程
-void workingThread(Message &messageClass, InboundMessage data, std::size_t maxMessageTokens)
+void workingThread(Message &messageClass, EventRouter &eventRouter,
+				   InboundMessage data, std::size_t maxMessageTokens)
 {
+	// notice/request 事件：不过消息过滤，按 key 路由给已注册 handler（v2.4.1 T6 起有订阅者）
+	if (data.post_type != "message")
+	{
+		eventRouter.dispatch(data);
+		return;
+	}
+
 	// UTF-8 下 1 汉字 ≈ 3 字节；OpenAI 分词器以汉字数计 token，这里按 3 倍粗略放宽上限
 	if (data.payload_size_bytes >
 		(maxMessageTokens * 3))
@@ -413,6 +422,8 @@ int main(int argc, char **argv)
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
 		globalVoice);
+	// notice/request 事件路由（v2.4.1 T4）：订阅者随 T6 各回应 handler 落地后注册
+	EventRouter eventRouter;
 	KeyedTaskScheduler messageWorkers(
 		settings.messageExecution,
 		[](std::exception_ptr error)
@@ -490,9 +501,9 @@ int main(int argc, char **argv)
 			auto message = std::make_shared<InboundMessage>(std::move(*msg));
 			const TaskSubmitResult submitResult = messageWorkers.submit(
 				message->user_id,
-				[&messageClass, maxMessageTokens = settings.chat.maxMessageTokens,
+				[&messageClass, &eventRouter, maxMessageTokens = settings.chat.maxMessageTokens,
 				 message]() mutable {
-				workingThread(messageClass, std::move(*message), maxMessageTokens);
+				workingThread(messageClass, eventRouter, std::move(*message), maxMessageTokens);
 			});
 			if (submitResult == TaskSubmitResult::Full)
 			{
