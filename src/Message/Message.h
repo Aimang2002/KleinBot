@@ -24,10 +24,12 @@ class Message
 {
 public:
 	// MessageSenderPort 由 main.cpp 装配并注入，Message 自身不负责生命周期
+	// typingIndicator 可空：注入时私聊 LLM 路径触发"正在输入"（T5），测试可传 nullptr
 	explicit Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                      MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                      CommandRegistry &registry, Voice &voice, MessageOptions options,
-                     ModelEndpointOptions visionModel, bool &globalVoice);
+                     ModelEndpointOptions visionModel, bool &globalVoice,
+                     class TypingIndicator *typingIndicator = nullptr);
 
 	/**
 	 * @brief 消息过滤：群聊触发门槛与私聊放行
@@ -114,6 +116,7 @@ private:
     Voice &voice;
     MessageOptions options;
     ModelEndpointOptions visionModel;
+    class TypingIndicator *typingIndicator = nullptr; // 可空：未注入则无输入状态提示
 };
 
 #endif // MESSAGE_H

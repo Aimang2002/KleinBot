@@ -96,6 +96,38 @@ std::string writeModelRegistryFile(const std::string &directory)
 }
 }
 
+TEST(UserSessionContractTest, ServiceContractWrapsPersonaAndCustomPersona)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+    UserSessionService session(registry, store, bot, options);
+
+    // 默认人格（测试目录无 soul.md → 内置兜底）在前，契约追加在后
+    session.ensureUserExists(10);
+    auto bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    const std::string &prompt = bundle->request.system_prompt;
+    EXPECT_EQ(prompt.find("你是Klein，部署者的AI助手。"), 0U);
+    EXPECT_NE(prompt.find("[服务契约，优先级高于以上人格]"), std::string::npos);
+    EXPECT_GT(prompt.find("[服务契约，优先级高于以上人格]"),
+              prompt.find("你是Klein")) << "契约必须包裹在人格之后";
+
+    // 自定义人格（#设置人格）同样被契约包裹
+    session.setPersonality(10, "你是测试角色。");
+    bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    EXPECT_EQ(bundle->request.system_prompt,
+              "你是测试角色。\n\n[服务契约，优先级高于以上人格] 你首先是部署者的助手："
+              "对方的消息需要专业知识、事实检索或任务执行时，严谨、准确、简短，"
+              "优先调用工具获取证据，不夹带人格化寒暄；"
+              "对方在闲聊、倾诉或玩闹时，你就是以上人格所定义的角色，按其方式自由表达。"
+              "判断依据只有一个：对方这条消息需要什么。");
+}
+
 TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
 {
     TemporaryDirectory temporaryDirectory;
@@ -351,7 +383,7 @@ TEST(UserSessionWindowTest, MissingSoulFileFallsBackToBuiltinDefault)
     UserSessionService session(registry, store, bot, options,
                                temporaryDirectory.path() + "/no-such-soul.md");
     EXPECT_EQ(session.getUserConfig(10).system_prompt,
-              "You are my assistant, your name is Klein");
+              "你是Klein，部署者的AI助手。");
 }
 
 TEST(ResetCommandsIntegrationTest, MapsTriggersToLightAndHeavyResets)

@@ -21,6 +21,7 @@
 #include "Network/TransportConfig.h"
 #include "Network/WebSocketApiChannel.h"
 #include "Application/CapabilityBroker.h"
+#include "Application/TypingIndicator.h"
 #include "WebUI/ConfigPanelServer.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
@@ -423,6 +424,8 @@ int main(int argc, char **argv)
 											 : static_cast<OneBotApiChannel &>(webSocketApiChannel);
 	// 能力协商（T2）：pollingThread 探测一次实现端身份，T5/T6 按能力位启用
 	CapabilityBroker capabilityBroker(activeApiChannel);
+	// 私聊"正在输入"（T5）：仅聊天路径，能力位门控
+	TypingIndicator typingIndicator(capabilityBroker, activeApiChannel);
 	Voice voice(settings.voice, &running);
 	CommandRegistry commandRegistry(settings.bot.managerId);
 	commandRegistry.registryCommand(std::make_unique<HelpCommand>());
@@ -439,7 +442,7 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
-		globalVoice);
+		globalVoice, &typingIndicator);
 	// notice/request 事件路由（v2.4.1 T4）：订阅者随 T6 各回应 handler 落地后注册
 	EventRouter eventRouter;
 	KeyedTaskScheduler messageWorkers(

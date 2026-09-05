@@ -10,11 +10,23 @@
 #include <fstream>
 #include <sstream>
 
+namespace
+{
+// 服务契约（D13）：助手优先、人格其次。固定追加在人格之后——职责归代码，
+// 人格归 soul.md/#设置人格；措辞与具体角色解耦，自定义人格同样被契约包裹
+const char *const kServiceContractFrame =
+    "\n\n[服务契约，优先级高于以上人格] 你首先是部署者的助手："
+    "对方的消息需要专业知识、事实检索或任务执行时，严谨、准确、简短，"
+    "优先调用工具获取证据，不夹带人格化寒暄；"
+    "对方在闲聊、倾诉或玩闹时，你就是以上人格所定义的角色，按其方式自由表达。"
+    "判断依据只有一个：对方这条消息需要什么。";
+}
+
 UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store,
                                        const BotIdentity &bot, const ChatOptions &chat,
                                        const std::string &soulFile)
     : registry(mr), botIdentity(bot), chatOptions(chat),
-      default_personality("You are my assistant, your name is " + bot.name),
+      default_personality("你是" + bot.name + "，部署者的AI助手。"),
       user_messages(std::make_unique<std::unordered_map<uint64_t, Person>>()),
       soul_file(soulFile), store(store)
 {
@@ -243,8 +255,8 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     result.model = std::move(*model);
     result.model_name = p.current_model;
 
-    // 超参数 + system_prompt 直接拷贝
-    result.request.system_prompt = p.system_prompt;
+    // 超参数 + system_prompt：人格 + 服务契约（契约总是包裹在人格外层，含自定义人格）
+    result.request.system_prompt = p.system_prompt + kServiceContractFrame;
     result.request.temperature = p.temperature;
     result.request.frequency_penalty = p.frequency_penalty;
     result.request.presence_penalty = p.presence_penalty;

@@ -3,6 +3,7 @@
 #include "../utils/Utils.hpp"
 #include "../Asset/ImageAssetStore.h"
 #include "../Application/ReplyContextRouting.h"
+#include "../Application/TypingIndicator.h"
 #include "Message.h"
 #include <algorithm>
 #include <iomanip>
@@ -14,11 +15,12 @@ std::mt19937 mt_rand(1000);
 Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                  MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                  CommandRegistry &registry, Voice &voice, MessageOptions options,
-                 ModelEndpointOptions visionModel, bool &globalVoice)
+                 ModelEndpointOptions visionModel, bool &globalVoice,
+                 TypingIndicator *typingIndicator)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry), voice(voice),
       options(std::move(options)), visionModel(std::move(visionModel)),
-      global_Voice(globalVoice)
+      global_Voice(globalVoice), typingIndicator(typingIndicator)
 {
 }
 
@@ -82,6 +84,9 @@ void Message::handleMessage(const InboundMessage &current_data)
 
 		// 上下文模式仅管理员：普通用户无状态单轮，不写会话也不进长期记忆
 		const bool useContext = current_data.user_id == options.bot.managerId;
+		// 私聊 LLM 调用前触发"正在输入"（能力位门控在 TypingIndicator 内部，fire-and-forget）
+		if (typingIndicator != nullptr && current_data.message_type != "group")
+			typingIndicator->begin(current_data.user_id);
 		ChatReply chatReply = this->chatService.reply(
 			current_data.user_id, conversationText, useContext, std::move(currentImage));
 		if (!inboundAssetId.empty())

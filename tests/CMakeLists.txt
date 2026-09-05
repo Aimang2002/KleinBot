@@ -21,6 +21,7 @@ add_executable(kleinbot_tests
     StorageIntegrationTests.cpp
     TaskSchedulerTests.cpp
     TransportConfigTests.cpp
+    TypingIndicatorTests.cpp
     WebFetchTests.cpp
     WebSearchTests.cpp
 )
