@@ -17,8 +17,10 @@
 #include "src/Network/MyReverseWebSocket.h"
 #include "src/Network/MyWebSocket.h"
 #include "Network/OneBotHttpTransport.h"
+#include "Network/HttpApiChannel.h"
 #include "Network/TransportConfig.h"
 #include "Network/WebSocketApiChannel.h"
+#include "Application/CapabilityBroker.h"
 #include "WebUI/ConfigPanelServer.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
@@ -122,11 +124,14 @@ bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::millisecon
 
 // 子线程
 void pollingThread(ChatService &chatService, MessageSenderPort &sender,
-				   ReminderService &reminders, uint64_t managerId, const std::atomic<bool> &running)
+				   ReminderService &reminders, CapabilityBroker &capabilities,
+				   uint64_t managerId, const std::atomic<bool> &running)
 {
 	while (running.load())
 	{
 		std::time_t now = std::time(nullptr);
+		// 能力探测：未就绪时尝试（失败 60s 冷却），就绪后此处是无害的快速返回
+		capabilities.poll(static_cast<std::int64_t>(now));
 		std::tm *local_time = std::localtime(&now);
 		if (managerId != 0 && local_time->tm_hour == 8 && local_time->tm_min == 0 && local_time->tm_sec < 4)
 		{
@@ -404,9 +409,20 @@ int main(int argc, char **argv)
 	QueuedMessageSender messageSender(outboundQueue);
 	OneBotEventDecoder oneBotEventDecoder;
 	OneBotMessageEncoder oneBotMessageEncoder;
-	// WS 模式的 API 通道（echo 关联）；HTTP 模式由 HttpApiChannel 承担，
-	// 随 T2 能力探测接入统一消费点
+	// API 通道（T1 echo 关联）：WS 模式共用 WebSocketApiChannel，HTTP 模式用同步 HttpApiChannel
 	WebSocketApiChannel webSocketApiChannel;
+	std::unique_ptr<HttpApiChannel> httpApiChannel;
+	if (transportConfig.mode == TransportMode::Http)
+	{
+		httpApiChannel = std::make_unique<HttpApiChannel>(
+			transportConfig.http.apiBaseUrl, transportConfig.http.apiAuthToken,
+			transportConfig.connectTimeoutMs, transportConfig.requestTimeoutMs, &running);
+	}
+	OneBotApiChannel &activeApiChannel = httpApiChannel != nullptr
+											 ? *httpApiChannel
+											 : static_cast<OneBotApiChannel &>(webSocketApiChannel);
+	// 能力协商（T2）：pollingThread 探测一次实现端身份，T5/T6 按能力位启用
+	CapabilityBroker capabilityBroker(activeApiChannel);
 	Voice voice(settings.voice, &running);
 	CommandRegistry commandRegistry(settings.bot.managerId);
 	commandRegistry.registryCommand(std::make_unique<HelpCommand>());
@@ -448,7 +464,7 @@ int main(int argc, char **argv)
 		std::to_string(settings.messageExecution.initialWorkerThreads) +
 		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
 		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), settings.bot.managerId, std::cref(running));
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)

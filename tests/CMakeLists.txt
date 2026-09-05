@@ -1,5 +1,6 @@
 add_executable(kleinbot_tests
     ActionTests.cpp
+    CapabilityBrokerTests.cpp
     CommandAdapterTests.cpp
     ConfigPanelServerTests.cpp
     ConfigReloadTests.cpp
