@@ -74,7 +74,8 @@ int main(int argc, char **argv)
     WebSocketApiChannel apiChannel;
     std::atomic<bool> running{true};
 
-    sender.send_private(42, TextMessage{"contract-outbound"});
+    sender.deliver(OutboundDelivery{
+        DirectMessageTarget{"42"}, TextMessage{"contract-outbound"}});
 
     std::thread transportThread([&]() {
         switch (config.mode)

@@ -20,7 +20,35 @@ std::string localFileUrl(std::string path)
 OneBotAction OneBotMessageEncoder::encode(const OutboundDelivery &delivery) const
 {
     OneBotAction action;
-    action.params["message"] = toSegments(delivery.message);
+    nlohmann::json segments = nlohmann::json::array();
+
+    // 回应段在最前：引用与 @ 描述"回应谁"，先于内容呈现
+    if (delivery.reply)
+    {
+        if (!delivery.reply->message_id_raw.empty())
+        {
+            segments.push_back({
+                {"type", "reply"},
+                {"data", {{"id", delivery.reply->message_id_raw}}}});
+        }
+        else if (delivery.reply->message_id > 0)
+        {
+            segments.push_back({
+                {"type", "reply"},
+                {"data", {{"id", delivery.reply->message_id}}}});
+        }
+        if (!delivery.reply->at_user_id.empty())
+        {
+            segments.push_back({
+                {"type", "at"},
+                {"data", {{"qq", parseNumericId(delivery.reply->at_user_id)}}}});
+        }
+    }
+    for (const auto &segment : toSegments(delivery.message))
+    {
+        segments.push_back(segment);
+    }
+    action.params["message"] = std::move(segments);
 
     std::visit([&](const auto &target) {
         using Target = std::decay_t<decltype(target)>;

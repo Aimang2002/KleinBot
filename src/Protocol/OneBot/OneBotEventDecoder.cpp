@@ -73,6 +73,10 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
     }
 
     message.message_id = document.value("message_id", 0LL);
+    if (document.contains("message_id") && document["message_id"].is_string())
+    {
+        message.message_id_raw = document["message_id"].get<std::string>();
+    }
     message.message_timestamp = document.value("time", 0LL);
     return message;
 }

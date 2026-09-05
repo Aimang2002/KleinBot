@@ -174,6 +174,10 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.storage.imageAssets, candidate.storage.imageAssets,
                  "storage.image_assets", ConfigChangeImpact::Restart);
 
+    addIfChanged(diff, current.persona.humanize.quoteReply,
+                 candidate.persona.humanize.quoteReply,
+                 "persona.humanize.quote_reply", rebuild);
+
     addIfChanged(diff, current.proxy, candidate.proxy, "network.proxy", rebuild);
 
     addIfChanged(diff, current.communication.protocolType,

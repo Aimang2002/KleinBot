@@ -9,8 +9,7 @@ class QueuedMessageSender : public MessageSenderPort
 public:
     explicit QueuedMessageSender(OutboundMessageQueue &queue);
 
-    void send_private(long long user_id, const OutboundMessage &message) override;
-    void send_group(long long group_id, const OutboundMessage &message) override;
+    void deliver(OutboundDelivery delivery) override;
 
 private:
     OutboundMessageQueue &queue;

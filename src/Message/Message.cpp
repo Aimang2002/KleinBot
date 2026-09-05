@@ -120,14 +120,27 @@ void Message::handleMessage(const InboundMessage &current_data)
 
 void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 {
+	OutboundDelivery delivery;
 	if (data.message_type == "group")
 	{
-		sender.send_group(data.group_id, msg);
+		delivery.target = GroupMessageTarget{std::to_string(data.group_id)};
+		// 群聊回复自带引用+@：多人群聊里让人知道在跟谁说话；
+		// 自身消息的回声不 @ 自己
+		if (options.humanizeQuoteReply && data.user_id != options.bot.id)
+		{
+			ReplyContext reply;
+			reply.message_id = data.message_id;
+			reply.message_id_raw = data.message_id_raw;
+			reply.at_user_id = std::to_string(data.user_id);
+			delivery.reply = std::move(reply);
+		}
 	}
 	else
 	{
-		sender.send_private(data.user_id, msg);
+		delivery.target = DirectMessageTarget{std::to_string(data.user_id)};
 	}
+	delivery.message = msg;
+	sender.deliver(std::move(delivery));
 }
 
 void Message::dispatchText(const InboundMessage &data, const std::string &text)

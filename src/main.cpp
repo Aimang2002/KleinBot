@@ -133,7 +133,8 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 			const std::string message = "早上好，请跟我打招呼的同时来一句元气满满的句子，让我一整天都有活力（直接说就好，不要在前面加上语气词例如“好的”）";
 			LOG_INFO("每日早安即将发送，亲爱的管理员，早上好。");
 			std::string response = chatService.replyOneShot(message);
-			sender.send_private(static_cast<long long>(managerId), TextMessage{response});
+			sender.deliver(OutboundDelivery{
+				DirectMessageTarget{std::to_string(managerId)}, TextMessage{response}});
 		}
 
 		// 到期提醒：逐条经模型渲染后私聊送达，模型失败时兜底直发原文
@@ -153,7 +154,8 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 				LOG_WARNING("提醒渲染失败，兜底直发原文：id=" + std::to_string(due.id));
 				response = "提醒（原定 " + formatLocal(due.scheduled_at) + "）：" + due.content;
 			}
-			sender.send_private(static_cast<long long>(due.user_id), TextMessage{response});
+			sender.deliver(OutboundDelivery{
+				DirectMessageTarget{std::to_string(due.user_id)}, TextMessage{response}});
 		}
 
 		sleepWhileRunning(running, std::chrono::seconds(3));

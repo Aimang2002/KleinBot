@@ -22,13 +22,15 @@ TEST(OutboundMessageQueueTest, PreservesSemanticDeliveryOrder)
     EXPECT_FALSE(queue.tryPop().has_value());
 }
 
-TEST(QueuedMessageSenderTest, EnqueuesProtocolIndependentTargets)
+TEST(QueuedMessageSenderTest, DeliverEnqueuesProtocolIndependentDelivery)
 {
     OutboundMessageQueue queue;
     QueuedMessageSender sender(queue);
 
-    sender.send_private(42, TextMessage{"private"});
-    sender.send_group(88, ImageMessage{ImageMessage::Source::Url, "https://example.test/image.png"});
+    sender.deliver(OutboundDelivery{
+        DirectMessageTarget{"42"}, TextMessage{"private"}});
+    sender.deliver(OutboundDelivery{
+        GroupMessageTarget{"88"}, ImageMessage{ImageMessage::Source::Url, "https://example.test/image.png"}});
 
     auto privateDelivery = queue.tryPop();
     auto groupDelivery = queue.tryPop();
@@ -37,6 +39,7 @@ TEST(QueuedMessageSenderTest, EnqueuesProtocolIndependentTargets)
     ASSERT_TRUE(groupDelivery.has_value());
     EXPECT_EQ(std::get<DirectMessageTarget>(privateDelivery->target).user_id, "42");
     EXPECT_EQ(std::get<TextMessage>(privateDelivery->message).content, "private");
+    EXPECT_FALSE(privateDelivery->reply.has_value());
     EXPECT_EQ(std::get<GroupMessageTarget>(groupDelivery->target).group_id, "88");
     EXPECT_EQ(std::get<ImageMessage>(groupDelivery->message).data,
               "https://example.test/image.png");
@@ -58,6 +61,60 @@ TEST(OneBotMessageEncoderTest, PreservesPrivateTextEnvelopeContract)
             ]
         }
     })"));
+}
+
+TEST(OneBotMessageEncoderTest, EncodesReplyAndAtSegmentsBeforeContent)
+{
+    OneBotMessageEncoder encoder;
+    OutboundDelivery delivery{
+        GroupMessageTarget{"88"},
+        TextMessage{"在跟你说话"}};
+    delivery.reply = ReplyContext{5566, "", "10001"};
+
+    const nlohmann::json encoded = encoder.encode(delivery).toJson();
+
+    // 段顺序固定：reply → at → 内容
+    EXPECT_EQ(encoded, nlohmann::json::parse(R"({
+        "action": "send_group_msg",
+        "params": {
+            "group_id": 88,
+            "message": [
+                {"type": "reply", "data": {"id": 5566}},
+                {"type": "at", "data": {"qq": 10001}},
+                {"type": "text", "data": {"text": "在跟你说话"}}
+            ]
+        }
+    })"));
+}
+
+TEST(OneBotMessageEncoderTest, ReplyContextRawIdAndPartialVariants)
+{
+    OneBotMessageEncoder encoder;
+
+    // 字符串消息 ID 原样回填（个别实现端形态），优先于数值字段
+    OutboundDelivery rawDelivery{
+        GroupMessageTarget{"88"}, TextMessage{"raw"}};
+    rawDelivery.reply = ReplyContext{0, "MsajdvLqdzYxMQA=", "10001"};
+    const auto raw = encoder.encode(rawDelivery);
+    EXPECT_EQ(raw.params.at("message").at(0).at("type"), "reply");
+    EXPECT_EQ(raw.params.at("message").at(0).at("data").at("id"),
+              "MsajdvLqdzYxMQA=");
+
+    // 仅 @ 不引用
+    OutboundDelivery atOnly{
+        GroupMessageTarget{"88"}, TextMessage{"at only"}};
+    atOnly.reply = ReplyContext{0, "", "10001"};
+    const auto atEncoded = encoder.encode(atOnly);
+    EXPECT_EQ(atEncoded.params.at("message").at(0).at("type"), "at");
+    EXPECT_EQ(atEncoded.params.at("message").size(), 2u);
+
+    // 空的 ReplyContext（全默认值）不产生任何段
+    OutboundDelivery emptyReply{
+        GroupMessageTarget{"88"}, TextMessage{"plain"}};
+    emptyReply.reply = ReplyContext{};
+    const auto plain = encoder.encode(emptyReply);
+    EXPECT_EQ(plain.params.at("message").size(), 1u);
+    EXPECT_EQ(plain.params.at("message").at(0).at("type"), "text");
 }
 
 TEST(OneBotMessageEncoderTest, EncodesAllExistingMessageVariants)

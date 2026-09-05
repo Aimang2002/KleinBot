@@ -87,6 +87,35 @@ TEST(ConfigDiffTest, ClassifiesDynamicRebuildAndRestartChanges)
                                ConfigChangeImpact::Restart));
 }
 
+TEST(PersonaSchemaTest, QuoteReplyDefaultsOnAndMapsIntoMessageOptions)
+{
+    ConfigLoader loader;
+
+    // 缺省：不写 persona 节 → quoteReply 默认 true
+    const ConfigLoadResult withoutNode = loader.loadText(validConfig);
+    ASSERT_TRUE(withoutNode.canStart());
+    EXPECT_TRUE(withoutNode.config->persona.humanize.quoteReply);
+    const RuntimeSettings defaultRuntime = buildRuntimeSettings(*withoutNode.config);
+    EXPECT_TRUE(defaultRuntime.message.humanizeQuoteReply);
+
+    // 显式关闭 + reload diff 登记
+    nlohmann::json candidate = nlohmann::json::parse(validConfig);
+    candidate["persona"] = {{"humanize", {{"quote_reply", false}}}};
+    const ConfigLoadResult disabled = loader.loadText(candidate.dump());
+    ASSERT_TRUE(disabled.canStart());
+    EXPECT_FALSE(disabled.config->persona.humanize.quoteReply);
+    EXPECT_FALSE(buildRuntimeSettings(*disabled.config).message.humanizeQuoteReply);
+
+    const ConfigDiff diff = compareConfig(*withoutNode.config, *disabled.config);
+    EXPECT_TRUE(containsChange(diff, "persona.humanize.quote_reply",
+                               ConfigChangeImpact::Rebuild));
+
+    // 未知字段警告但不致命
+    candidate["persona"]["humanize"]["unknown_switch"] = 1;
+    const ConfigLoadResult withUnknown = loader.loadText(candidate.dump());
+    EXPECT_TRUE(withUnknown.canStart());
+}
+
 TEST(ConfigSnapshotStoreTest, PublishesValidatedCandidateWithoutApplyingRuntimeObjects)
 {
     ConfigLoader loader;

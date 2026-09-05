@@ -20,6 +20,8 @@ struct InboundMessage
     std::string message_data_url;
 
     std::int64_t message_id = 0;
+    // 个别实现端（如 Lagrange 部分 API）消息 ID 为字符串：原样保存供 reply 段回填
+    std::string message_id_raw;
     std::int64_t message_timestamp = 0;
     std::size_t payload_size_bytes = 0;
 
