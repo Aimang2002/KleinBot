@@ -105,3 +105,52 @@ TEST(OneBotEventDecoderMentionTest, MentionedIdsReplaceLegacyStringMatching)
     ASSERT_TRUE(textOnly.has_value());
     EXPECT_TRUE(textOnly->mentioned_ids.empty());
 }
+
+TEST(OneBotEventDecoderMentionTest, MessageIdStringAndMissingFormsAreGraceful)
+{
+    OneBotEventDecoder decoder;
+
+    // 字符串形态（NapCat 新版）：不抛异常，进 raw 供 reply 段原样回填
+    const auto stringId = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [{"type": "at", "data": {"qq": 10086}}],
+        "message_id": "MsajdvLqdzYxMQA=",
+        "time": 1757010503
+    })");
+    ASSERT_TRUE(stringId.has_value());
+    EXPECT_EQ(stringId->message_id, 0);
+    EXPECT_EQ(stringId->message_id_raw, "MsajdvLqdzYxMQA=");
+
+    // 缺失形态：message_id 为 0，事件照常解析（引用降级为仅@）
+    const auto missingId = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [{"type": "at", "data": {"qq": 10086}}],
+        "time": 1757010504
+    })");
+    ASSERT_TRUE(missingId.has_value());
+    EXPECT_EQ(missingId->message_id, 0);
+    EXPECT_TRUE(missingId->message_id_raw.empty());
+
+    // 畸形 at 段（缺 qq 字段）：跳过该段，事件其余部分照常解析
+    const auto malformedAt = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [
+            {"type": "at", "data": {}},
+            {"type": "text", "data": {"text": "在吗"}}
+        ],
+        "message_id": 7791,
+        "time": 1757010505
+    })");
+    ASSERT_TRUE(malformedAt.has_value());
+    EXPECT_TRUE(malformedAt->mentioned_ids.empty());
+    EXPECT_EQ(malformedAt->plain_text, "在吗");
+}

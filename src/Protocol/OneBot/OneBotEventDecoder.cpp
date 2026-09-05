@@ -71,29 +71,54 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
             }
             else if (type == "at")
             {
-                // qq 可能是数字或字符串；"all"（@全体成员）是广播不是点名，不记录
-                const auto &qq = segment["data"].at("qq");
-                if (qq.is_number_unsigned())
+                // qq 可能是数字或字符串；"all"（@全体成员）是广播不是点名，不记录。
+                // 字段缺失时跳过该段而不是让整个事件解析失败
+                if (segment["data"].contains("qq"))
                 {
-                    message.mentioned_ids.push_back(qq.get<std::uint64_t>());
-                }
-                else if (qq.is_string())
-                {
-                    const std::string value = qq.get<std::string>();
-                    if (value != "all" && !value.empty() &&
-                        value.find_first_not_of("0123456789") == std::string::npos)
+                    const auto &qq = segment["data"]["qq"];
+                    if (qq.is_number_unsigned())
                     {
-                        message.mentioned_ids.push_back(std::stoull(value));
+                        message.mentioned_ids.push_back(qq.get<std::uint64_t>());
+                    }
+                    else if (qq.is_string())
+                    {
+                        const std::string value = qq.get<std::string>();
+                        if (value != "all" && !value.empty() &&
+                            value.find_first_not_of("0123456789") == std::string::npos)
+                        {
+                            message.mentioned_ids.push_back(std::stoull(value));
+                        }
                     }
                 }
             }
         }
     }
 
-    message.message_id = document.value("message_id", 0LL);
-    if (document.contains("message_id") && document["message_id"].is_string())
+    // message_id 双形态：数字直接取；字符串（NapCat 新版形态）存 raw 供 reply 段回填。
+    // 注意不能先 value("message_id", 0LL)——字符串形态会让 value() 抛类型异常丢掉整个事件
+    if (document.contains("message_id"))
     {
-        message.message_id_raw = document["message_id"].get<std::string>();
+        if (document["message_id"].is_number_integer())
+        {
+            message.message_id = document["message_id"].get<std::int64_t>();
+        }
+        else if (document["message_id"].is_string())
+        {
+            message.message_id_raw = document["message_id"].get<std::string>();
+        }
+    }
+    if (postType == "message" && message.message_id == 0 && message.message_id_raw.empty())
+    {
+        // 引用回复依赖此字段；缺失只降级（仅@），但要留痕帮助定位实现端事件差异
+        std::string keys;
+        for (const auto &item : document.items())
+        {
+            if (!keys.empty())
+                keys += ",";
+            keys += item.key();
+        }
+        LOG_WARNING("入站消息事件缺少 message_id（事件字段：" + keys +
+                    "），回应将降级为仅@不引用");
     }
     message.message_timestamp = document.value("time", 0LL);
     return message;

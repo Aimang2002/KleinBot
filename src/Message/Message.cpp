@@ -128,6 +128,13 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 		delivery.target = GroupMessageTarget{std::to_string(data.group_id)};
 		// 指向性回复：被 @ 才引用+@ 回发起人（固定行为，无配置开关）
 		delivery.reply = buildReplyContext(data, options.bot);
+		if (delivery.reply)
+		{
+			const bool quoteable = delivery.reply->message_id != 0 ||
+								   !delivery.reply->message_id_raw.empty();
+			LOG_INFO("群聊回应元数据：message_id=" + std::to_string(data.message_id) +
+					 (quoteable ? "，引用+@" : "，仅@（原消息缺ID）"));
+		}
 	}
 	else
 	{
