@@ -82,6 +82,26 @@ void Message::handleMessage(const InboundMessage &current_data)
 			}
 		}
 
+		// 人格编译（T5）：#重置对话 后首次聊天，把 soul.md 按 persona-spec
+		// 编译为标签式 prompt（独立调用，不落库不入记忆；失败保留标志下轮重试）
+		if (this->userSession.personaBuildPending(current_data.user_id))
+		{
+			std::string spec;
+			std::string soul;
+			if (this->userSession.loadPersonaBuildMaterials(spec, soul))
+			{
+				const std::string compiled = this->chatService.buildOnce(
+					spec, "以下是人格源描述（soul.md）：\n" + soul +
+							  "\n\n请按规范把它编译为标签块，只输出标签块本身。");
+				this->userSession.applyGeneratedPersona(current_data.user_id, compiled);
+			}
+			else
+			{
+				// 规范/人格文件不可用：清除标志，退回 raw soul 常驻行为
+				this->userSession.applyGeneratedPersona(current_data.user_id, "skip");
+			}
+		}
+
 		// 上下文模式仅管理员：普通用户无状态单轮，不写会话也不进长期记忆
 		const bool useContext = current_data.user_id == options.bot.managerId;
 		// 私聊 LLM 调用前触发"正在输入"（能力位门控在 TypingIndicator 内部，fire-and-forget）

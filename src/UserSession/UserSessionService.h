@@ -28,9 +28,11 @@ class UserSessionService
 {
 public:
     // soulFile：默认人格文件，用户无持久化人格时读取；文件缺失/为空时
-    // 退回内置默认 "You are my assistant, your name is ..."
+    // 退回内置默认 "你是<bot.name>，部署者的AI助手。"
+    // personaSpecFile：人格编译规范（T5），缺失时禁用 AI 编译人格，直接用 soul.md
     UserSessionService(const ModelRegistry &mr, ConversationStore &store, const BotIdentity &bot,
-                       const ChatOptions &chat, const std::string &soulFile = "source/soul.md");
+                       const ChatOptions &chat, const std::string &soulFile = "source/soul.md",
+                       const std::string &personaSpecFile = "source/persona-spec.md");
     void setMemoryService(MemoryService *service);
     void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
@@ -52,6 +54,14 @@ public:
     Person getUserConfig(const uint64_t user_id);
     std::optional<ChatCallBundle> buildChatRequest(const uint64_t &user_id);
 
+    // ---- 人格编译（T5）：#重置对话 后首次聊天把 soul.md 编译为标签式 prompt ----
+    // 是否存在待编译请求：手动人格存在或规范文件缺失时为 false
+    bool personaBuildPending(const uint64_t user_id);
+    // 编译素材（规范文件 + 当前 soul 内容）；不可用返回 false
+    bool loadPersonaBuildMaterials(std::string &specOut, std::string &soulOut);
+    // 应用编译产物：仅内存，不落 user_persona；空串视为失败、保留待编译标志
+    void applyGeneratedPersona(const uint64_t user_id, const std::string &compiledPrompt);
+
 private:
     std::mutex mutex_message;
     std::string default_personality;
@@ -66,6 +76,7 @@ private:
     BotIdentity botIdentity;
     ChatOptions chatOptions;
     std::string soul_file;
+    std::string persona_spec_file;
     ConversationStore &store;
     MemoryService *memoryService = nullptr;
     ImageAssetStore *imageAssetStore = nullptr;

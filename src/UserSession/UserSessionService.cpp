@@ -24,11 +24,12 @@ const char *const kServiceContractFrame =
 
 UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store,
                                        const BotIdentity &bot, const ChatOptions &chat,
-                                       const std::string &soulFile)
+                                       const std::string &soulFile,
+                                       const std::string &personaSpecFile)
     : registry(mr), botIdentity(bot), chatOptions(chat),
       default_personality("你是" + bot.name + "，部署者的AI助手。"),
       user_messages(std::make_unique<std::unordered_map<uint64_t, Person>>()),
-      soul_file(soulFile), store(store)
+      soul_file(soulFile), persona_spec_file(personaSpecFile), store(store)
 {
 }
 
@@ -51,6 +52,9 @@ Person UserSessionService::createDefaultPerson(const uint64_t user_id)
     person.system_prompt = this->store.loadPersona(user_id);
     if (person.system_prompt.empty())
         person.system_prompt = this->loadSoulFallback();
+    // 每个新对话周期（冷启动/#重置对话）都重新编译人格（D14）；
+    // 手动人格存在时 personaBuildPending 会自行排除
+    person.persona_needs_build = true;
     person.current_model = chatOptions.defaultModel;
     person.isOpenVoiceMode = false;
     person.temperature = chatOptions.temperature;
@@ -111,6 +115,10 @@ void UserSessionService::resetChat(const uint64_t user_id)
         this->store.setContextStartId(user_id, history.back().id + 1);
     history.clear();
     user->second.history_anchor = 0;
+    // 新话题配新人格：重置后首次聊天由 AI 按 persona-spec 重新编译
+    // soul.md 为标签式 prompt（长期记忆不受影响——它以对话轮次为源，
+    // 与 system_prompt 正交）
+    user->second.persona_needs_build = true;
 }
 
 void UserSessionService::resetContext(const uint64_t user_id)
@@ -127,6 +135,13 @@ void UserSessionService::resetContext(const uint64_t user_id)
         this->memoryService->clearUser(user_id);
     if (this->imageAssetStore != nullptr)
         this->imageAssetStore->clearUser(user_id);
+    // 人格同样回归源码（D14）：清掉内存中的编译产物，回退到手动人格/soul.md，
+    // 下轮聊天按 persona-spec + soul 重新编译。手动人格保留——
+    // personaBuildPending 会排除，此处恢复的 system_prompt 即手动人格
+    user->second.system_prompt = this->store.loadPersona(user_id);
+    if (user->second.system_prompt.empty())
+        user->second.system_prompt = this->loadSoulFallback();
+    user->second.persona_needs_build = true;
 }
 
 std::string UserSessionService::getModelName(uint64_t user_id)
@@ -235,6 +250,54 @@ Person UserSessionService::getUserConfig(const uint64_t user_id)
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     return this->user_messages->find(user_id)->second;
+}
+
+bool UserSessionService::personaBuildPending(const uint64_t user_id)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_message);
+    this->ensureUserExistsUnlock(user_id);
+    auto user = this->user_messages->find(user_id);
+    // 手动人格（#设置人格）是部署者的明确意志，永远优先，不编译
+    if (!this->store.loadPersona(user_id).empty())
+        return false;
+    return user->second.persona_needs_build;
+}
+
+bool UserSessionService::loadPersonaBuildMaterials(std::string &specOut, std::string &soulOut)
+{
+    // 规范缺失 = 功能未部署，直接禁用编译（降级为 raw soul，不报错刷屏）
+    std::ifstream specInput(this->persona_spec_file);
+    if (!specInput.is_open())
+        return false;
+    std::ostringstream specBuffer;
+    specBuffer << specInput.rdbuf();
+    specOut = utils::trim(specBuffer.str());
+
+    soulOut = this->loadSoulFallback();
+    return !specOut.empty() && !soulOut.empty();
+}
+
+void UserSessionService::applyGeneratedPersona(const uint64_t user_id,
+                                               const std::string &compiledPrompt)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_message);
+    this->ensureUserExistsUnlock(user_id);
+    auto user = this->user_messages->find(user_id);
+    if (compiledPrompt == "skip")
+    {
+        // 素材不可用（规范/人格文件缺失）：取消本次编译请求，退回 raw soul 常驻
+        user->second.persona_needs_build = false;
+        return;
+    }
+    if (compiledPrompt.empty())
+    {
+        // 编译失败：保留待编译标志，下一条聊天消息重试；本轮仍用 soul.md 兜底
+        LOG_WARNING("人格编译产物为空，保留重试标志");
+        return;
+    }
+    user->second.system_prompt = compiledPrompt;
+    user->second.persona_needs_build = false;
+    LOG_INFO("人格编译完成，长度：" + std::to_string(compiledPrompt.size()));
 }
 
 std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_t &user_id)

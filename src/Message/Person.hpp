@@ -29,6 +29,10 @@ struct Person
 
     // 会话设定
     std::string system_prompt;
+    // 人格编译请求（T5）：#重置对话 后置位，首次聊天由 AI 按 persona-spec
+    // 把 soul.md 编译为标签式 system_prompt 并清位。手动人格（#设置人格）
+    // 存在时不编译。仅内存状态，不持久化
+    bool persona_needs_build = false;
     double temperature = 0.7;       // 温度
     double frequency_penalty = 0.0; // 频率惩罚
     double presence_penalty = 0.0;  // 存在惩罚

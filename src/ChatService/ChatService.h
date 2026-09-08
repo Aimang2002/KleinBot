@@ -32,6 +32,9 @@ public:
     ChatReply reply(uint64_t user_id, const std::string &text, bool use_context,
                     std::optional<ChatImageContent> currentImage = std::nullopt);
     std::string replyOneShot(const std::string &prompt); // 无状态（一次性）对话
+    // 一次性调用（自定 system，低温度）：人格编译等后台任务用。
+    // 不写历史、不入记忆队列、无工具；失败返回空串
+    std::string buildOnce(const std::string &systemPrompt, const std::string &userPrompt);
 
 private:
     Dock &dock;

@@ -6,6 +6,7 @@
 #include "../Memory/MemoryService.h"
 #include "../Tool/ToolArgumentParser.h"
 #include "../Tool/ToolContext.h"
+#include "../utils/Utils.hpp"
 #include "../WebFetch/WebFetchOptions.h"
 
 ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use_context,
@@ -287,6 +288,32 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
     std::cout << "\033[32m" << "Model response: " << "\033[0m" << LLM_content << std::endl;
     resultReply.text = suppressTerminalTextReply ? std::string() : LLM_content;
     return resultReply;
+}
+
+std::string ChatService::buildOnce(const std::string &systemPrompt, const std::string &userPrompt)
+{
+    const std::string &modelName = chatConfig.defaultModel;
+    const std::optional<ChatModel> model = this->models.find(modelName);
+    if (!model)
+    {
+        LOG_ERROR("DEFAULT_MODEL 未在 ModelsName.json 注册：" + modelName);
+        return {};
+    }
+
+    ChatRequest request;
+    request.temperature = 0.3; // 编译类任务要稳定，不要创造性
+    request.system_prompt = systemPrompt;
+    request.history.push_back({"user", userPrompt});
+
+    ChatResponse response = this->dock.RequestChat(*model, modelName, request);
+    if (response.cancelled)
+        return {};
+    if (response.code != 200)
+    {
+        LOG_ERROR("ChatService::buildOnce 调用 LLM 失败：" + std::to_string(response.code));
+        return {};
+    }
+    return utils::trim(response.content);
 }
 
 std::string ChatService::replyOneShot(const std::string &prompt)
