@@ -29,10 +29,9 @@ class UserSessionService
 public:
     // soulFile：默认人格文件，用户无持久化人格时读取；文件缺失/为空时
     // 退回内置默认 "你是<bot.name>，部署者的AI助手。"
-    // personaSpecFile：人格编译规范（T5），缺失时禁用 AI 编译人格，直接用 soul.md
+    // 人格编译规范内嵌于实现（D14：内部逻辑归代码），无对应文件
     UserSessionService(const ModelRegistry &mr, ConversationStore &store, const BotIdentity &bot,
-                       const ChatOptions &chat, const std::string &soulFile = "source/soul.md",
-                       const std::string &personaSpecFile = "source/persona-spec.md");
+                       const ChatOptions &chat, const std::string &soulFile = "source/soul.md");
     void setMemoryService(MemoryService *service);
     void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
@@ -57,10 +56,18 @@ public:
     // ---- 人格编译（T5）：#重置对话 后首次聊天把 soul.md 编译为标签式 prompt ----
     // 是否存在待编译请求：手动人格存在或规范文件缺失时为 false
     bool personaBuildPending(const uint64_t user_id);
-    // 编译素材（规范文件 + 当前 soul 内容）；不可用返回 false
-    bool loadPersonaBuildMaterials(std::string &specOut, std::string &soulOut);
+    // 编译任务文本：system（内嵌规范）与 user（soul 包装）——规范内嵌恒可用，无失败路径
+    void personaBuildTask(std::string &systemOut, std::string &userOut);
     // 应用编译产物：仅内存，不落 user_persona；空串视为失败、保留待编译标志
     void applyGeneratedPersona(const uint64_t user_id, const std::string &compiledPrompt);
+    // 单飞编译者的完成入口：释放单飞位；成功则产物进共享缓存（哈希来自获权时快照）
+    void finishPersonaBuild(const uint64_t user_id, const std::string &compiledPrompt);
+
+    // ---- 共享编译缓存（T5）：产物按 (persona-spec + soul) 内容哈希寻址，全用户共用 ----
+    // 哈希命中 → 直接复用产物（新用户零 LLM 调用）；未命中 → 单飞编译（并发只放行一个，
+    // 其余用户本轮 soul 兜底、标志保留，编译完成后下条消息走缓存）
+    std::optional<std::string> freshSharedPersona();
+    bool tryBeginPersonaBuild();
 
 private:
     std::mutex mutex_message;
@@ -71,12 +78,19 @@ private:
     void ensureUserExistsUnlock(const uint64_t user_id);
     Person createDefaultPerson(const uint64_t user_id);
     // 读取 soul.md 作为默认人格；不可用时退回 default_personality
-    std::string loadSoulFallback();
+    std::string loadSoulFallback() const;
     const ModelRegistry &registry;
     BotIdentity botIdentity;
     ChatOptions chatOptions;
     std::string soul_file;
-    std::string persona_spec_file;
+    // 共享编译缓存（mutex_message 保护）；哈希 = std::hash(规范常量 + soul 内容)，
+    // 仅进程内变更检测用（缓存不持久化，无跨进程稳定性需求）
+    std::size_t shared_persona_hash_ = 0;
+    std::string shared_persona_prompt_;
+    bool shared_persona_ready_ = false;
+    bool persona_build_in_progress_ = false;
+    std::size_t persona_build_hash_ = 0; // 单飞期间的待写入哈希
+    std::size_t computePersonaHash() const;
     ConversationStore &store;
     MemoryService *memoryService = nullptr;
     ImageAssetStore *imageAssetStore = nullptr;

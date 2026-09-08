@@ -82,23 +82,24 @@ void Message::handleMessage(const InboundMessage &current_data)
 			}
 		}
 
-		// 人格编译（T5）：#重置对话 后首次聊天，把 soul.md 按 persona-spec
-		// 编译为标签式 prompt（独立调用，不落库不入记忆；失败保留标志下轮重试）
+		// 人格编译（T5）：新对话周期后首次聊天，把 soul.md 按（内嵌）规范
+		// 编译为标签式 prompt（独立调用，不落库不入记忆）。
+		// 三级判定：共享缓存命中 → 直接复用（零 LLM）；未命中 → 单飞编译；
+		// 别的线程在编 → 本轮 soul 兜底、标志保留，编译完成后下条消息走缓存
 		if (this->userSession.personaBuildPending(current_data.user_id))
 		{
-			std::string spec;
-			std::string soul;
-			if (this->userSession.loadPersonaBuildMaterials(spec, soul))
+			if (auto shared = this->userSession.freshSharedPersona())
 			{
-				const std::string compiled = this->chatService.buildOnce(
-					spec, "以下是人格源描述（soul.md）：\n" + soul +
-							  "\n\n请按规范把它编译为标签块，只输出标签块本身。");
-				this->userSession.applyGeneratedPersona(current_data.user_id, compiled);
+				this->userSession.applyGeneratedPersona(current_data.user_id, *shared);
 			}
-			else
+			else if (this->userSession.tryBeginPersonaBuild())
 			{
-				// 规范/人格文件不可用：清除标志，退回 raw soul 常驻行为
-				this->userSession.applyGeneratedPersona(current_data.user_id, "skip");
+				std::string compileSystem;
+				std::string compileTask;
+				this->userSession.personaBuildTask(compileSystem, compileTask);
+				const std::string compiled =
+					this->chatService.buildOnce(compileSystem, compileTask);
+				this->userSession.finishPersonaBuild(current_data.user_id, compiled);
 			}
 		}
 

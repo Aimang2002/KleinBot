@@ -33,18 +33,16 @@ std::string writeFile(const std::filesystem::path &path, const std::string &cont
     return path.string();
 }
 
-const char *kSampleSpec = "# 人格编译规范\n标签块只含标签，禁止职责条款。\n";
 const char *kSampleSoul = "克莱茵：理性、高效、偶尔吐槽的AI助手。";
 }
 
-TEST(PersonaBuildLifecycleTest, ResetSetsFlagAndBuildAppliesCompiledPrompt)
+TEST(PersonaBuildLifecycleTest, ColdStartAndResetArmBuildAndApplyCompiledPrompt)
 {
     const auto dir = std::filesystem::temp_directory_path() /
                      ("kleinbot-persona-" + std::to_string(::time(nullptr)));
     std::filesystem::create_directories(dir);
     writeModelRegistryFile(dir);
     writeFile(dir / "soul.md", kSampleSoul);
-    writeFile(dir / "persona-spec.md", kSampleSpec);
 
     ConversationStore store((dir / "conversation.db").string());
     ModelRegistry registry(writeModelRegistryFile(dir));
@@ -52,8 +50,7 @@ TEST(PersonaBuildLifecycleTest, ResetSetsFlagAndBuildAppliesCompiledPrompt)
     options.defaultModel = "test-model";
     BotIdentity bot;
     UserSessionService session(registry, store, bot, options,
-                               (dir / "soul.md").string(),
-                               (dir / "persona-spec.md").string());
+                               (dir / "soul.md").string());
 
     // 冷启动（首次出现）即置位：新对话周期重新编译人格
     session.ensureUserExists(10);
@@ -66,25 +63,21 @@ TEST(PersonaBuildLifecycleTest, ResetSetsFlagAndBuildAppliesCompiledPrompt)
     session.resetChat(10);
     EXPECT_TRUE(session.personaBuildPending(10));
 
-    std::string spec;
-    std::string soul;
-    ASSERT_TRUE(session.loadPersonaBuildMaterials(spec, soul));
-    EXPECT_NE(spec.find("人格编译规范"), std::string::npos);
-    EXPECT_NE(soul.find("克莱茵"), std::string::npos);
+    // 编译任务可用（规范内嵌，无失败路径），素材含 soul 内容
+    std::string compileSystem;
+    std::string compileTask;
+    session.personaBuildTask(compileSystem, compileTask);
+    EXPECT_NE(compileSystem.find("人格编译规范"), std::string::npos);
+    EXPECT_NE(compileTask.find("克莱茵"), std::string::npos);
 
     // 编译失败（空产物）：标志保留，下轮重试
-    session.applyGeneratedPersona(10, "");
+    session.finishPersonaBuild(10, "");
     EXPECT_TRUE(session.personaBuildPending(10));
     EXPECT_NE(session.getUserConfig(10).system_prompt.find("克莱茵"), std::string::npos)
         << "失败时维持 soul.md 兜底";
 
-    // skip：素材缺失语义，取消标志
-    session.applyGeneratedPersona(10, "skip");
-    EXPECT_FALSE(session.personaBuildPending(10));
-
-    // 重新置位后成功应用：prompt 替换、标志清除
-    session.resetChat(10);
-    session.applyGeneratedPersona(10, "CHARACTER_KLEIN\nSTYLE_BRIEF");
+    // 成功应用：prompt 替换、标志清除
+    session.finishPersonaBuild(10, "CHARACTER_KLEIN\nSTYLE_BRIEF");
     EXPECT_FALSE(session.personaBuildPending(10));
     EXPECT_EQ(session.getUserConfig(10).system_prompt, "CHARACTER_KLEIN\nSTYLE_BRIEF");
 
@@ -104,7 +97,6 @@ TEST(PersonaBuildLifecycleTest, ManualPersonaSuppressesBuild)
     std::filesystem::create_directories(dir);
     writeModelRegistryFile(dir);
     writeFile(dir / "soul.md", kSampleSoul);
-    writeFile(dir / "persona-spec.md", kSampleSpec);
 
     ConversationStore store((dir / "conversation.db").string());
     ModelRegistry registry(writeModelRegistryFile(dir));
@@ -112,8 +104,7 @@ TEST(PersonaBuildLifecycleTest, ManualPersonaSuppressesBuild)
     options.defaultModel = "test-model";
     BotIdentity bot;
     UserSessionService session(registry, store, bot, options,
-                               (dir / "soul.md").string(),
-                               (dir / "persona-spec.md").string());
+                               (dir / "soul.md").string());
 
     session.ensureUserExists(10);
     session.setPersonality(10, "手动人格优先");
@@ -128,14 +119,13 @@ TEST(PersonaBuildLifecycleTest, ManualPersonaSuppressesBuild)
     std::filesystem::remove_all(dir);
 }
 
-TEST(PersonaBuildLifecycleTest, MissingSpecDisablesBuild)
+TEST(PersonaSharedCacheTest, BuiltPromptIsSharedAndInvalidatedByFileChange)
 {
     const auto dir = std::filesystem::temp_directory_path() /
-                     ("kleinbot-persona-c-" + std::to_string(::time(nullptr)));
+                     ("kleinbot-persona-share-" + std::to_string(::time(nullptr)));
     std::filesystem::create_directories(dir);
     writeModelRegistryFile(dir);
     writeFile(dir / "soul.md", kSampleSoul);
-    // 不写 persona-spec.md
 
     ConversationStore store((dir / "conversation.db").string());
     ModelRegistry registry(writeModelRegistryFile(dir));
@@ -143,15 +133,47 @@ TEST(PersonaBuildLifecycleTest, MissingSpecDisablesBuild)
     options.defaultModel = "test-model";
     BotIdentity bot;
     UserSessionService session(registry, store, bot, options,
-                               (dir / "soul.md").string(),
-                               (dir / "persona-spec.md").string());
+                               (dir / "soul.md").string());
 
+    // 用户 A 完成一次编译：产物进入共享缓存
     session.ensureUserExists(10);
     session.resetChat(10);
-    std::string spec;
-    std::string soul;
-    // 规范缺失：素材不可用 → 调用方走 skip 取消语义
-    EXPECT_FALSE(session.loadPersonaBuildMaterials(spec, soul));
+    ASSERT_TRUE(session.tryBeginPersonaBuild());
+    session.finishPersonaBuild(10, "COMPILED_V1");
+    EXPECT_FALSE(session.personaBuildPending(10));
+    EXPECT_EQ(session.getUserConfig(10).system_prompt, "COMPILED_V1");
+
+    // 新用户 B（待编译）→ 缓存命中，零 LLM 直接复用
+    session.ensureUserExists(20);
+    session.resetChat(20);
+    ASSERT_TRUE(session.personaBuildPending(20));
+    auto shared = session.freshSharedPersona();
+    ASSERT_TRUE(shared.has_value());
+    EXPECT_EQ(*shared, "COMPILED_V1");
+    session.applyGeneratedPersona(20, *shared);
+    EXPECT_EQ(session.getUserConfig(20).system_prompt, "COMPILED_V1");
+    EXPECT_FALSE(session.personaBuildPending(20));
+
+    // soul.md 变更 → 哈希失效 → 缓存不再命中，需要重编；已应用的用户不受影响
+    writeFile(dir / "soul.md", "克莱茵 v2：性格大改。");
+    EXPECT_FALSE(session.freshSharedPersona().has_value());
+    EXPECT_FALSE(session.personaBuildPending(10));
+
+    // 单飞：获权期间他人 tryBegin 失败；空产物释放单飞但保留标志（重试语义）
+    session.ensureUserExists(30);
+    session.resetChat(30);
+    ASSERT_TRUE(session.tryBeginPersonaBuild());
+    EXPECT_FALSE(session.tryBeginPersonaBuild());
+    session.finishPersonaBuild(30, "");
+    EXPECT_TRUE(session.personaBuildPending(30));
+    ASSERT_TRUE(session.tryBeginPersonaBuild());
+    session.finishPersonaBuild(30, "COMPILED_V2");
+
+    // 新哈希发布后缓存指向 v2
+    EXPECT_FALSE(session.personaBuildPending(30));
+    auto sharedV2 = session.freshSharedPersona();
+    ASSERT_TRUE(sharedV2.has_value());
+    EXPECT_EQ(*sharedV2, "COMPILED_V2");
 
     std::filesystem::remove_all(dir);
 }
