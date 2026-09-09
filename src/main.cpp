@@ -22,7 +22,6 @@
 #include "Network/WebSocketApiChannel.h"
 #include "Application/CapabilityBroker.h"
 #include "Application/TypingIndicator.h"
-#include "Event/PokeResponder.h"
 #include "Event/FriendRequestNotifier.h"
 #include "WebUI/ConfigPanelServer.h"
 #include "Persistence/ReminderStore.h"
@@ -453,25 +452,11 @@ int main(int argc, char **argv)
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
 		globalVoice, &typingIndicator);
-	// notice/request 事件路由（v2.4.1 T4）+ 被动事件回应（T6）：
+	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
-	PersonaReplier personaReplier = [&chatService](std::uint64_t userId, const std::string &prompt)
-	{ return chatService.replyInCharacter(userId, prompt); };
-	auto voiceRenderer = [&globalVoice, &userSession, &voice](std::uint64_t userId,
-															  const std::string &text) -> std::optional<std::string>
-	{
-		if (!globalVoice || !userSession.isVoiceMode(userId))
-			return std::nullopt;
-		const std::string audioPath = voice.toAudio(text);
-		return audioPath.empty() ? std::nullopt : std::optional<std::string>(audioPath);
-	};
-	PokeResponder pokeResponder(personaReplier, messageSender, capabilityBroker,
-								activeApiChannel, std::move(voiceRenderer), settings.bot,
-								settings.bot.managerId);
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,
 												settings.bot.managerId);
 	EventRouter eventRouter;
-	eventRouter.subscribe("notice.notify.poke", pokeResponder);
 	eventRouter.subscribe("request.friend", friendRequestNotifier);
 	KeyedTaskScheduler messageWorkers(
 		settings.messageExecution,

@@ -1,15 +1,14 @@
 #include <gtest/gtest.h>
 
-#include "Application/BotIdentity.h"
-#include "Application/CapabilityBroker.h"
 #include "Application/EventRouter.h"
 #include "Event/FriendRequestNotifier.h"
-#include "Event/PokeResponder.h"
+#include "Network/OneBotApiChannel.h"
 #include "Port/MessageSenderPort.h"
 #include "Port/OutboundMessage.h"
 #include "Protocol/OneBot/OneBotEventDecoder.h"
 
 #include <chrono>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -234,169 +233,6 @@ public:
     OneBotApiResult result;
 };
 
-CapabilityBroker::VersionProbe probeFor(const std::string &appName)
-{
-    auto info = std::make_shared<OneBotApiResult>();
-    info->retcode = 0;
-    info->data = nlohmann::json({{"app_name", appName}});
-    return [info]() -> std::optional<OneBotApiResult> { return *info; };
-}
-
-InboundMessage pokeEvent(std::uint64_t user, std::uint64_t target, std::uint64_t group)
-{
-    InboundMessage event;
-    event.post_type = "notice";
-    event.notice_type = "notify";
-    event.sub_type = "poke";
-    event.user_id = user;
-    event.target_id = target;
-    event.group_id = group;
-    event.nickname = "戳人者";
-    return event;
-}
-
-InboundMessage noticeEvent(const std::string &noticeType, std::uint64_t user,
-                           std::uint64_t group)
-{
-    InboundMessage event;
-    event.post_type = "notice";
-    event.notice_type = noticeType;
-    event.user_id = user;
-    event.group_id = group;
-    return event;
-}
-
-// 三注可注入 seam 全部确定性：固定时钟、恒 0 随机（概率必中、延迟取下限）、不真睡
-struct PokeHarness
-{
-    std::int64_t now = 1000;
-    std::vector<std::string> prompts;
-    std::vector<std::uint64_t> replierUsers; // 人格装配用的用户（应为管理员）
-    RecordingSender sender;
-    FakeApiChannel api;
-    BotIdentity bot{10086, 0, "Klein"};
-
-    PokeResponder make(const CapabilityBroker &broker)
-    {
-        PersonaReplier replier = [this](std::uint64_t userId, const std::string &prompt)
-        {
-            replierUsers.push_back(userId);
-            prompts.push_back(prompt);
-            return "哼，戳什么戳";
-        };
-        return PokeResponder(replier, sender, broker, api,
-                             PokeResponder::VoiceRenderer{}, bot,
-                             99999,
-                             [this] { return now; },
-                             [](int, int) { return 0; },
-                             [](std::chrono::milliseconds) {});
-    }
-};
-}
-
-TEST(PokeResponderTest, IgnoresPokesNotAddressedToBotAndSelfEcho)
-{
-    CapabilityBroker broker(probeFor("NapCat"));
-    broker.poll(0);
-    PokeHarness harness;
-    PokeResponder responder = harness.make(broker);
-
-    responder.handle(pokeEvent(10001, 20002, 8823)); // 戳的是别人
-    responder.handle(pokeEvent(harness.bot.id, harness.bot.id, 8823)); // bot 自己戳出去的回声
-    responder.handle(pokeEvent(0, harness.bot.id, 8823)); // 无效发起者
-
-    EXPECT_TRUE(harness.sender.delivered.empty());
-    EXPECT_TRUE(harness.prompts.empty());
-}
-
-TEST(PokeResponderTest, RepliesInCharacterToGroupAndPrivatePokes)
-{
-    CapabilityBroker broker(probeFor("NapCat"));
-    broker.poll(0);
-    PokeHarness harness;
-    PokeResponder responder = harness.make(broker);
-
-    InboundMessage groupPoke = pokeEvent(10001, harness.bot.id, 8823);
-    responder.handle(groupPoke);
-    ASSERT_EQ(harness.sender.delivered.size(), 1u);
-    ASSERT_TRUE(std::holds_alternative<GroupMessageTarget>(harness.sender.delivered[0].target));
-    EXPECT_EQ(std::get<GroupMessageTarget>(harness.sender.delivered[0].target).group_id, "8823");
-    ASSERT_NE(harness.sender.textAt(0), nullptr);
-    EXPECT_EQ(*harness.sender.textAt(0), "哼，戳什么戳");
-    // prompt 携带发起人身份与场景；人格装配走管理员会话
-    ASSERT_EQ(harness.prompts.size(), 1u);
-    EXPECT_EQ(harness.replierUsers[0], 99999ULL);
-    EXPECT_NE(harness.prompts[0].find("戳人者"), std::string::npos);
-    EXPECT_NE(harness.prompts[0].find("在群里"), std::string::npos);
-    EXPECT_NE(harness.prompts[0].find("只说那句话"), std::string::npos) << "输出物钉死";
-
-    harness.now += 60; // 越过冷却
-    responder.handle(pokeEvent(10001, harness.bot.id, 0)); // 私聊戳
-    ASSERT_EQ(harness.sender.delivered.size(), 2u);
-    ASSERT_TRUE(std::holds_alternative<DirectMessageTarget>(harness.sender.delivered[1].target));
-    EXPECT_EQ(harness.prompts[1].find("在群里"), std::string::npos)
-        << "私聊 prompt 不应包含群场景描述";
-    EXPECT_NE(harness.prompts[1].find("在私聊"), std::string::npos);
-}
-
-TEST(PokeResponderTest, CooldownSuppressesRapidRepeatPokes)
-{
-    CapabilityBroker broker(probeFor("NapCat"));
-    broker.poll(0);
-    PokeHarness harness;
-    PokeResponder responder = harness.make(broker);
-
-    responder.handle(pokeEvent(10001, harness.bot.id, 8823));
-    responder.handle(pokeEvent(10001, harness.bot.id, 8823)); // 30s 冷却内：不回
-    EXPECT_EQ(harness.sender.delivered.size(), 1u);
-
-    harness.now += 60; // 越过冷却：再戳再回
-    responder.handle(pokeEvent(10001, harness.bot.id, 8823));
-    EXPECT_EQ(harness.sender.delivered.size(), 2u);
-}
-
-TEST(PokeResponderTest, PokeBackRequiresGroupCapabilityAndProbability)
-{
-    CapabilityBroker napcat(probeFor("NapCat"));
-    napcat.poll(0);
-    PokeHarness harness;
-    PokeResponder responder = harness.make(napcat);
-    responder.handle(pokeEvent(10001, harness.bot.id, 8823)); // 恒中随机 → 必反戳
-    ASSERT_EQ(harness.api.actions.size(), 1u);
-    EXPECT_EQ(harness.api.actions[0], "group_poke");
-    EXPECT_EQ(harness.api.paramsList[0].value("group_id", 0ULL), 8823ULL);
-    EXPECT_EQ(harness.api.paramsList[0].value("user_id", 0ULL), 10001ULL);
-
-    PokeHarness privateHarness;
-    PokeResponder privateResponder = privateHarness.make(napcat);
-    privateResponder.handle(pokeEvent(10001, harness.bot.id, 0)); // 私聊戳：无处反戳
-    EXPECT_TRUE(privateHarness.api.actions.empty());
-
-    CapabilityBroker unknown(probeFor("UnknownImpl")); // 未知实现：可见行为默认关
-    unknown.poll(0);
-    PokeHarness silentHarness;
-    PokeResponder silentResponder = silentHarness.make(unknown);
-    silentResponder.handle(pokeEvent(10001, harness.bot.id, 8823));
-    EXPECT_EQ(silentHarness.sender.delivered.size(), 1u) << "回应照常";
-    EXPECT_TRUE(silentHarness.api.actions.empty()) << "反戳静默关闭";
-}
-
-TEST(PokeResponderTest, PokeBackLimitedToOnePerUserPerHour)
-{
-    CapabilityBroker broker(probeFor("NapCat"));
-    broker.poll(0);
-    PokeHarness harness;
-    PokeResponder responder = harness.make(broker);
-
-    responder.handle(pokeEvent(10001, harness.bot.id, 8823)); // 反戳 1
-    harness.now += 60;                                        // 越过回应冷却，未过反戳间隔
-    responder.handle(pokeEvent(10001, harness.bot.id, 8823)); // 有回应、无第二次反戳
-    EXPECT_EQ(harness.sender.delivered.size(), 2u);
-    EXPECT_EQ(harness.api.actions.size(), 1u);
-
-    harness.now += 3600; // 越过 1 小时：允许再次反戳
-    responder.handle(pokeEvent(10001, harness.bot.id, 8823));
-    EXPECT_EQ(harness.api.actions.size(), 2u);
 }
 
 namespace
