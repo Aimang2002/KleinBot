@@ -23,7 +23,6 @@
 #include "Application/CapabilityBroker.h"
 #include "Application/TypingIndicator.h"
 #include "Event/PokeResponder.h"
-#include "Event/GroupWelcomeResponder.h"
 #include "Event/FriendRequestNotifier.h"
 #include "WebUI/ConfigPanelServer.h"
 #include "Persistence/ReminderStore.h"
@@ -469,14 +468,10 @@ int main(int argc, char **argv)
 	PokeResponder pokeResponder(personaReplier, messageSender, capabilityBroker,
 								activeApiChannel, std::move(voiceRenderer), settings.bot,
 								settings.bot.managerId);
-	GroupWelcomeResponder welcomeResponder(personaReplier, messageSender, settings.bot,
-										   settings.bot.managerId);
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,
 												settings.bot.managerId);
 	EventRouter eventRouter;
 	eventRouter.subscribe("notice.notify.poke", pokeResponder);
-	eventRouter.subscribe("notice.group_increase", welcomeResponder);
-	eventRouter.subscribe("notice.group_decrease", welcomeResponder);
 	eventRouter.subscribe("request.friend", friendRequestNotifier);
 	KeyedTaskScheduler messageWorkers(
 		settings.messageExecution,

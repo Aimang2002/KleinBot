@@ -4,7 +4,6 @@
 #include "Application/CapabilityBroker.h"
 #include "Application/EventRouter.h"
 #include "Event/FriendRequestNotifier.h"
-#include "Event/GroupWelcomeResponder.h"
 #include "Event/PokeResponder.h"
 #include "Port/MessageSenderPort.h"
 #include "Port/OutboundMessage.h"
@@ -398,70 +397,6 @@ TEST(PokeResponderTest, PokeBackLimitedToOnePerUserPerHour)
     harness.now += 3600; // 越过 1 小时：允许再次反戳
     responder.handle(pokeEvent(10001, harness.bot.id, 8823));
     EXPECT_EQ(harness.api.actions.size(), 2u);
-}
-
-namespace
-{
-struct WelcomeHarness
-{
-    std::int64_t now = 1000;
-    std::vector<std::string> prompts;
-    std::vector<std::uint64_t> replierUsers;
-    RecordingSender sender;
-    BotIdentity bot{10086, 0, "Klein"};
-
-    GroupWelcomeResponder make()
-    {
-        PersonaReplier replier = [this](std::uint64_t userId, const std::string &prompt)
-        {
-            replierUsers.push_back(userId);
-            prompts.push_back(prompt);
-            return "欢迎新人";
-        };
-        return GroupWelcomeResponder(replier, sender, bot, 99999, [this] { return now; });
-    }
-};
-}
-
-TEST(GroupWelcomeResponderTest, BotSelfJoinAndDepartureAreSilent)
-{
-    WelcomeHarness harness;
-    GroupWelcomeResponder responder = harness.make();
-
-    responder.handle(noticeEvent("group_increase", harness.bot.id, 8823)); // bot 自己进群
-    responder.handle(noticeEvent("group_decrease", 20002, 8823));          // 离群默认不说话
-
-    EXPECT_TRUE(harness.sender.delivered.empty());
-    EXPECT_TRUE(harness.prompts.empty());
-}
-
-TEST(GroupWelcomeResponderTest, WelcomesOnlyFirstMemberWithinCooldown)
-{
-    WelcomeHarness harness;
-    GroupWelcomeResponder responder = harness.make();
-
-    responder.handle(noticeEvent("group_increase", 20001, 8823));
-    responder.handle(noticeEvent("group_increase", 20002, 8823)); // 冷却内：不欢迎
-    EXPECT_EQ(harness.sender.delivered.size(), 1u);
-    EXPECT_EQ(std::get<GroupMessageTarget>(harness.sender.delivered[0].target).group_id,
-              "8823");
-    EXPECT_EQ(harness.replierUsers[0], 99999ULL) << "人格装配走管理员会话";
-    EXPECT_NE(harness.prompts[0].find("20001"), std::string::npos) << "prompt 含新成员标识";
-
-    harness.now += 601; // 冷却过后再有新成员：重新欢迎
-    responder.handle(noticeEvent("group_increase", 20003, 8823));
-    EXPECT_EQ(harness.sender.delivered.size(), 2u);
-}
-
-TEST(GroupWelcomeResponderTest, CooldownIsPerGroup)
-{
-    WelcomeHarness harness;
-    GroupWelcomeResponder responder = harness.make();
-
-    responder.handle(noticeEvent("group_increase", 20001, 8823));
-    responder.handle(noticeEvent("group_increase", 20002, 9944));
-
-    EXPECT_EQ(harness.sender.delivered.size(), 2u);
 }
 
 namespace
