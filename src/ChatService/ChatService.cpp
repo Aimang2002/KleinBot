@@ -10,7 +10,8 @@
 #include "../WebFetch/WebFetchOptions.h"
 
 ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use_context,
-                             std::optional<ChatImageContent> currentImage)
+                             std::optional<ChatImageContent> currentImage,
+                             const std::string &situationNote)
 {
     ChatReply resultReply;
     int64_t userMessageId = 0;
@@ -29,6 +30,10 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
         return resultReply;
     }
     auto &bundle = *bundleOpt;
+
+    // 单轮情境注记紧跟服务契约：行为约束归 system，先于后续工具规则注入
+    if (!situationNote.empty())
+        bundle.request.system_prompt += situationNote;
 
     // 非上下文模式：清空历史，只发当前这条
     if (!use_context)

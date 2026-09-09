@@ -106,22 +106,24 @@ void Message::handleMessage(const InboundMessage &current_data)
 		// 上下文模式仅管理员：普通用户无状态单轮，不写会话也不进长期记忆
 		const bool useContext = current_data.user_id == options.bot.managerId;
 
-		// 新朋友第一句话（私聊、非管理员、进程内首次）：注入情境注记，
-		// 让模型先回应对方再顺带简要自我介绍。普通用户无会话历史，
+		// 新朋友第一句话（私聊、非管理员、进程内首次）：情境注记进 system prompt
+		// （行为约束归 system，约束力强于用户文本前插）。普通用户无会话历史，
 		// takeFirstContact 是模型判断"初次接触"的唯一信号源
+		std::string situationNote;
 		if (!useContext && current_data.message_type != "group" &&
 			this->userSession.takeFirstContact(current_data.user_id))
 		{
-			conversationText =
-				"[系统注] 对方刚加上你好友，这是TA发来的第一句话：先自然回应对方说的内容，"
-				"再顺带用一两句话把自己介绍给对方，不要生硬地报身份。\n" + conversationText;
+			situationNote =
+				"\n\n[系统注] 对方刚加上你好友，这是TA发来的第一句话：先自然回应对方说的内容，"
+				"再顺带用一两句话把自己介绍给对方，不要生硬地报身份。";
 		}
 
 		// 私聊 LLM 调用前触发"正在输入"（能力位门控在 TypingIndicator 内部，fire-and-forget）
 		if (typingIndicator != nullptr && current_data.message_type != "group")
 			typingIndicator->begin(current_data.user_id);
 		ChatReply chatReply = this->chatService.reply(
-			current_data.user_id, conversationText, useContext, std::move(currentImage));
+			current_data.user_id, conversationText, useContext, std::move(currentImage),
+			situationNote);
 		if (!inboundAssetId.empty())
 			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
 				chatReply.user_message_id);

@@ -29,8 +29,12 @@ public:
                 const ChatOptions &chatConfig, uint64_t managerId)
         : dock(dock), userSession(USS), models(models), tools(tools), memoryService(memoryService),
           chatConfig(chatConfig), managerId(managerId) {}
+    // situationNote：单轮情境注记（如新朋友第一句话），追加在 system prompt 内——
+    // 行为约束归 system 而非用户文本（约束力更强）；仅影响注入的那一轮，
+    // 供应商前缀缓存代价为该用户一次性 miss
     ChatReply reply(uint64_t user_id, const std::string &text, bool use_context,
-                    std::optional<ChatImageContent> currentImage = std::nullopt);
+                    std::optional<ChatImageContent> currentImage = std::nullopt,
+                    const std::string &situationNote = {});
     // 人格化单轮回应（T6）：与 reply() 相同的人格装配（用户人格 / soul 兜底 + 服务契约），
     // 但单轮、不带工具、不写会话不入长期记忆——戳一戳、欢迎、提醒转达等被动场景不值得进记忆。
     // 失败返回空串，调用方决定降级，绝不把错误文案当回复发给用户

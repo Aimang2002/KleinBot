@@ -127,7 +127,7 @@ TEST(UserSessionContractTest, ServiceContractWrapsPersonaAndCustomPersona)
               "对方在闲聊、倾诉或玩闹时，你就是以上人格所定义的角色，按其方式自由表达。"
               "判断依据只有一个：对方这条消息需要什么。"
               "对方打招呼、寒暄或刚加上好友发来第一句话时，直接回应对方说的内容，"
-              "不以自我介绍开场；介绍自己仅在对方问起时进行。");
+              "不要以自我介绍开场；介绍自己仅在对方问起或系统注记标明首次接触时顺带进行。");
 }
 
 TEST(UserSessionFirstContactTest, ReportsTrueOnlyOncePerUser)
