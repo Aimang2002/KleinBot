@@ -73,14 +73,13 @@ void PokeResponder::handle(const InboundMessage &event)
     sleeper_(std::chrono::seconds(randomIn_(kReplyDelayMinSeconds, kReplyDelayMaxSeconds)));
 
     const bool inGroup = event.group_id != 0;
-    // 场景交代要具体：这是系统通知、消息发到哪个会话、对什么做反应。
-    // 含糊的"有人戳了你，请回应一句"会让模型输出"我在"这类应答式退化文本
-    const std::string scene = inGroup ? "在群里戳了戳你。你的下一句QQ消息会发在这个群里"
-                                      : "在私聊里戳了戳你。你的下一句QQ消息会发给对方";
-    const std::string prompt = std::string("QQ戳一戳通知：") + displayName(event) +
-                               scene +
-                               "——像真人被戳了一下的自然反应：撒娇、吐槽、装不耐烦都可以，"
-                               "符合你的性格，一到两句话。";
+    // 事件+任务框架（真机教训：含糊场景会让模型输出"我在/收到"这类应答式退化文本）
+    const std::string scene = inGroup ? "（群聊里）" : "（私聊）";
+    const std::string prompt = std::string("[系统事件] ") + displayName(event) +
+                               " 戳了戳你" + scene +
+                               "。\n你的任务：立即回发一条QQ消息给TA——像真人被戳了一下的自然反应："
+                               "撒娇、吐槽、装不耐烦都可以，符合你的性格，一到两句话。"
+                               "只输出这条消息本身，不要确认或转述这条事件。";
     const std::string reply = replier_(event.user_id, prompt);
     if (reply.empty())
     {

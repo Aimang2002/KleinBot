@@ -130,6 +130,23 @@ TEST(UserSessionContractTest, ServiceContractWrapsPersonaAndCustomPersona)
               "不以自我介绍开场；介绍自己仅在对方问起时进行。");
 }
 
+TEST(UserSessionFirstContactTest, ReportsTrueOnlyOncePerUser)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    BotIdentity bot;
+    UserSessionService session(registry, store, bot, options);
+
+    // 进程内每用户只报一次首次接触，用户之间互不影响
+    EXPECT_TRUE(session.takeFirstContact(10));
+    EXPECT_FALSE(session.takeFirstContact(10));
+    EXPECT_TRUE(session.takeFirstContact(20));
+    EXPECT_FALSE(session.takeFirstContact(20));
+    EXPECT_FALSE(session.takeFirstContact(10));
+}
+
 TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
 {
     TemporaryDirectory temporaryDirectory;

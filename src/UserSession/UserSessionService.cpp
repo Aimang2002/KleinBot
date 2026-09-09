@@ -129,6 +129,12 @@ void UserSessionService::ensureUserExists(const uint64_t user_id)
     this->ensureUserExistsUnlock(user_id);
 }
 
+bool UserSessionService::takeFirstContact(const uint64_t user_id)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_message);
+    return this->first_contact_seen_.insert(user_id).second;
+}
+
 void UserSessionService::resetChat(const uint64_t user_id)
 {
     std::lock_guard<std::mutex> lock(this->mutex_message);

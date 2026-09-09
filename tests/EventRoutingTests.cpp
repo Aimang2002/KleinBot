@@ -324,14 +324,16 @@ TEST(PokeResponderTest, RepliesInCharacterToGroupAndPrivatePokes)
     // prompt 携带发起人身份与场景
     ASSERT_EQ(harness.prompts.size(), 1u);
     EXPECT_NE(harness.prompts[0].find("戳人者"), std::string::npos);
-    EXPECT_NE(harness.prompts[0].find("在群里"), std::string::npos);
+    EXPECT_NE(harness.prompts[0].find("群聊里"), std::string::npos);
+    EXPECT_NE(harness.prompts[0].find("你的任务"), std::string::npos) << "事件+任务框架";
 
     harness.now += 60; // 越过冷却
     responder.handle(pokeEvent(10001, harness.bot.id, 0)); // 私聊戳
     ASSERT_EQ(harness.sender.delivered.size(), 2u);
     ASSERT_TRUE(std::holds_alternative<DirectMessageTarget>(harness.sender.delivered[1].target));
-    EXPECT_EQ(harness.prompts[1].find("在群里"), std::string::npos)
+    EXPECT_EQ(harness.prompts[1].find("群聊里"), std::string::npos)
         << "私聊 prompt 不应包含群场景描述";
+    EXPECT_NE(harness.prompts[1].find("私聊"), std::string::npos);
 }
 
 TEST(PokeResponderTest, CooldownSuppressesRapidRepeatPokes)

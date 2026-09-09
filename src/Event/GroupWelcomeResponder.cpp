@@ -52,11 +52,14 @@ void GroupWelcomeResponder::handle(const InboundMessage &event)
         lastWelcome_[event.group_id] = now;
     }
 
-    // 场景交代要具体：系统通知 + 消息去向 + 对谁做反应，
-    // 避免模型把"新成员到来"理解成召唤而输出"我在"这类应答
+    // 事件+任务框架（真机教训：'通知'字样会让模型把自己摆到接收方位置，
+    // 输出"收到"这类应答；任务指令放最后+硬性内容要求才能压住退化输出）
     const std::string who = displayName(event);
-    const std::string prompt = "QQ群通知：" + who + " 刚刚加入了群聊。你要在这个群里发一条欢迎消息，"
-                               "像真人群友那样自然地向 " + who + " 问好并欢迎，一到两句话。";
+    const std::string prompt = std::string("[系统事件] ") + who +
+                               " 刚刚加入了群聊。\n你的任务：立即在这个群里发出一条欢迎消息——"
+                               "直接向 " + who +
+                               " 打招呼（带上TA的名字），表达欢迎，符合你的性格，自然口语，"
+                               "一到两句话。只输出这条消息本身，不要确认或转述这条事件。";
     const std::string reply = replier_(event.user_id, prompt);
     if (reply.empty())
     {

@@ -6,6 +6,7 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include "../Message/Person.hpp"
 #include "../ModelRegistry/ModelRegistry.h"
 #include "../ModelRegistry/ChatModel.h"
@@ -35,6 +36,11 @@ public:
     void setMemoryService(MemoryService *service);
     void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
+    // 进程内首次接触检测：每个用户只返回一次 true（mutex_message 保护）。
+    // 普通用户无会话历史，模型无法自行判断"新朋友第一句话"，Message 据此在
+    // 该轮注入自我介绍情境注记；重启后重新计数——最坏情况是重启后首次
+    // 私聊问候再介绍一次，可接受
+    bool takeFirstContact(uint64_t user_id);
     // 轻重置（#重置对话）：清空内存镜像并把上下文起点落库，
     // SQLite 原始历史、长期记忆和图片资源保留，旧话题仍可召回
     void resetChat(const uint64_t user_id);
@@ -73,6 +79,7 @@ private:
     std::mutex mutex_message;
     std::string default_personality;
     std::unique_ptr<std::unordered_map<uint64_t, Person>> user_messages; // key = QQ,second = 用户信息
+    std::unordered_set<uint64_t> first_contact_seen_;
 
 private:
     void ensureUserExistsUnlock(const uint64_t user_id);

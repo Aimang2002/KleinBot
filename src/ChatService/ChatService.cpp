@@ -330,9 +330,9 @@ std::string ChatService::replyInCharacter(uint64_t user_id, const std::string &p
     bundle.request.history.clear();
     bundle.request.tools.clear();
     bundle.request.system_prompt +=
-        "\n\n当前是被动事件场景（戳一戳、进群、提醒转达等系统通知），不是对话轮次："
-        "你输出的内容将原样作为一条QQ消息发出，只写这条消息本身，简短自然，"
-        "不要任何前缀、引号或解释。";
+        "\n\n以上输入是系统捕获的即时事件。你输出的内容会原样作为一条QQ消息发出，"
+        "它必须是对事件中当事人的直接回应，而不是对事件的确认、转述或描述；"
+        "只输出这条消息本身，简短自然，不要任何前缀、引号或解释。";
 
     ChatResponse response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
     if (response.cancelled)
