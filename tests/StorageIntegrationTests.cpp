@@ -125,7 +125,9 @@ TEST(UserSessionContractTest, ServiceContractWrapsPersonaAndCustomPersona)
               "对方的消息需要专业知识、事实检索或任务执行时，严谨、准确、简短，"
               "优先调用工具获取证据，不夹带人格化寒暄；"
               "对方在闲聊、倾诉或玩闹时，你就是以上人格所定义的角色，按其方式自由表达。"
-              "判断依据只有一个：对方这条消息需要什么。");
+              "判断依据只有一个：对方这条消息需要什么。"
+              "对方打招呼、寒暄或刚加上好友发来第一句话时，直接回应对方说的内容，"
+              "不以自我介绍开场；介绍自己仅在对方问起时进行。");
 }
 
 TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
