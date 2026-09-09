@@ -31,7 +31,10 @@ public:
           chatConfig(chatConfig), managerId(managerId) {}
     ChatReply reply(uint64_t user_id, const std::string &text, bool use_context,
                     std::optional<ChatImageContent> currentImage = std::nullopt);
-    std::string replyOneShot(const std::string &prompt); // 无状态（一次性）对话
+    // 人格化单轮回应（T6）：与 reply() 相同的人格装配（用户人格 / soul 兜底 + 服务契约），
+    // 但单轮、不带工具、不写会话不入长期记忆——戳一戳、欢迎、提醒转达等被动场景不值得进记忆。
+    // 失败返回空串，调用方决定降级，绝不把错误文案当回复发给用户
+    std::string replyInCharacter(uint64_t user_id, const std::string &prompt);
     // 一次性调用（自定 system，低温度）：人格编译等后台任务用。
     // 不写历史、不入记忆队列、无工具；失败返回空串
     std::string buildOnce(const std::string &systemPrompt, const std::string &userPrompt);

@@ -316,33 +316,30 @@ std::string ChatService::buildOnce(const std::string &systemPrompt, const std::s
     return utils::trim(response.content);
 }
 
-std::string ChatService::replyOneShot(const std::string &prompt)
+std::string ChatService::replyInCharacter(uint64_t user_id, const std::string &prompt)
 {
-    const std::string &modelName = chatConfig.defaultModel;
-
-    const std::optional<ChatModel> model = this->models.find(modelName);
-    if (!model)
+    auto bundleOpt = this->userSession.buildChatRequest(user_id);
+    if (!bundleOpt)
     {
-        LOG_ERROR("DEFAULT_MODEL 未在 ModelsName.json 注册：" + modelName);
-        return "系统提示：默认模型未配置";
+        LOG_ERROR("ChatService::replyInCharacter 模型未注册，user_id=" + std::to_string(user_id));
+        return {};
     }
+    auto &bundle = *bundleOpt;
 
-    ChatRequest request;
-    request.frequency_penalty = chatConfig.frequencyPenalty;
-    request.presence_penalty = chatConfig.presencePenalty;
-    request.temperature = chatConfig.temperature;
-    request.system_prompt = "你是人工助手";
-    request.history.push_back({"user", prompt});
+    // 单轮：人格与服务契约照常装配，历史清空、不带工具
+    bundle.request.history.clear();
+    bundle.request.tools.clear();
+    bundle.request.system_prompt +=
+        "\n\n当前是自然回应场景（被戳一戳、欢迎新成员、转达提醒等被动事件），不是对话轮次："
+        "只输出回应文本本身，简短自然，不要任何前缀、引号或解释。";
 
-    ChatResponse response = this->dock.RequestChat(*model, modelName, request);
-
+    ChatResponse response = this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
     if (response.cancelled)
         return {};
-
     if (response.code != 200)
     {
-        LOG_ERROR("ChatService::replyOneShot 调用 LLM 失败：" + std::to_string(response.code));
-        return response.error_message.empty() ? "网络异常" : response.error_message;
+        LOG_ERROR("ChatService::replyInCharacter 调用 LLM 失败：" + std::to_string(response.code));
+        return {};
     }
-    return response.content;
+    return utils::trim(response.content);
 }

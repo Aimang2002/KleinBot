@@ -138,23 +138,31 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 		{
 			const std::string message = "早上好，请跟我打招呼的同时来一句元气满满的句子，让我一整天都有活力（直接说就好，不要在前面加上语气词例如“好的”）";
 			LOG_INFO("每日早安即将发送，亲爱的管理员，早上好。");
-			std::string response = chatService.replyOneShot(message);
-			sender.deliver(OutboundDelivery{
-				DirectMessageTarget{std::to_string(managerId)}, TextMessage{response}});
+			std::string response = chatService.replyInCharacter(managerId, message);
+			// 生成失败静默跳过：不发空消息，也不把错误文案发给管理员，下一天再试
+			if (!response.empty())
+			{
+				sender.deliver(OutboundDelivery{
+					DirectMessageTarget{std::to_string(managerId)}, TextMessage{response}});
+			}
+			else
+			{
+				LOG_WARNING("每日早安生成失败，今日跳过");
+			}
 		}
 
-		// 到期提醒：逐条经模型渲染后私聊送达，模型失败时兜底直发原文
+		// 到期提醒：逐条经模型以人格口吻渲染后私聊送达，模型失败时兜底直发原文
 		for (const DueEvent &due : reminders.popDue(nowSeconds()))
 		{
 			std::string prompt = "现在是" + formatLocal(nowSeconds()) +
 								 "。你之前收到用户的委托：" + due.content +
-								 "。请以克莱茵的口吻把这个提醒转达给用户，简短自然。";
+								 "。请把这个提醒转达给用户，简短自然。";
 			if (due.late)
 				prompt += "该提醒已错过原定触发时间（" + formatLocal(due.scheduled_at) +
 						  "），请向用户说明这一点并致歉。";
 			LOG_INFO("提醒到期：id=" + std::to_string(due.id) + "，user_id=" +
 					 std::to_string(due.user_id));
-			std::string response = chatService.replyOneShot(prompt);
+			std::string response = chatService.replyInCharacter(due.user_id, prompt);
 			if (response.empty())
 			{
 				LOG_WARNING("提醒渲染失败，兜底直发原文：id=" + std::to_string(due.id));
