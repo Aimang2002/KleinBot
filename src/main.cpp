@@ -467,8 +467,10 @@ int main(int argc, char **argv)
 		return audioPath.empty() ? std::nullopt : std::optional<std::string>(audioPath);
 	};
 	PokeResponder pokeResponder(personaReplier, messageSender, capabilityBroker,
-								activeApiChannel, std::move(voiceRenderer), settings.bot);
-	GroupWelcomeResponder welcomeResponder(personaReplier, messageSender, settings.bot);
+								activeApiChannel, std::move(voiceRenderer), settings.bot,
+								settings.bot.managerId);
+	GroupWelcomeResponder welcomeResponder(personaReplier, messageSender, settings.bot,
+										   settings.bot.managerId);
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,
 												settings.bot.managerId);
 	EventRouter eventRouter;

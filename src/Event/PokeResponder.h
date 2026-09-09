@@ -35,6 +35,7 @@ public:
     PokeResponder(PersonaReplier replier, MessageSenderPort &sender,
                   const CapabilityBroker &capabilities, OneBotApiChannel &api,
                   VoiceRenderer voiceRenderer, BotIdentity bot,
+                  std::uint64_t personaUserId = 0,
                   Clock clock = {}, RandomIn randomIn = {}, Sleeper sleeper = {});
 
     void handle(const InboundMessage &event) override;
@@ -48,6 +49,9 @@ private:
     OneBotApiChannel &api_;
     VoiceRenderer voiceRenderer_;
     BotIdentity bot_;
+    // 人格装配用用户：0 时回退事件当事人。默认用管理员会话——事件回应说
+    // 部署者调好的口吻，且不给每个戳人者/进群者创建幽灵会话
+    std::uint64_t personaUserId_;
     Clock clock_;
     RandomIn randomIn_;
     Sleeper sleeper_;

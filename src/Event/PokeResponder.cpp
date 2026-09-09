@@ -34,9 +34,11 @@ std::string displayName(const InboundMessage &event)
 PokeResponder::PokeResponder(PersonaReplier replier, MessageSenderPort &sender,
                              const CapabilityBroker &capabilities, OneBotApiChannel &api,
                              VoiceRenderer voiceRenderer, BotIdentity bot,
+                             std::uint64_t personaUserId,
                              Clock clock, RandomIn randomIn, Sleeper sleeper)
     : replier_(std::move(replier)), sender_(sender), capabilities_(capabilities),
       api_(api), voiceRenderer_(std::move(voiceRenderer)), bot_(bot),
+      personaUserId_(personaUserId),
       clock_(clock ? std::move(clock) : std::function<std::int64_t()>(
                                             [] { return std::time(nullptr); })),
       randomIn_(randomIn ? std::move(randomIn)
@@ -73,14 +75,16 @@ void PokeResponder::handle(const InboundMessage &event)
     sleeper_(std::chrono::seconds(randomIn_(kReplyDelayMinSeconds, kReplyDelayMaxSeconds)));
 
     const bool inGroup = event.group_id != 0;
-    // 事件+任务框架（真机教训：含糊场景会让模型输出"我在/收到"这类应答式退化文本）
-    const std::string scene = inGroup ? "（群聊里）" : "（私聊）";
-    const std::string prompt = std::string("[系统事件] ") + displayName(event) +
-                               " 戳了戳你" + scene +
-                               "。\n你的任务：立即回发一条QQ消息给TA——像真人被戳了一下的自然反应："
-                               "撒娇、吐槽、装不耐烦都可以，符合你的性格，一到两句话。"
-                               "只输出这条消息本身，不要确认或转述这条事件。";
-    const std::string reply = replier_(event.user_id, prompt);
+    // 纯自然叙事（真机教训：元框架会被模型当成需要应答的对话，产出
+    // "我在/收到/未收到事件内容"这类退化应答，方括号标记最严重）
+    const std::string scene = inGroup ? "在群里" : "在私聊";
+    const std::string prompt = displayName(event) + " 刚刚" + scene +
+                               "戳了戳你——就是QQ的戳一戳，你被TA戳了一下。回TA一句话吧，"
+                               "像真人被戳到的反应：可以撒娇、可以吐槽、也可以装不耐烦，"
+                               "看你的性格来，一两句话就够。你接下来这句话会直接发给TA，"
+                               "所以只说那句话，别的不用说。";
+    const std::string reply = replier_(personaUserId_ != 0 ? personaUserId_ : event.user_id,
+                                       prompt);
     if (reply.empty())
     {
         LOG_WARNING("戳一戳回应生成失败，静默跳过：user_id=" + std::to_string(event.user_id));

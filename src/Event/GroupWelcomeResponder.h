@@ -21,7 +21,8 @@ public:
     using Clock = std::function<std::int64_t()>;
 
     GroupWelcomeResponder(PersonaReplier replier, MessageSenderPort &sender,
-                          BotIdentity bot, Clock clock = {});
+                          BotIdentity bot, std::uint64_t personaUserId = 0,
+                          Clock clock = {});
 
     void handle(const InboundMessage &event) override;
 
@@ -29,6 +30,8 @@ private:
     PersonaReplier replier_;
     MessageSenderPort &sender_;
     BotIdentity bot_;
+    // 人格装配用用户：0 时回退事件当事人（理由见 PokeResponder）
+    std::uint64_t personaUserId_;
     Clock clock_;
 
     std::mutex mutex_;

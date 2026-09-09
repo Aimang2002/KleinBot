@@ -272,19 +272,22 @@ struct PokeHarness
 {
     std::int64_t now = 1000;
     std::vector<std::string> prompts;
+    std::vector<std::uint64_t> replierUsers; // 人格装配用的用户（应为管理员）
     RecordingSender sender;
     FakeApiChannel api;
     BotIdentity bot{10086, 0, "Klein"};
 
     PokeResponder make(const CapabilityBroker &broker)
     {
-        PersonaReplier replier = [this](std::uint64_t, const std::string &prompt)
+        PersonaReplier replier = [this](std::uint64_t userId, const std::string &prompt)
         {
+            replierUsers.push_back(userId);
             prompts.push_back(prompt);
             return "哼，戳什么戳";
         };
         return PokeResponder(replier, sender, broker, api,
                              PokeResponder::VoiceRenderer{}, bot,
+                             99999,
                              [this] { return now; },
                              [](int, int) { return 0; },
                              [](std::chrono::milliseconds) {});
@@ -321,19 +324,20 @@ TEST(PokeResponderTest, RepliesInCharacterToGroupAndPrivatePokes)
     EXPECT_EQ(std::get<GroupMessageTarget>(harness.sender.delivered[0].target).group_id, "8823");
     ASSERT_NE(harness.sender.textAt(0), nullptr);
     EXPECT_EQ(*harness.sender.textAt(0), "哼，戳什么戳");
-    // prompt 携带发起人身份与场景
+    // prompt 携带发起人身份与场景；人格装配走管理员会话
     ASSERT_EQ(harness.prompts.size(), 1u);
+    EXPECT_EQ(harness.replierUsers[0], 99999ULL);
     EXPECT_NE(harness.prompts[0].find("戳人者"), std::string::npos);
-    EXPECT_NE(harness.prompts[0].find("群聊里"), std::string::npos);
-    EXPECT_NE(harness.prompts[0].find("你的任务"), std::string::npos) << "事件+任务框架";
+    EXPECT_NE(harness.prompts[0].find("在群里"), std::string::npos);
+    EXPECT_NE(harness.prompts[0].find("只说那句话"), std::string::npos) << "输出物钉死";
 
     harness.now += 60; // 越过冷却
     responder.handle(pokeEvent(10001, harness.bot.id, 0)); // 私聊戳
     ASSERT_EQ(harness.sender.delivered.size(), 2u);
     ASSERT_TRUE(std::holds_alternative<DirectMessageTarget>(harness.sender.delivered[1].target));
-    EXPECT_EQ(harness.prompts[1].find("群聊里"), std::string::npos)
+    EXPECT_EQ(harness.prompts[1].find("在群里"), std::string::npos)
         << "私聊 prompt 不应包含群场景描述";
-    EXPECT_NE(harness.prompts[1].find("私聊"), std::string::npos);
+    EXPECT_NE(harness.prompts[1].find("在私聊"), std::string::npos);
 }
 
 TEST(PokeResponderTest, CooldownSuppressesRapidRepeatPokes)
@@ -402,17 +406,19 @@ struct WelcomeHarness
 {
     std::int64_t now = 1000;
     std::vector<std::string> prompts;
+    std::vector<std::uint64_t> replierUsers;
     RecordingSender sender;
     BotIdentity bot{10086, 0, "Klein"};
 
     GroupWelcomeResponder make()
     {
-        PersonaReplier replier = [this](std::uint64_t, const std::string &prompt)
+        PersonaReplier replier = [this](std::uint64_t userId, const std::string &prompt)
         {
+            replierUsers.push_back(userId);
             prompts.push_back(prompt);
             return "欢迎新人";
         };
-        return GroupWelcomeResponder(replier, sender, bot, [this] { return now; });
+        return GroupWelcomeResponder(replier, sender, bot, 99999, [this] { return now; });
     }
 };
 }
@@ -439,6 +445,7 @@ TEST(GroupWelcomeResponderTest, WelcomesOnlyFirstMemberWithinCooldown)
     EXPECT_EQ(harness.sender.delivered.size(), 1u);
     EXPECT_EQ(std::get<GroupMessageTarget>(harness.sender.delivered[0].target).group_id,
               "8823");
+    EXPECT_EQ(harness.replierUsers[0], 99999ULL) << "人格装配走管理员会话";
     EXPECT_NE(harness.prompts[0].find("20001"), std::string::npos) << "prompt 含新成员标识";
 
     harness.now += 601; // 冷却过后再有新成员：重新欢迎

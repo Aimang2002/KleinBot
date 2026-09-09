@@ -17,8 +17,10 @@ std::string displayName(const InboundMessage &event)
 }
 
 GroupWelcomeResponder::GroupWelcomeResponder(PersonaReplier replier, MessageSenderPort &sender,
-                                             BotIdentity bot, Clock clock)
+                                             BotIdentity bot, std::uint64_t personaUserId,
+                                             Clock clock)
     : replier_(std::move(replier)), sender_(sender), bot_(bot),
+      personaUserId_(personaUserId),
       clock_(clock ? std::move(clock) : std::function<std::int64_t()>(
                                             [] { return std::time(nullptr); }))
 {
@@ -52,15 +54,16 @@ void GroupWelcomeResponder::handle(const InboundMessage &event)
         lastWelcome_[event.group_id] = now;
     }
 
-    // 事件+任务框架（真机教训：'通知'字样会让模型把自己摆到接收方位置，
-    // 输出"收到"这类应答；任务指令放最后+硬性内容要求才能压住退化输出）
+    // 纯自然叙事（真机教训：三轮迭代证明任何元框架都会被模型当成需要应答的
+    // 对话——"我在"/"收到"/"未收到事件内容"均由此而来，方括号标记最严重）。
+    // 要求里放应答无法满足的硬性内容（带上名字），结尾钉死输出物
     const std::string who = displayName(event);
-    const std::string prompt = std::string("[系统事件] ") + who +
-                               " 刚刚加入了群聊。\n你的任务：立即在这个群里发出一条欢迎消息——"
-                               "直接向 " + who +
-                               " 打招呼（带上TA的名字），表达欢迎，符合你的性格，自然口语，"
-                               "一到两句话。只输出这条消息本身，不要确认或转述这条事件。";
-    const std::string reply = replier_(event.user_id, prompt);
+    const std::string prompt = "咱们群刚来了一位新成员，是 " + who +
+                               "。你以群友的身份跟TA打个招呼、欢迎一下——像平时群聊那样自然，"
+                               "带上TA的名字，一两句话就够。你接下来这句话会直接发到群里，"
+                               "所以只说欢迎那句话，别的不用说。";
+    const std::string reply = replier_(personaUserId_ != 0 ? personaUserId_ : event.user_id,
+                                       prompt);
     if (reply.empty())
     {
         LOG_WARNING("进群欢迎生成失败，静默跳过：group_id=" +
