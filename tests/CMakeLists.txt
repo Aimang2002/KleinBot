@@ -8,6 +8,7 @@ add_executable(kleinbot_tests
     ConfigWriterTests.cpp
     CurlRequestControlTests.cpp
     EventRoutingTests.cpp
+    GroupContextTests.cpp
     MemoryRecallTests.cpp
     ModelCatalogTests.cpp
     ModelReadinessTests.cpp
