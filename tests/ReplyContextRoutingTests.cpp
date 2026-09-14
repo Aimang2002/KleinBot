@@ -193,3 +193,56 @@ TEST(OneBotEventDecoderMentionTest, MentionedCommandTextIsCommandReady)
     ASSERT_TRUE(atOnly.has_value());
     EXPECT_TRUE(atOnly->plain_text.empty());
 }
+
+// 引用回复段（T7b）：被引用消息 ID 双形态解析，供观察通道还原回复链
+TEST(OneBotEventDecoderMentionTest, ParsesReplySegmentInBothIdForms)
+{
+    OneBotEventDecoder decoder;
+
+    const auto numeric = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [
+            {"type": "reply", "data": {"id": 7788}},
+            {"type": "text", "data": {"text": "同感"}}
+        ],
+        "message_id": 7795,
+        "time": 1757010509
+    })");
+    ASSERT_TRUE(numeric.has_value());
+    EXPECT_EQ(numeric->reply_to_message_id, 7788);
+    EXPECT_TRUE(numeric->reply_to_message_id_raw.empty());
+
+    // 字符串形态（NapCat 新版）：原样保存
+    const auto stringId = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [
+            {"type": "reply", "data": {"id": "CAQABAKDKogQAIgQ0Njg="}},
+            {"type": "text", "data": {"text": "是"}}
+        ],
+        "message_id": 7796,
+        "time": 1757010510
+    })");
+    ASSERT_TRUE(stringId.has_value());
+    EXPECT_EQ(stringId->reply_to_message_id, 0);
+    EXPECT_EQ(stringId->reply_to_message_id_raw, "CAQABAKDKogQAIgQ0Njg=");
+
+    // 无 reply 段：字段保持默认
+    const auto plain = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [{"type": "text", "data": {"text": "新话题"}}],
+        "message_id": 7797,
+        "time": 1757010511
+    })");
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(plain->reply_to_message_id, 0);
+    EXPECT_TRUE(plain->reply_to_message_id_raw.empty());
+}

@@ -70,6 +70,18 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
             {
                 message.message_data_url = segment["data"].value("url", "");
             }
+            else if (type == "reply")
+            {
+                // 引用回复段：被引用消息 ID 双形态（数字/字符串），供观察通道还原回复链
+                if (segment["data"].contains("id"))
+                {
+                    const auto &quoted = segment["data"]["id"];
+                    if (quoted.is_number_integer())
+                        message.reply_to_message_id = quoted.get<std::int64_t>();
+                    else if (quoted.is_string())
+                        message.reply_to_message_id_raw = quoted.get<std::string>();
+                }
+            }
             else if (type == "at")
             {
                 // qq 可能是数字或字符串；"all"（@全体成员）是广播不是点名，不记录。

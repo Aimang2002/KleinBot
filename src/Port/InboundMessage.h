@@ -27,6 +27,10 @@ struct InboundMessage
     std::int64_t message_id = 0;
     // 个别实现端（如 Lagrange 部分 API）消息 ID 为字符串：原样保存供 reply 段回填
     std::string message_id_raw;
+    // 入站引用回复：被引用消息的 ID（双形态，同 message_id）。观察通道用它在
+    // 群消息流中还原回复链——同线程消息互相加权（T7b）
+    std::int64_t reply_to_message_id = 0;
+    std::string reply_to_message_id_raw;
     std::int64_t message_timestamp = 0;
     std::size_t payload_size_bytes = 0;
 
