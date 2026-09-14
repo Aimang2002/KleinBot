@@ -331,8 +331,11 @@ std::string ChatService::replyInCharacter(uint64_t user_id, const std::string &p
     }
     auto &bundle = *bundleOpt;
 
-    // 单轮：人格与服务契约照常装配，历史清空、不带工具
+    // 单轮：人格与服务契约照常装配，历史清空、不带工具。
+    // prompt 必须手动塞进 history——buildChatRequest 只装配会话镜像，
+    // 这里不落库，不 append 就没有任何 user 消息
     bundle.request.history.clear();
+    bundle.request.history.push_back({"user", prompt});
     bundle.request.tools.clear();
     bundle.request.system_prompt +=
         "\n\n刚才那条不是正式对话，是一个需要你随口回应的小场景：你输出的这句话"

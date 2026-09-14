@@ -47,7 +47,8 @@ void Message::handleMessage(const InboundMessage &current_data)
 	if (intent == Intent::Chat)
 	{
 		CommandContext ctx{current_data.user_id, current_data.group_id, current_data.message_type, current_data};
-		auto rs = this->registry.execute(current_data.raw_message, ctx);
+		// 命令匹配用 plain_text：群聊 raw_message 带 [CQ:at,...] 前缀，精确匹配永远失败
+		auto rs = this->registry.execute(current_data.plain_text, ctx);
 		if (rs.has_value())
 		{
 			LOG_DEBUG("识别到命令");
@@ -80,6 +81,14 @@ void Message::handleMessage(const InboundMessage &current_data)
 					asset->mime_type.empty() ? "image/jpeg" : asset->mime_type,
 					base64};
 			}
+		}
+
+		// 群聊纯@（无文字无图片）：空 user 消息会让模型答非所问
+		// （"没有收到你的消息内容"之类），换成明确的情境占位，
+		// 让人格自然接住这次点名
+		if (conversationText.empty())
+		{
+			conversationText = "（对方只是@了你，没有附带任何文字）";
 		}
 
 		// 人格编译（T5）：新对话周期后首次聊天，把 soul.md 按（内嵌）规范

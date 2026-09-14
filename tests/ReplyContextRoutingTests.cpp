@@ -69,7 +69,9 @@ TEST(OneBotEventDecoderMentionTest, ParsesAtSegmentsInBothIdForms)
     ASSERT_EQ(event->mentioned_ids.size(), 2u);
     EXPECT_EQ(event->mentioned_ids[0], 10086ULL);
     EXPECT_EQ(event->mentioned_ids[1], 30001ULL);
-    EXPECT_EQ(event->plain_text, " 在吗");
+    // at 段独立于 text 段：拼接后的 plain_text 统一去首尾空白，
+    // 群聊里带 @ 的命令才不会因残留空格匹配不上
+    EXPECT_EQ(event->plain_text, "在吗");
 
     // "all"（@全体成员）是广播不是点名：不记录，群聊触发门槛不受其影响
     const auto broadcast = decoder.decode(R"({
@@ -153,4 +155,41 @@ TEST(OneBotEventDecoderMentionTest, MessageIdStringAndMissingFormsAreGraceful)
     ASSERT_TRUE(malformedAt.has_value());
     EXPECT_TRUE(malformedAt->mentioned_ids.empty());
     EXPECT_EQ(malformedAt->plain_text, "在吗");
+}
+
+TEST(OneBotEventDecoderMentionTest, MentionedCommandTextIsCommandReady)
+{
+    OneBotEventDecoder decoder;
+
+    // 群聊 @bot 发命令：raw_message 带 [CQ:at,...] 前缀不能用于匹配，
+    // plain_text 去首尾空白后必须与纯文本命令逐字相等
+    const auto command = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "raw_message": "[CQ:at,qq=10086] #帮助",
+        "message": [
+            {"type": "at", "data": {"qq": 10086}},
+            {"type": "text", "data": {"text": " #帮助 "}}
+        ],
+        "message_id": 7792,
+        "time": 1757010506
+    })");
+    ASSERT_TRUE(command.has_value());
+    ASSERT_EQ(command->mentioned_ids.size(), 1u);
+    EXPECT_EQ(command->plain_text, "#帮助");
+
+    // 纯@无文字：plain_text 为空，由消息层注入情境占位，模型不会收到空 user 消息
+    const auto atOnly = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [{"type": "at", "data": {"qq": 10086}}],
+        "message_id": 7793,
+        "time": 1757010507
+    })");
+    ASSERT_TRUE(atOnly.has_value());
+    EXPECT_TRUE(atOnly->plain_text.empty());
 }

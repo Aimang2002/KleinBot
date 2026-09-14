@@ -2,11 +2,13 @@
 
 #include "Action/Action.h"
 #include "Command/AdminCommand.h"
+#include "Command/CommandRegistry.h"
 #include "Command/HelpCommand.h"
 #include "Command/HelpText.h"
 #include "Command/QueryModelCommand.h"
 #include "Command/VoiceSwitchCommand.h"
 #include "KleinVersion.h"
+#include "Protocol/OneBot/OneBotEventDecoder.h"
 
 namespace
 {
@@ -126,4 +128,35 @@ TEST(HelpCommandTest, ReturnsHardCodedHelpTextWithGeneratedVersion)
     EXPECT_NE(content.find("欢迎使用克莱茵QQ机器人"), std::string::npos);
     EXPECT_NE(content.find("当前克莱茵版本:" + std::string(KLEINBOT_VERSION_STRING)),
               std::string::npos);
+}
+
+// 群聊命令链路契约：@bot 的群消息经解码器得到去空白 plain_text，
+// 注册表以它做匹配（raw_message 带 [CQ:at,...] 前缀，永远匹配不上）
+TEST(CommandRegistryGroupTest, MentionedGroupCommandMatchesThroughPlainText)
+{
+    OneBotEventDecoder decoder;
+    const auto event = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "raw_message": "[CQ:at,qq=10086] #帮助",
+        "message": [
+            {"type": "at", "data": {"qq": 10086}},
+            {"type": "text", "data": {"text": " #帮助"}}
+        ],
+        "message_id": 7794,
+        "time": 1757010508
+    })");
+    ASSERT_TRUE(event.has_value());
+
+    CommandRegistry registry(99999);
+    registry.registryCommand(std::make_unique<HelpCommand>());
+    // Message::handleMessage 的接线：registry.execute 收到的是 plain_text
+    CommandContext ctx{event->user_id, event->group_id, event->message_type, *event};
+    const auto result = registry.execute(event->plain_text, ctx);
+
+    ASSERT_TRUE(result.has_value());
+    const std::string &content = std::get<TextMessage>(result->payload).content;
+    EXPECT_NE(content.find("欢迎使用克莱茵QQ机器人"), std::string::npos);
 }

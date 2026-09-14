@@ -1,6 +1,7 @@
 #include "OneBotEventDecoder.h"
 
 #include "../../Log/Log.h"
+#include "../../utils/Utils.hpp"
 #include "../../../Library/nlohmann/json.hpp"
 
 std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payload) const
@@ -93,6 +94,10 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
             }
         }
     }
+    // at 段独立于 text 段，"@bot 命令" 的文本段会残留首尾空白；
+    // 命令匹配与参数提取都以 plain_text 为准，这里统一去首尾空白，
+    // 否则群聊里带 @ 的命令永远差一个空格匹配不上
+    message.plain_text = utils::trim(message.plain_text);
 
     // message_id 双形态：数字直接取；字符串（NapCat 新版形态）存 raw 供 reply 段回填。
     // 注意不能先 value("message_id", 0LL)——字符串形态会让 value() 抛类型异常丢掉整个事件
