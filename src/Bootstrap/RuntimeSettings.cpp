@@ -123,6 +123,9 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.webFetch.cacheTtlSeconds,
         schema.webFetch.cacheMaxEntries,
         schema.proxy};
+    result.perception = {
+        schema.perception.enabled,
+        schema.perception.observeGroups};
     result.message = {
         result.bot,
         schema.bot.groupChatEnabled};

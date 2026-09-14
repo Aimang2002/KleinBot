@@ -4,6 +4,7 @@
 #include "Command/ResetChatCommand.h"
 #include "Command/ResetContextCommand.h"
 #include "Persistence/ConversationStore.h"
+#include "Perception/PerceptionStore.h"
 #include "Tool/SendImageTool.h"
 #include "UserSession/UserSessionService.h"
 
@@ -521,4 +522,102 @@ TEST(SendImageToolIntegrationTest, SendsLatestImageAsTerminalResultWithoutExposi
     const auto &image = std::get<ImageMessage>(result.outbound_messages.front());
     EXPECT_EQ(image.source, ImageMessage::Source::LocalPath);
     EXPECT_EQ(image.data, latestAsset->local_path);
+}
+
+namespace
+{
+// 读回 affinity 表全部行（user, group, observed, interaction, last_seen），测试断言用
+std::vector<std::string> readAffinityRows(const std::string &dbPath)
+{
+    std::vector<std::string> rows;
+    sqlite3 *database = nullptr;
+    if (sqlite3_open(dbPath.c_str(), &database) != SQLITE_OK)
+    {
+        sqlite3_close(database);
+        return rows;
+    }
+    const char *query =
+        "SELECT user_id, group_id, observed_count, interaction_count, last_seen_ts"
+        " FROM affinity ORDER BY user_id, group_id;";
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(database, query, -1, &statement, nullptr) == SQLITE_OK)
+    {
+        while (sqlite3_step(statement) == SQLITE_ROW)
+        {
+            rows.push_back(std::to_string(sqlite3_column_int64(statement, 0)) + "," +
+                           std::to_string(sqlite3_column_int64(statement, 1)) + "," +
+                           std::to_string(sqlite3_column_int64(statement, 2)) + "," +
+                           std::to_string(sqlite3_column_int64(statement, 3)) + "," +
+                           std::to_string(sqlite3_column_int64(statement, 4)));
+        }
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(database);
+    return rows;
+}
+
+// affinity 表的全部列名：D7 红线（原文永不落盘）的结构性证据——
+// 不允许出现任何承载文本的列
+std::vector<std::string> readAffinityColumns(const std::string &dbPath)
+{
+    std::vector<std::string> columns;
+    sqlite3 *database = nullptr;
+    if (sqlite3_open(dbPath.c_str(), &database) != SQLITE_OK)
+    {
+        sqlite3_close(database);
+        return columns;
+    }
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(database, "PRAGMA table_info(affinity);", -1,
+                           &statement, nullptr) == SQLITE_OK)
+    {
+        while (sqlite3_step(statement) == SQLITE_ROW)
+            columns.push_back(reinterpret_cast<const char *>(sqlite3_column_text(statement, 1)));
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(database);
+    return columns;
+}
+}
+
+// 观察通道亲密度落库生命周期（v2.4.1 T7）：UPSERT 累加而非覆盖；
+// 表结构只含计数列——D7 红线（原文永不落盘）由列集合本身保证
+TEST(PerceptionStoreIntegrationTest, AffinityUpsertAccumulatesAcrossFlushes)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
+
+    {
+        PerceptionStore store(dbPath);
+        ASSERT_TRUE(store.isOpen());
+        store.upsertBatch({
+            {10, 8823, 5, 1, 1000},
+            {20, 8823, 2, 0, 1001},
+        });
+        // 第二次 flush：同键累加，last_seen 取最新
+        store.upsertBatch({
+            {10, 8823, 3, 2, 2000},
+        });
+    }
+
+    // 对象销毁重开：验证持久化而非内存态
+    {
+        PerceptionStore store(dbPath);
+        ASSERT_TRUE(store.isOpen());
+        store.upsertBatch({
+            {10, 8823, 1, 1, 3000},
+        });
+    }
+
+    const auto rows = readAffinityRows(dbPath);
+    ASSERT_EQ(rows.size(), 2U);
+    EXPECT_EQ(rows[0], "10,8823,9,4,3000");
+    EXPECT_EQ(rows[1], "20,8823,2,0,1001");
+
+    const auto columns = readAffinityColumns(dbPath);
+    EXPECT_EQ(columns,
+              (std::vector<std::string>{"user_id", "group_id", "observed_count",
+                                        "interaction_count", "last_seen_ts"}))
+        << "affinity 表不允许出现承载消息文本的列";
 }

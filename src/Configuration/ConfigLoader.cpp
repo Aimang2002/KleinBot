@@ -427,7 +427,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     Decoder decoder(result.diagnostics);
     decoder.unknownFields(document,
                           {"schema_version", "bot", "chat", "models", "voice",
-                           "memory", "web_search", "web_fetch", "storage",
+                           "memory", "web_search", "web_fetch", "perception", "storage",
                            "network", "communication", "webui"},
                           "$" );
 
@@ -601,6 +601,41 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         config.webFetch.cacheMaxEntries = static_cast<std::size_t>(decoder.integer(
             *webFetch, "cache_max_entries", "web_fetch.cache_max_entries",
             32, 1, 1024));
+    }
+
+    const json *perception = decoder.object(document, "perception", "perception");
+    if (perception != nullptr)
+    {
+        decoder.unknownFields(*perception, {"enabled", "observe_groups"}, "perception");
+        config.perception.enabled = decoder.boolean(
+            *perception, "enabled", "perception.enabled", false);
+        // 解码器没有数组辅助：observe_groups 手工解析，元素须为非负整数
+        if (perception->contains("observe_groups"))
+        {
+            const json &groups = (*perception)["observe_groups"];
+            if (groups.is_array())
+            {
+                for (const auto &entry : groups)
+                {
+                    if (entry.is_number_unsigned())
+                        config.perception.observeGroups.push_back(entry.get<std::uint64_t>());
+                    else
+                        decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
+                                           "perception.observe_groups", "群号须为非负整数，该元素已忽略");
+                }
+            }
+            else
+            {
+                decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
+                                   "perception.observe_groups", "必须是数组");
+            }
+        }
+        if (config.perception.enabled && config.perception.observeGroups.empty())
+        {
+            config.perception.enabled = false;
+            decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Dependency,
+                               "perception.observe_groups", "白名单为空，观察通道保持关闭");
+        }
     }
 
     const json *storage = decoder.object(document, "storage", "storage");
