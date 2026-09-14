@@ -5,6 +5,7 @@
 #include "../Application/ReplyContextRouting.h"
 #include "../Application/TypingIndicator.h"
 #include "../Perception/PerceptionChannel.h"
+#include "../Perception/GroupContextService.h"
 #include "Message.h"
 #include <algorithm>
 #include <iomanip>
@@ -17,11 +18,13 @@ Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatS
                  MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                  CommandRegistry &registry, Voice &voice, MessageOptions options,
                  ModelEndpointOptions visionModel, bool &globalVoice,
-                 TypingIndicator *typingIndicator, PerceptionChannel *perception)
+                 TypingIndicator *typingIndicator, PerceptionChannel *perception,
+                 GroupContextService *groupContext)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry), voice(voice),
       options(std::move(options)), visionModel(std::move(visionModel)),
-      global_Voice(globalVoice), typingIndicator(typingIndicator), perception(perception)
+      global_Voice(globalVoice), typingIndicator(typingIndicator), perception(perception),
+      groupContext(groupContext)
 {
 }
 
@@ -92,15 +95,19 @@ void Message::handleMessage(const InboundMessage &current_data)
 			conversationText = "（对方只是@了你，没有附带任何文字）";
 		}
 
-		// 观察通道话题注入（T7 消费端）：白名单群被 @ 时把群内近期热点
-		// 作为背景注记附在用户消息尾部——数据注记走 user 尾部而非 system，
-		// 管理员上下文模式的 system 前缀缓存保持逐字稳定；
-		// 通道关闭/非白名单/无热点时返回空串
-		if (current_data.message_type == "group" && this->perception != nullptr)
+		// 群上下文注入（T7b）：内容层优先——按触发句相关性选择的原文块/摘要
+		// （并行话题、他人反驳由此天然入选）；空选时退回关键词热点注记（T7）。
+		// 数据注记走 user 尾部而非 system，管理员前缀缓存保持逐字稳定
+		if (current_data.message_type == "group")
 		{
-			const std::string topicNote = this->perception->topicNoteFor(current_data.group_id);
-			if (!topicNote.empty())
-				conversationText += "\n" + topicNote;
+			std::string contextNote;
+			if (this->groupContext != nullptr)
+				contextNote = this->groupContext->assemble(current_data.group_id,
+					current_data.plain_text);
+			if (contextNote.empty() && this->perception != nullptr)
+				contextNote = this->perception->topicNoteFor(current_data.group_id);
+			if (!contextNote.empty())
+				conversationText += "\n" + contextNote;
 		}
 
 		// 人格编译（T5）：新对话周期后首次聊天，把 soul.md 按（内嵌）规范
@@ -138,6 +145,10 @@ void Message::handleMessage(const InboundMessage &current_data)
 				"\n\n[系统注] 对方刚加上你好友，这是TA发来的第一句话：先自然回应对方说的内容，"
 				"再顺带用一两句话把自己介绍给对方，不要生硬地报身份。";
 		}
+		// 群聊收敛契约（T7b）：行为约束归 system（D13 分工）；静态常量保证
+		// 管理员群聊请求的 system 前缀逐字稳定，不影响供应商缓存命中
+		if (current_data.message_type == "group")
+			situationNote += GroupContextService::groupConversationContract();
 
 		// 私聊 LLM 调用前触发"正在输入"（能力位门控在 TypingIndicator 内部，fire-and-forget）
 		if (typingIndicator != nullptr && current_data.message_type != "group")
@@ -154,6 +165,16 @@ void Message::handleMessage(const InboundMessage &current_data)
 
 		if (llm_text.empty())
 		{
+			return;
+		}
+
+		// 群聊收敛契约（T7b）：模型判定无增量时输出 [不回应] 标记，静默不发。
+		// 抑制一律留日志：每次沉默都是可观测的决策，prompt 分寸靠它调
+		if (current_data.message_type == "group" &&
+			GroupContextService::isSuppressed(llm_text))
+		{
+			LOG_INFO("群聊收敛：本轮判定无增量，静默不回应（群 " +
+					 std::to_string(current_data.group_id) + "）");
 			return;
 		}
 
@@ -187,6 +208,9 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 	if (data.message_type == "group")
 	{
 		delivery.target = GroupMessageTarget{std::to_string(data.group_id)};
+		// 她的出站也是群内容（T7b）：入库后她下次被 @ 能接上自己说过的话
+		if (this->groupContext != nullptr)
+			this->groupContext->recordOutbound(data.group_id, msg);
 		// 指向性回复：被 @ 才引用+@ 回发起人（固定行为，无配置开关）
 		delivery.reply = buildReplyContext(data, options.bot);
 		if (delivery.reply)

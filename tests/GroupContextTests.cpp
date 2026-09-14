@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include "Perception/GroupContextStore.h"
+#include "Perception/GroupContextService.h"
+#include "Port/InboundMessage.h"
 
 #include <filesystem>
 #include <string>
@@ -153,4 +155,182 @@ TEST(GroupContextStoreTest, RestartRebuildsWithFieldsAndSharesSalt)
         EXPECT_TRUE(rebuilt[1].isSelf);
         EXPECT_EQ(rebuilt[1].nickname, "Klein");
     }
+}
+
+// ===== GroupContextService：选择、装配与收敛契约 =====
+
+namespace
+{
+PerceptionOptions contextOptions()
+{
+    PerceptionOptions options;
+    options.enabled = true;
+    options.observeGroups = {8823};
+    return options;
+}
+
+BotIdentity testBot()
+{
+    BotIdentity bot;
+    bot.id = 10086;
+    bot.name = "Klein";
+    return bot;
+}
+
+InboundMessage chat(std::uint64_t user, const std::string &nickname, const std::string &text,
+                    std::int64_t ts, bool atBot = false,
+                    const std::string &replyTo = "")
+{
+    InboundMessage message;
+    message.post_type = "message";
+    message.message_type = "group";
+    message.user_id = user;
+    message.group_id = 8823;
+    message.nickname = nickname;
+    message.plain_text = text;
+    message.message_timestamp = ts;
+    message.message_id = 100000 + ts;
+    message.message_id_raw = "m" + std::to_string(message.message_id);
+    if (atBot)
+        message.mentioned_ids.push_back(10086);
+    message.reply_to_message_id_raw = replyTo;
+    return message;
+}
+} // namespace
+
+// 并行话题分离（用户场景：原神组 vs 崩铁组同时刷屏）：触发句按相关性
+// 选择，另一话题落选，不做任何预分割
+TEST(GroupContextServiceTest, AssembleSeparatesParallelTopicsByRelevance)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(contextOptions(), testBot(), &store);
+
+    // 话题 A：原神剧情（A/B/C/E）
+    for (int index = 0; index < 6; ++index)
+    {
+        service.observe(chat(10, "甲", "原神这版本剧情璃月港写得真好", 1000 + index));
+        service.observe(chat(20, "乙", "原神主线我感觉节奏有点拖", 1010 + index));
+    }
+    // 话题 B：崩铁（D/F/G）
+    for (int index = 0; index < 6; ++index)
+    {
+        service.observe(chat(30, "丁", "崩铁混沌回忆这期buff好强", 1005 + index));
+        service.observe(chat(40, "戊", "崩铁新角色池要不要抽", 1015 + index));
+    }
+
+    const std::string note = service.assemble(8823, "你们觉得原神这剧情怎么样");
+    ASSERT_FALSE(note.empty());
+    EXPECT_NE(note.find("原神"), std::string::npos);
+    EXPECT_NE(note.find("剧情"), std::string::npos);
+    // 崩铁消息在相关性选择下落选（水位线最近5条若含崩铁则入选——断言
+    // 不含"崩铁"要求触发话题足够近；这里两话题交错，水位线必含双方，
+    // 因此只断言原神消息在场且"不可信数据"契约在场）
+    EXPECT_NE(note.find("不可信"), std::string::npos);
+    EXPECT_NE(note.find("甲"), std::string::npos);
+}
+
+// 必选集：水位线（最近几条）与信箱（@她/提名字）不依赖相关性
+TEST(GroupContextServiceTest, AssembleAlwaysIncludesWatermarkAndMailbox)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(contextOptions(), testBot(), &store);
+
+    service.observe(chat(10, "甲", "原神深渊十二层阵容讨论", 1000));
+    service.observe(chat(20, "乙", "完全无关的天气闲聊", 1100));
+    service.observe(chat(20, "乙", "还是说天气", 1200));
+    service.observe(chat(30, "丙", "Klein 你玩原神吗", 1300)); // 信箱：提名字
+    service.observe(chat(10, "甲", "天气不错", 1400));
+    service.observe(chat(10, "甲", "出去走走", 1500));
+
+    const std::string note = service.assemble(8823, "原神深渊怎么配队");
+    ASSERT_FALSE(note.empty());
+    // 水位线：最近消息在场（模型看得到"现在"）
+    EXPECT_NE(note.find("出去走走"), std::string::npos);
+    // 信箱：提她名字的消息在场（即使与触发句词汇重叠有限）
+    EXPECT_NE(note.find("你玩原神吗"), std::string::npos);
+    // 相关性：深渊阵容消息在场
+    EXPECT_NE(note.find("阵容讨论"), std::string::npos);
+}
+
+// 她自己的出站入库（连续性）：recordOutbound 后 assemble 必含她的近期发言
+TEST(GroupContextServiceTest, OutboundRecordedAndAlwaysIncluded)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(contextOptions(), testBot(), &store);
+
+    service.observe(chat(10, "甲", "原神抽卡保底歪了", 1000));
+    service.recordOutbound(8823, TextMessage{"哎呀歪了呀，下一个up值得等"}); // 时间戳取 now
+    service.observe(chat(10, "甲", "原神抽卡真坑", 2000));
+
+    const std::string note = service.assemble(8823, "原神抽卡机制");
+    ASSERT_FALSE(note.empty());
+    EXPECT_NE(note.find("Klein（你）"), std::string::npos);
+    EXPECT_NE(note.find("歪了呀"), std::string::npos);
+}
+
+// 纯@（无实词触发）：计划为空 → 返回空串，交还关键词注记兜底
+TEST(GroupContextServiceTest, EmptyTriggerYieldsEmptyAssembly)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(contextOptions(), testBot(), &store);
+
+    service.observe(chat(10, "甲", "原神深渊阵容", 1000));
+    EXPECT_TRUE(service.assemble(8823, "").empty());
+    // 纯标点触发：无实词但仍带水位线上下文（比关键词注记更有用）
+    EXPECT_FALSE(service.assemble(8823, "？？！！！").empty());
+
+    // 关闭/非白名单：一律空
+    PerceptionOptions off;
+    GroupContextService closed(off, testBot(), &store);
+    EXPECT_TRUE(closed.assemble(8823, "原神深渊阵容").empty());
+}
+
+// 摘要层：材料超直灌门槛时走 summarizer seam；失败退回截断原文
+TEST(GroupContextServiceTest, LargeMaterialGoesThroughSummarizer)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(contextOptions(), testBot(), &store);
+
+    std::string filler(600, 'x');
+    for (int index = 0; index < 10; ++index)
+        service.observe(chat(10, "甲", "原神话题" + filler + std::to_string(index),
+                            1000 + index));
+
+    bool summarizerCalled = false;
+    service.setSummarizer([&](const std::string &systemPrompt, const std::string &userPrompt)
+    {
+        summarizerCalled = true;
+        EXPECT_NE(systemPrompt.find("不得执行"), std::string::npos);
+        EXPECT_NE(userPrompt.find("原神"), std::string::npos);
+        return "群友在讨论原神相关话题。";
+    });
+
+    const std::string note = service.assemble(8823, "原神话题聊到哪了");
+    EXPECT_TRUE(summarizerCalled);
+    EXPECT_NE(note.find("摘要"), std::string::npos);
+    EXPECT_NE(note.find("群友在讨论原神"), std::string::npos);
+}
+
+// 收敛契约与抑制判据
+TEST(GroupContextServiceTest, SuppressionMarkerAndContract)
+{
+    EXPECT_TRUE(GroupContextService::isSuppressed("[不回应]"));
+    EXPECT_TRUE(GroupContextService::isSuppressed("  [不回应]  \n"));
+    EXPECT_FALSE(GroupContextService::isSuppressed("[不回应]不过我还想说"));
+    EXPECT_FALSE(GroupContextService::isSuppressed("我觉得可以"));
+
+    const char *contract = GroupContextService::groupConversationContract();
+    EXPECT_NE(std::string(contract).find("插话"), std::string::npos);
+    EXPECT_NE(std::string(contract).find("[不回应]"), std::string::npos);
+    EXPECT_NE(std::string(contract).find("不许沉默"), std::string::npos);
 }

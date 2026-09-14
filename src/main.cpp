@@ -28,6 +28,8 @@
 #include "Reminder/ReminderService.h"
 #include "Perception/PerceptionChannel.h"
 #include "Perception/PerceptionStore.h"
+#include "Perception/GroupContextStore.h"
+#include "Perception/GroupContextService.h"
 #include "MessageSender/QueuedMessageSender.h"
 #include "MessageQueue/OutboundMessageQueue.h"
 #include "Port/OutboundMessage.h"
@@ -129,7 +131,7 @@ bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::millisecon
 // 子线程
 void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 				   ReminderService &reminders, CapabilityBroker &capabilities,
-				   PerceptionChannel &perception,
+				   PerceptionChannel &perception, GroupContextStore *groupContext,
 				   uint64_t managerId, const std::atomic<bool> &running)
 {
 	while (running.load())
@@ -178,6 +180,9 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 
 		// 观察通道亲密度落库（T7）：内部节流，30s 间隔或累计 delta≥100 才真正写
 		perception.flushDue(nowSeconds());
+		// 群内容库 TTL 清理（T7b）：删除 24h 前的消息行（镜像+磁盘）；关闭时无库
+		if (groupContext != nullptr)
+			groupContext->prune(nowSeconds());
 
 		sleepWhileRunning(running, std::chrono::seconds(3));
 	}
@@ -186,7 +191,7 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 
 // 子线程
 void workingThread(Message &messageClass, EventRouter &eventRouter,
-				   PerceptionChannel &perception,
+				   PerceptionChannel &perception, GroupContextService &groupContext,
 				   InboundMessage data, std::size_t maxMessageTokens)
 {
 	// notice/request 事件：不过消息过滤，按 key 路由给已注册 handler（v2.4.1 T6 起有订阅者）
@@ -208,6 +213,10 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 		messageClass.sendError(data, "系统提示：消息长度超过最大限度，请减少单次发送的字符数量...");
 		return;
 	}
+
+	// 群内容入库（T7b）：白名单群的 @ 与非 @ 消息都是群内容（超长的刷屏
+	// 分支已在上文 return，不计入库）；服务内部有开关/白名单/群聊三重门控
+	groupContext.observe(data);
 
 	if (!messageClass.messageFilter(data))
 	{
@@ -463,16 +472,23 @@ int main(int argc, char **argv)
 	// 观察通道（T7）：只看不说、0 LLM；白名单起步，功能关闭时不建库不动用户数据。
 	// 须在 Message 之前构造：Message 持其指针在 @ 消息上注入话题注记
 	std::unique_ptr<PerceptionStore> perceptionStore;
+	std::unique_ptr<GroupContextStore> groupContextStore;
 	if (settings.perception.observing())
 	{
 		perceptionStore = std::make_unique<PerceptionStore>(dbPath);
+		groupContextStore = std::make_unique<GroupContextStore>(dbPath);
 		LOG_INFO("观察通道已启用，白名单群 " + std::to_string(settings.perception.observeGroups.size()) +
-				 " 个（消息原文永不落盘）");
+				 " 个（群内容短时缓冲：每群300条/24小时）");
 	}
 	PerceptionChannel perceptionChannel(settings.perception, perceptionStore.get());
+	GroupContextService groupContextService(settings.perception, settings.bot,
+											groupContextStore.get());
+	groupContextService.setSummarizer([&chatService](const std::string &systemPrompt,
+													 const std::string &userPrompt)
+		{ return chatService.buildOnce(systemPrompt, userPrompt); });
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
-		globalVoice, &typingIndicator, &perceptionChannel);
+		globalVoice, &typingIndicator, &perceptionChannel, &groupContextService);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,
@@ -501,7 +517,7 @@ int main(int argc, char **argv)
 		std::to_string(settings.messageExecution.initialWorkerThreads) +
 		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
 		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), settings.bot.managerId, std::cref(running));
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)
@@ -556,10 +572,10 @@ int main(int argc, char **argv)
 			auto message = std::make_shared<InboundMessage>(std::move(*msg));
 			const TaskSubmitResult submitResult = messageWorkers.submit(
 				message->user_id,
-				[&messageClass, &eventRouter, &perceptionChannel,
+				[&messageClass, &eventRouter, &perceptionChannel, &groupContextService,
 				 maxMessageTokens = settings.chat.maxMessageTokens,
 				 message]() mutable {
-				workingThread(messageClass, eventRouter, perceptionChannel, std::move(*message), maxMessageTokens);
+				workingThread(messageClass, eventRouter, perceptionChannel, groupContextService, std::move(*message), maxMessageTokens);
 			});
 			if (submitResult == TaskSubmitResult::Full)
 			{
