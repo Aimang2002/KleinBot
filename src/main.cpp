@@ -26,6 +26,8 @@
 #include "WebUI/ConfigPanelServer.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
+#include "Perception/PerceptionChannel.h"
+#include "Perception/PerceptionStore.h"
 #include "MessageSender/QueuedMessageSender.h"
 #include "MessageQueue/OutboundMessageQueue.h"
 #include "Port/OutboundMessage.h"
@@ -127,6 +129,7 @@ bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::millisecon
 // 子线程
 void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 				   ReminderService &reminders, CapabilityBroker &capabilities,
+				   PerceptionChannel &perception,
 				   uint64_t managerId, const std::atomic<bool> &running)
 {
 	while (running.load())
@@ -173,6 +176,9 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 				DirectMessageTarget{std::to_string(due.user_id)}, TextMessage{response}});
 		}
 
+		// 观察通道亲密度落库（T7）：内部节流，30s 间隔或累计 delta≥100 才真正写
+		perception.flushDue(nowSeconds());
+
 		sleepWhileRunning(running, std::chrono::seconds(3));
 	}
 	LOG_INFO("定时任务线程已退出");
@@ -180,6 +186,7 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 
 // 子线程
 void workingThread(Message &messageClass, EventRouter &eventRouter,
+				   PerceptionChannel &perception,
 				   InboundMessage data, std::size_t maxMessageTokens)
 {
 	// notice/request 事件：不过消息过滤，按 key 路由给已注册 handler（v2.4.1 T6 起有订阅者）
@@ -204,9 +211,13 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 
 	if (!messageClass.messageFilter(data))
 	{
+		// 非 @ 群消息等过滤失败路径：观察通道只看不说（T7，白名单外/关闭时内部 no-op）
+		perception.observeMessage(data);
 		return;
 	}
 
+	// @bot 已处理消息进互动计数
+	perception.observeInteraction(data);
 	messageClass.handleMessage(data);
 }
 
@@ -458,6 +469,15 @@ int main(int argc, char **argv)
 												settings.bot.managerId);
 	EventRouter eventRouter;
 	eventRouter.subscribe("request.friend", friendRequestNotifier);
+	// 观察通道（T7）：只看不说、0 LLM；白名单起步，功能关闭时不建库不动用户数据
+	std::unique_ptr<PerceptionStore> perceptionStore;
+	if (settings.perception.observing())
+	{
+		perceptionStore = std::make_unique<PerceptionStore>(dbPath);
+		LOG_INFO("观察通道已启用，白名单群 " + std::to_string(settings.perception.observeGroups.size()) +
+				 " 个（消息原文永不落盘）");
+	}
+	PerceptionChannel perceptionChannel(settings.perception, perceptionStore.get());
 	KeyedTaskScheduler messageWorkers(
 		settings.messageExecution,
 		[](std::exception_ptr error)
@@ -480,7 +500,7 @@ int main(int argc, char **argv)
 		std::to_string(settings.messageExecution.initialWorkerThreads) +
 		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
 		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), settings.bot.managerId, std::cref(running));
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)
@@ -535,9 +555,10 @@ int main(int argc, char **argv)
 			auto message = std::make_shared<InboundMessage>(std::move(*msg));
 			const TaskSubmitResult submitResult = messageWorkers.submit(
 				message->user_id,
-				[&messageClass, &eventRouter, maxMessageTokens = settings.chat.maxMessageTokens,
+				[&messageClass, &eventRouter, &perceptionChannel,
+				 maxMessageTokens = settings.chat.maxMessageTokens,
 				 message]() mutable {
-				workingThread(messageClass, eventRouter, std::move(*message), maxMessageTokens);
+				workingThread(messageClass, eventRouter, perceptionChannel, std::move(*message), maxMessageTokens);
 			});
 			if (submitResult == TaskSubmitResult::Full)
 			{

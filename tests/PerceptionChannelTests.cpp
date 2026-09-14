@@ -1,0 +1,295 @@
+#include <gtest/gtest.h>
+
+#include "Perception/PerceptionChannel.h"
+#include "Perception/PerceptionStore.h"
+
+#include <chrono>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sqlite3.h>
+#include <string>
+#include <vector>
+
+namespace
+{
+class TemporaryDirectory
+{
+public:
+    TemporaryDirectory()
+    {
+        std::string pattern = "/tmp/kleinbot-perception-XXXXXX";
+        pattern.push_back('\0');
+        char *created = mkdtemp(pattern.data());
+        if (created != nullptr)
+            directory = created;
+    }
+
+    ~TemporaryDirectory()
+    {
+        if (!directory.empty())
+            std::filesystem::remove_all(directory);
+    }
+
+    const std::string &path() const { return directory; }
+
+private:
+    std::string directory;
+};
+
+InboundMessage groupMessage(std::uint64_t user, std::uint64_t group,
+                            const std::string &text, std::time_t timestamp)
+{
+    InboundMessage message;
+    message.post_type = "message";
+    message.message_type = "group";
+    message.user_id = user;
+    message.group_id = group;
+    message.plain_text = text;
+    message.message_timestamp = timestamp;
+    return message;
+}
+
+InboundMessage privateMessage(std::uint64_t user, const std::string &text)
+{
+    InboundMessage message;
+    message.post_type = "message";
+    message.message_type = "private";
+    message.user_id = user;
+    message.plain_text = text;
+    message.message_timestamp = 1000;
+    return message;
+}
+
+PerceptionOptions whitelistOptions()
+{
+    PerceptionOptions options;
+    options.enabled = true;
+    options.observeGroups = {8823};
+    return options;
+}
+
+std::vector<std::string> readAffinityRows(const std::string &dbPath)
+{
+    std::vector<std::string> rows;
+    sqlite3 *database = nullptr;
+    if (sqlite3_open(dbPath.c_str(), &database) != SQLITE_OK)
+    {
+        sqlite3_close(database);
+        return rows;
+    }
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(database,
+                           "SELECT user_id, group_id, observed_count, interaction_count,"
+                           " last_seen_ts FROM affinity ORDER BY user_id;",
+                           -1, &statement, nullptr) == SQLITE_OK)
+    {
+        while (sqlite3_step(statement) == SQLITE_ROW)
+        {
+            rows.push_back(std::to_string(sqlite3_column_int64(statement, 0)) + "," +
+                           std::to_string(sqlite3_column_int64(statement, 1)) + "," +
+                           std::to_string(sqlite3_column_int64(statement, 2)) + "," +
+                           std::to_string(sqlite3_column_int64(statement, 3)) + "," +
+                           std::to_string(sqlite3_column_int64(statement, 4)));
+        }
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(database);
+    return rows;
+}
+
+std::string readFileBytes(const std::filesystem::path &path)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open())
+        return {};
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
+}
+} // namespace
+
+TEST(PerceptionChannelTest, ObservesOnlyWhitelistedEnabledGroups)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
+    PerceptionStore store(dbPath);
+
+    // 总开关关闭：一切 no-op
+    PerceptionOptions disabled;
+    disabled.enabled = false;
+    disabled.observeGroups = {8823};
+    PerceptionChannel closed(disabled, &store);
+    closed.observeMessage(groupMessage(10, 8823, "你好", 1000));
+    closed.observeInteraction(groupMessage(10, 8823, "在吗", 1001));
+    closed.flushDue(100000);
+    EXPECT_TRUE(readAffinityRows(dbPath).empty());
+    EXPECT_TRUE(closed.hotTopics(8823, 5).empty());
+
+    // 开启但群不在白名单 / 私聊：不观察
+    PerceptionChannel channel(whitelistOptions(), &store);
+    channel.observeMessage(groupMessage(10, 9999, "别的群", 1000));
+    channel.observeInteraction(privateMessage(10, "私聊不算群观察"));
+    channel.flushDue(100000);
+    EXPECT_TRUE(readAffinityRows(dbPath).empty());
+    EXPECT_TRUE(channel.hotTopics(9999, 5).empty());
+}
+
+TEST(PerceptionChannelTest, AffinityAggregatesAndFlushesToStore)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
+    PerceptionStore store(dbPath);
+    PerceptionChannel channel(whitelistOptions(), &store);
+
+    channel.observeMessage(groupMessage(10, 8823, "早上好", 1000));
+    channel.observeMessage(groupMessage(10, 8823, "吃什么", 1005));
+    channel.observeInteraction(groupMessage(10, 8823, "@机器人 帮我查天气", 1010));
+    channel.observeMessage(groupMessage(20, 8823, "路过", 1000));
+
+    channel.flushDue(100000);
+    const auto rows = readAffinityRows(dbPath);
+    ASSERT_EQ(rows.size(), 2U);
+    EXPECT_EQ(rows[0], "10,8823,2,1,1010");
+    EXPECT_EQ(rows[1], "20,8823,1,0,1000");
+
+    // 节流：间隔不足 30s 且未达 delta 阈值，新计数滞留内存不写库
+    channel.observeMessage(groupMessage(10, 8823, "再来一条", 1015));
+    channel.flushDue(100001);
+    EXPECT_EQ(readAffinityRows(dbPath).size(), 2U);
+
+    // 间隔到期：增量累加落库
+    channel.flushDue(100031);
+    const auto accumulated = readAffinityRows(dbPath);
+    ASSERT_EQ(accumulated.size(), 2U);
+    EXPECT_EQ(accumulated[0], "10,8823,3,1,1015");
+    EXPECT_EQ(accumulated[1], "20,8823,1,0,1000");
+}
+
+TEST(PerceptionChannelTest, WindowEvictsByCount)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    PerceptionChannel channel(whitelistOptions(), nullptr);
+
+    // 600 条不同 ASCII 词消息：条数上限 500，最旧 100 条连同计数淘汰
+    for (int index = 0; index < 600; ++index)
+        channel.observeMessage(groupMessage(10, 8823, "gg" + std::to_string(index),
+                                            1000 + index));
+
+    const auto topics = channel.hotTopics(8823, 100000);
+    ASSERT_EQ(topics.size(), 500U);
+    EXPECT_EQ(topics[0].second, 1.0); // 每个词只出现一次，无热点梯度
+    bool hasOldest = false;
+    bool hasNewest = false;
+    for (const auto &topic : topics)
+    {
+        if (topic.first == "gg0")
+            hasOldest = true;
+        if (topic.first == "gg599")
+            hasNewest = true;
+    }
+    EXPECT_FALSE(hasOldest) << "最旧 100 条应已淘汰";
+    EXPECT_TRUE(hasNewest);
+}
+
+TEST(PerceptionChannelTest, WindowEvictsByTime)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    PerceptionChannel channel(whitelistOptions(), nullptr);
+
+    channel.observeMessage(groupMessage(10, 8823, "旧话题", 100000));
+    // 2 小时窗口外的新消息触发对旧条目的淘汰
+    channel.observeMessage(groupMessage(10, 8823, "新话题", 100000 + 7201));
+
+    const auto topics = channel.hotTopics(8823, 200000);
+    bool hasOld = false;
+    bool hasNew = false;
+    double sharedGram = 0.0;
+    for (const auto &topic : topics)
+    {
+        if (topic.first == "旧话")
+            hasOld = true;
+        if (topic.first == "新话")
+            hasNew = true;
+        if (topic.first == "话题")
+            sharedGram = topic.second;
+    }
+    EXPECT_FALSE(hasOld);
+    EXPECT_TRUE(hasNew);
+    EXPECT_EQ(sharedGram, 1.0) << "共享 2-gram 只剩新消息的贡献";
+}
+
+// D7 红线：消息原文永不落盘、不驻留内存——库文件字节级找不到原文，
+// 内存里只存在 2-gram 碎片（不可能是完整句子）
+TEST(PerceptionChannelTest, RedLinePlaintextNeverPersisted)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
+    PerceptionStore store(dbPath);
+    PerceptionChannel channel(whitelistOptions(), &store);
+
+    // 全小写标记：normalizeText 只小写化 ASCII，避免大小写转换让碎片对不上原文
+    const std::string secret = "绝密原文标记zeroonetwo不要外传";
+    channel.observeMessage(groupMessage(10, 8823, secret, 1000));
+    channel.flushDue(100000);
+
+    // 主库与 WAL 页都要干净
+    EXPECT_EQ(readFileBytes(dbPath).find(secret), std::string::npos);
+    const std::string wal = readFileBytes(dbPath + "-wal");
+    EXPECT_EQ(wal.find(secret), std::string::npos);
+
+    // 内存侧：hotTopics 只允许 2-gram / ASCII 词碎片
+    for (const auto &topic : channel.hotTopics(8823, 100))
+    {
+        EXPECT_NE(topic.first, secret);
+        EXPECT_NE(secret.find(topic.first), std::string::npos)
+            << "内存中的 n-gram 必须来自原文的碎片，而不是额外内容";
+    }
+}
+
+TEST(PerceptionChannelTest, HotTopicsReturnsTopNOrdered)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    PerceptionChannel channel(whitelistOptions(), nullptr);
+
+    for (int index = 0; index < 3; ++index)
+        channel.observeMessage(groupMessage(10, 8823, "苹果", 1000 + index));
+    for (int index = 0; index < 2; ++index)
+        channel.observeMessage(groupMessage(10, 8823, "香蕉", 1100 + index));
+    channel.observeMessage(groupMessage(10, 8823, "橘子", 1200));
+
+    const auto topics = channel.hotTopics(8823, 2);
+    ASSERT_EQ(topics.size(), 2U);
+    EXPECT_EQ(topics[0].first, "苹果");
+    EXPECT_EQ(topics[0].second, 3.0);
+    EXPECT_EQ(topics[1].first, "香蕉");
+    EXPECT_EQ(topics[1].second, 2.0);
+}
+
+// 成本主张的证据（计划 §七）：1 万条消息观察 + flush 的耗时冒烟，
+// 上界给到 10s——真实的量级是毫秒级，超限说明实现退化成了平方复杂度
+TEST(PerceptionChannelTest, PerfSmokeTenThousandMessages)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    PerceptionStore store(temporaryDirectory.path() + "/conversation.db");
+    PerceptionChannel channel(whitelistOptions(), &store);
+
+    const auto started = std::chrono::steady_clock::now();
+    for (int index = 0; index < 10000; ++index)
+    {
+        channel.observeMessage(groupMessage(10 + index % 20, 8823,
+                                            "第" + std::to_string(index) + "条群聊内容",
+                                            1000 + index));
+    }
+    channel.flushDue(100000);
+    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - started;
+
+    EXPECT_LT(elapsed.count(), 10.0);
+    EXPECT_EQ(readAffinityRows(temporaryDirectory.path() + "/conversation.db").size(), 20U);
+}
