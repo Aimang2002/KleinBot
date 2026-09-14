@@ -202,6 +202,17 @@ void UserSessionService::resetPersonality(const uint64_t user_id)
     this->store.clearPersona(user_id);
     // 每次重读 soul.md：管理员改默认人格后，#人格还原 无需重启即可生效
     user->second.system_prompt = this->loadSoulFallback();
+    // 人格切换即新对话起点：RAM 镜像清空 + 起点持久化（重启不回读旧话题，
+    // 旧话题行仍留库供召回），与 resetChat 的轻量清空同语义——
+    // 否则旧人格口吻的上下文会压在新人格上
+    auto &history = user->second.user_chatHistory;
+    if (!history.empty())
+        this->store.setContextStartId(user_id, history.back().id + 1);
+    history.clear();
+    user->second.history_anchor = 0;
+    // 重新武装人格编译（D14）：还原后没有手动人格，下次聊天按规范重编 soul.md；
+    // 此前不置位导致"聊过→设置→还原"的用户此后一直用未编译的 soul.md 原文
+    user->second.persona_needs_build = true;
 }
 
 void UserSessionService::switchModel(const uint64_t user_id, const std::string &newModel)

@@ -119,6 +119,57 @@ TEST(PersonaBuildLifecycleTest, ManualPersonaSuppressesBuild)
     std::filesystem::remove_all(dir);
 }
 
+// 回归：#人格还原 必须重新武装编译并清掉 RAM 上下文窗口。
+// 此前缺陷：还原后 persona_needs_build 不置位，"聊过→设置→还原"的用户
+// 此后一直用未编译的 soul.md 原文；且旧人格口吻的上下文压在新人格上
+TEST(PersonaBuildLifecycleTest, ResetPersonalityRearmsBuildAndClearsContextWindow)
+{
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("kleinbot-persona-restore-" + std::to_string(::time(nullptr)));
+    std::filesystem::create_directories(dir);
+    writeModelRegistryFile(dir);
+    writeFile(dir / "soul.md", kSampleSoul);
+
+    ConversationStore store((dir / "conversation.db").string());
+    ModelRegistry registry(writeModelRegistryFile(dir));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+    UserSessionService session(registry, store, bot, options,
+                               (dir / "soul.md").string());
+
+    // 模拟聊过：对话落库、编译产物已应用（标志已清）
+    session.ensureUserExists(10);
+    session.appendMessage(10, "user", "早上好");
+    session.appendMessage(10, "assistant", "早。");
+    session.applyGeneratedPersona(10, "COMPILED_V1");
+    ASSERT_FALSE(session.personaBuildPending(10));
+
+    // 手动人格压制编译，再叠一轮对话
+    session.setPersonality(10, "手动人格");
+    session.appendMessage(10, "user", "换个身份聊聊");
+
+    session.resetPersonality(10);
+
+    // 回退 soul.md 兜底；编译重新武装（修复点）
+    EXPECT_NE(session.getUserConfig(10).system_prompt.find("克莱茵"), std::string::npos);
+    EXPECT_TRUE(session.personaBuildPending(10));
+    // RAM 镜像清空
+    EXPECT_TRUE(session.getChatHistory(10).empty());
+    // 旧话题行仍留库供召回，上下文起点持久化（重启不回读旧话题）
+    EXPECT_FALSE(store.loadAll(10).empty());
+    EXPECT_GT(store.contextStartId(10), 0);
+
+    // 冷启动模拟（同库新会话对象）：镜像为空、待编译
+    UserSessionService restarted(registry, store, bot, options,
+                                 (dir / "soul.md").string());
+    restarted.ensureUserExists(10);
+    EXPECT_TRUE(restarted.getChatHistory(10).empty());
+    EXPECT_TRUE(restarted.personaBuildPending(10));
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST(PersonaSharedCacheTest, BuiltPromptIsSharedAndInvalidatedByFileChange)
 {
     const auto dir = std::filesystem::temp_directory_path() /
