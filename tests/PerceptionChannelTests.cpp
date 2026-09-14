@@ -271,6 +271,64 @@ TEST(PerceptionChannelTest, HotTopicsReturnsTopNOrdered)
     EXPECT_EQ(topics[1].second, 2.0);
 }
 
+TEST(PerceptionChannelTest, ExtractNgramsFiltersStopTerms)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    PerceptionChannel channel(whitelistOptions(), nullptr);
+
+    // 高频功能词出现最多，但不是话题：不进热度
+    for (int index = 0; index < 5; ++index)
+        channel.observeMessage(groupMessage(10, 8823, "我们", 1000 + index));
+    channel.observeMessage(groupMessage(10, 8823, "苹果", 2000));
+
+    const auto topics = channel.hotTopics(8823, 10);
+    for (const auto &topic : topics)
+        EXPECT_NE(topic.first, "我们");
+    ASSERT_EQ(topics.size(), 1U);
+    EXPECT_EQ(topics[0].first, "苹果");
+}
+
+// 消费端：被 @ 时的话题注记——count≥2 门槛、关闭/无热点返回空、
+// 格式为纯自然叙事（T6 教训：元词汇会被模型当成待应答的对话）
+TEST(PerceptionChannelTest, TopicNoteGatesAndFormat)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+
+    // 关闭：不生成注记
+    PerceptionOptions disabled;
+    disabled.enabled = false;
+    disabled.observeGroups = {8823};
+    PerceptionChannel closed(disabled, nullptr);
+    closed.observeMessage(groupMessage(10, 8823, "苹果", 1000));
+    closed.observeMessage(groupMessage(10, 8823, "苹果", 1001));
+    EXPECT_TRUE(closed.topicNoteFor(8823).empty());
+
+    PerceptionChannel channel(whitelistOptions(), nullptr);
+
+    // 只出现过一次的碎片：不算"常聊"，不给注记
+    channel.observeMessage(groupMessage(10, 8823, "苹果", 1000));
+    EXPECT_TRUE(channel.topicNoteFor(8823).empty());
+
+    // 非白名单群：空
+    channel.observeMessage(groupMessage(10, 9999, "香蕉", 1000));
+    channel.observeMessage(groupMessage(10, 9999, "香蕉", 1001));
+    EXPECT_TRUE(channel.topicNoteFor(9999).empty());
+
+    // 重复出现：注记含碎片与最小标记，无"事件/任务"类元词汇
+    channel.observeMessage(groupMessage(10, 8823, "苹果", 1001));
+    channel.observeMessage(groupMessage(20, 8823, "香蕉", 1002));
+    channel.observeMessage(groupMessage(20, 8823, "香蕉", 1003));
+    const std::string note = channel.topicNoteFor(8823);
+    ASSERT_FALSE(note.empty());
+    EXPECT_NE(note.find("苹果"), std::string::npos);
+    EXPECT_NE(note.find("香蕉"), std::string::npos);
+    EXPECT_NE(note.find("群聊"), std::string::npos);
+    EXPECT_EQ(note.find("事件"), std::string::npos);
+    EXPECT_EQ(note.find("任务"), std::string::npos);
+}
+
 // 成本主张的证据（计划 §七）：1 万条消息观察 + flush 的耗时冒烟，
 // 上界给到 10s——真实的量级是毫秒级，超限说明实现退化成了平方复杂度
 TEST(PerceptionChannelTest, PerfSmokeTenThousandMessages)

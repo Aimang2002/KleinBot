@@ -2,24 +2,14 @@
 #include "../utils/TextTokenize.h"
 #include <algorithm>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace
 {
 using utils::hasNonAscii;
+using utils::isStopTerm;
 using utils::normalizeText;
 using utils::splitWords;
 using utils::utf8Characters;
-
-bool isStopTerm(const std::string &term)
-{
-    static const std::unordered_set<std::string> stopTerms = {
-        "我", "你", "他", "她", "它", "我们", "你们", "他们", "之前", "以前",
-        "曾经", "现在", "原来", "最早", "是不是", "有没有", "是否", "什么",
-        "哪个", "多少", "怎么", "为什么", "一下", "关于", "提过", "说过",
-        "告诉", "记得", "事情", "东西", "问题", "这个", "那个"};
-    return stopTerms.find(term) != stopTerms.end();
-}
 
 void addTerm(std::unordered_map<std::string, double> &terms, const std::string &term,
              double weight)

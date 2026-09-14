@@ -22,6 +22,10 @@ std::vector<std::string> utf8Characters(const std::string &value);
 
 // 是否含任意非 ASCII 字节（CJK 判定的粗粒度形态）
 bool hasNonAscii(const std::string &value);
+
+// 高频功能词判定（"我们""什么"这类）：召回查询与观察通道热度共用的
+// 噪声过滤——它们出现得最多，但从来不是话题
+bool isStopTerm(const std::string &term);
 }
 
 #endif // TEXT_TOKENIZE_H

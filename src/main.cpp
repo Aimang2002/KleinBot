@@ -460,16 +460,8 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));
 	commandRegistry.registryCommand(std::make_unique<RemoveContextCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
-	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
-		commandRegistry, voice, settings.message, settings.models.vision,
-		globalVoice, &typingIndicator);
-	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
-	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
-	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,
-												settings.bot.managerId);
-	EventRouter eventRouter;
-	eventRouter.subscribe("request.friend", friendRequestNotifier);
-	// 观察通道（T7）：只看不说、0 LLM；白名单起步，功能关闭时不建库不动用户数据
+	// 观察通道（T7）：只看不说、0 LLM；白名单起步，功能关闭时不建库不动用户数据。
+	// 须在 Message 之前构造：Message 持其指针在 @ 消息上注入话题注记
 	std::unique_ptr<PerceptionStore> perceptionStore;
 	if (settings.perception.observing())
 	{
@@ -478,6 +470,15 @@ int main(int argc, char **argv)
 				 " 个（消息原文永不落盘）");
 	}
 	PerceptionChannel perceptionChannel(settings.perception, perceptionStore.get());
+	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
+		commandRegistry, voice, settings.message, settings.models.vision,
+		globalVoice, &typingIndicator, &perceptionChannel);
+	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
+	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
+	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,
+												settings.bot.managerId);
+	EventRouter eventRouter;
+	eventRouter.subscribe("request.friend", friendRequestNotifier);
 	KeyedTaskScheduler messageWorkers(
 		settings.messageExecution,
 		[](std::exception_ptr error)

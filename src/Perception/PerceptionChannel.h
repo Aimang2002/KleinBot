@@ -34,9 +34,13 @@ public:
     void observeInteraction(const InboundMessage &message);
     // pollingThread 每 3s 轮到；实际 30s 间隔或累计 delta≥100 才写库
     void flushDue(std::time_t now);
-    // v2.4.2 衔接预留：该群当前热度 topN 的 (n-gram, count)，本版本仅测试消费
+    // 该群当前热度 topN 的 (n-gram, count)：topicNoteFor 的数据源，
+    // v2.4.2 心境/接话继续直接消费
     std::vector<std::pair<std::string, double>> hotTopics(std::uint64_t groupId,
                                                           std::size_t topN) const;
+    // 消费端：被 @ 的白名单群生成本轮回复的话题背景注记（附在用户消息尾部）。
+    // 关闭/非白名单/无 count≥2 的热点时返回空串
+    std::string topicNoteFor(std::uint64_t groupId) const;
 
 private:
     struct HeatWindow

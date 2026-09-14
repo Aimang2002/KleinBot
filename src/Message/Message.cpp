@@ -4,6 +4,7 @@
 #include "../Asset/ImageAssetStore.h"
 #include "../Application/ReplyContextRouting.h"
 #include "../Application/TypingIndicator.h"
+#include "../Perception/PerceptionChannel.h"
 #include "Message.h"
 #include <algorithm>
 #include <iomanip>
@@ -16,11 +17,11 @@ Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatS
                  MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                  CommandRegistry &registry, Voice &voice, MessageOptions options,
                  ModelEndpointOptions visionModel, bool &globalVoice,
-                 TypingIndicator *typingIndicator)
+                 TypingIndicator *typingIndicator, PerceptionChannel *perception)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry), voice(voice),
       options(std::move(options)), visionModel(std::move(visionModel)),
-      global_Voice(globalVoice), typingIndicator(typingIndicator)
+      global_Voice(globalVoice), typingIndicator(typingIndicator), perception(perception)
 {
 }
 
@@ -89,6 +90,17 @@ void Message::handleMessage(const InboundMessage &current_data)
 		if (conversationText.empty())
 		{
 			conversationText = "（对方只是@了你，没有附带任何文字）";
+		}
+
+		// 观察通道话题注入（T7 消费端）：白名单群被 @ 时把群内近期热点
+		// 作为背景注记附在用户消息尾部——数据注记走 user 尾部而非 system，
+		// 管理员上下文模式的 system 前缀缓存保持逐字稳定；
+		// 通道关闭/非白名单/无热点时返回空串
+		if (current_data.message_type == "group" && this->perception != nullptr)
+		{
+			const std::string topicNote = this->perception->topicNoteFor(current_data.group_id);
+			if (!topicNote.empty())
+				conversationText += "\n" + topicNote;
 		}
 
 		// 人格编译（T5）：新对话周期后首次聊天，把 soul.md 按（内嵌）规范

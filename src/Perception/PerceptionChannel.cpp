@@ -111,12 +111,16 @@ std::vector<std::string> PerceptionChannel::extractNgrams(const std::string &pla
     {
         if (utils::hasNonAscii(word))
         {
-            // CJK：字符 2-gram（过滤单字符噪声）
+            // CJK：字符 2-gram；功能词（"我们"这类高频噪声）不进热度
             const std::vector<std::string> characters = utils::utf8Characters(word);
             for (std::size_t start = 0; start + 2 <= characters.size(); ++start)
-                ngrams.push_back(characters[start] + characters[start + 1]);
+            {
+                std::string gram = characters[start] + characters[start + 1];
+                if (!utils::isStopTerm(gram))
+                    ngrams.push_back(std::move(gram));
+            }
         }
-        else if (word.size() >= 2)
+        else if (word.size() >= 2 && !utils::isStopTerm(word))
         {
             // ASCII：整词作 term（单字母词是噪声）
             ngrams.push_back(word);
@@ -235,4 +239,30 @@ std::vector<std::pair<std::string, double>> PerceptionChannel::hotTopics(
         });
     }
     return topics;
+}
+
+std::string PerceptionChannel::topicNoteFor(std::uint64_t groupId) const
+{
+    // 消费端（v2.4.1）：被 @ 时给本轮回复带上群内近期热点。
+    // count ≥2 才算"常聊"——只出现过一次的碎片是噪声，宁可不给
+    const auto topics = hotTopics(groupId, 6);
+    if (topics.empty() || topics.front().second < 2)
+        return {};
+
+    std::string fragments;
+    for (const auto &topic : topics)
+    {
+        if (topic.second < 2)
+            break; // 已按热度降序，其后都更冷
+        if (!fragments.empty())
+            fragments += "、";
+        fragments += topic.first;
+    }
+    if (fragments.empty())
+        return {};
+
+    // 纯自然叙事（T6 教训：元词汇与方括号任务标记会被当成待应答的对话，
+    // 这里保留 [系统注] 最小标记 + 数据本身，不写指令腔）
+    return "[系统注] 这是群聊，群里最近常聊：" + fragments +
+           "。回应时可自然利用这些背景，不必刻意罗列。";
 }
