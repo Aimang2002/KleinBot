@@ -297,25 +297,46 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
 
 std::string ChatService::buildOnce(const std::string &systemPrompt, const std::string &userPrompt)
 {
-    const std::string &modelName = chatConfig.defaultModel;
-    const std::optional<ChatModel> model = this->models.find(modelName);
-    if (!model)
+    return buildOnceWith(ModelEndpointOptions{}, systemPrompt, userPrompt);
+}
+
+std::string ChatService::buildOnceWith(const ModelEndpointOptions &worker,
+                                       const std::string &systemPrompt,
+                                       const std::string &userPrompt)
+{
+    ChatModel requestModel;
+    std::string modelName;
+    if (worker.configured())
     {
-        LOG_ERROR("DEFAULT_MODEL 未在 ModelsName.json 注册：" + modelName);
-        return {};
+        // 杂务专用端点：与 drawing/vision 相同的直连模式
+        requestModel.endpoint = worker.endpoint;
+        requestModel.api_key = worker.apiKey;
+        requestModel.api_standard = worker.apiStandard;
+        modelName = worker.model;
+    }
+    else
+    {
+        const std::optional<ChatModel> model = this->models.find(chatConfig.defaultModel);
+        if (!model)
+        {
+            LOG_ERROR("DEFAULT_MODEL 未在 ModelsName.json 注册：" + chatConfig.defaultModel);
+            return {};
+        }
+        requestModel = *model;
+        modelName = chatConfig.defaultModel;
     }
 
     ChatRequest request;
-    request.temperature = 0.3; // 编译类任务要稳定，不要创造性
+    request.temperature = 0.3; // 判断/压缩类任务要稳定，不要创造性
     request.system_prompt = systemPrompt;
     request.history.push_back({"user", userPrompt});
 
-    ChatResponse response = this->dock.RequestChat(*model, modelName, request);
+    ChatResponse response = this->dock.RequestChat(requestModel, modelName, request);
     if (response.cancelled)
         return {};
     if (response.code != 200)
     {
-        LOG_ERROR("ChatService::buildOnce 调用 LLM 失败：" + std::to_string(response.code));
+        LOG_ERROR("ChatService::buildOnceWith 调用 LLM 失败：" + std::to_string(response.code));
         return {};
     }
     return utils::trim(response.content);

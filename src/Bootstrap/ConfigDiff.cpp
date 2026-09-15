@@ -113,6 +113,7 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
 
     compareModelEndpoint(diff, current.models.drawing, candidate.models.drawing, "models.drawing");
     compareModelEndpoint(diff, current.models.vision, candidate.models.vision, "models.vision");
+    compareModelEndpoint(diff, current.models.worker, candidate.models.worker, "models.worker");
 
     addIfChanged(diff, current.voice.enabled, candidate.voice.enabled,
                  "voice.enabled", ConfigChangeImpact::Dynamic);

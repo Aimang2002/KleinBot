@@ -20,6 +20,7 @@ struct ModelRuntimeSettings
 {
     ModelEndpointOptions drawing;
     ModelEndpointOptions vision;
+    ModelEndpointOptions worker;
 };
 
 struct StorageRuntimeSettings

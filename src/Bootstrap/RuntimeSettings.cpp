@@ -90,6 +90,7 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
     result.messageExecution = mapMessageExecution(schema.chat);
     result.models.drawing = mapModel(schema.models.drawing);
     result.models.vision = mapModel(schema.models.vision);
+    result.models.worker = mapModel(schema.models.worker);
     result.voice = {
         schema.voice.enabled,
         schema.voice.host,

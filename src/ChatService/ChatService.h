@@ -2,6 +2,7 @@
 #define CHATSERVICE_H
 
 #include "../ModelApiCaller/Dock.hpp"
+#include "../ModelApiCaller/ModelEndpointOptions.h"
 #include "../UserSession/UserSessionService.h"
 #include "../ModelRegistry/ModelRegistry.h"
 #include "ChatOptions.h"
@@ -42,6 +43,10 @@ public:
     // 一次性调用（自定 system，低温度）：人格编译等后台任务用。
     // 不写历史、不入记忆队列、无工具；失败返回空串
     std::string buildOnce(const std::string &systemPrompt, const std::string &userPrompt);
+    // 指定杂务模型的一次性调用（话题判断/上下文压缩等后台苦力任务）：
+    // worker 端点已配置则直连该端点，否则回退默认模型。失败返回空串
+    std::string buildOnceWith(const ModelEndpointOptions &worker,
+                              const std::string &systemPrompt, const std::string &userPrompt);
 
 private:
     Dock &dock;

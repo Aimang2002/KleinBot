@@ -31,6 +31,14 @@
                 "from_env": "KLEIN_VISION_API_KEY"
             },
             "api_standard": "OpenAI"
+        },
+        "worker": {
+            "model": "",
+            "endpoint": "",
+            "api_key": {
+                "from_env": "KLEIN_WORKER_API_KEY"
+            },
+            "api_standard": "OpenAI"
         }
     },
     "voice": {

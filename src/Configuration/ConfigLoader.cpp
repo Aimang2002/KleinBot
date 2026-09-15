@@ -476,9 +476,10 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     {
         // registry_path 与 stable_diffusion 均已废弃（前者路径钉死为 kModelRegistryPath，
         // 后者由 models.drawing 取代）：保留在白名单里让老配置静默加载，不弹“未知字段”警告
-        decoder.unknownFields(*models, {"registry_path", "drawing", "vision", "stable_diffusion"}, "models");
+        decoder.unknownFields(*models, {"registry_path", "drawing", "vision", "worker", "stable_diffusion"}, "models");
         config.models.drawing = decodeModelEndpoint(decoder, *models, "drawing", "models.drawing");
         config.models.vision = decodeModelEndpoint(decoder, *models, "vision", "models.vision");
+        config.models.worker = decodeModelEndpoint(decoder, *models, "worker", "models.worker");
     }
 
     const json *voice = decoder.object(document, "voice", "voice");

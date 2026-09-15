@@ -48,6 +48,9 @@ struct ModelSchema
 {
     ModelEndpointSchema drawing;
     ModelEndpointSchema vision;
+    // 杂务模型（可选）：话题判断/上下文压缩等后台苦力任务的专用端点；
+    // 未配置时回退 chat.default_model
+    ModelEndpointSchema worker;
 };
 
 struct VoiceSchema
