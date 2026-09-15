@@ -90,9 +90,11 @@ void GroupListService::rebuildMirrorFromDisk()
 
 std::string GroupListService::avatarUrlFor(std::uint64_t groupId)
 {
-    // qlogo 群头像规则 URL（各实现端 get_group_list 不返回头像，构造是通行做法）
+    // qlogo 群头像规则 URL（各实现端 get_group_list 不返回头像，构造是通行做法）。
+    // 用 /100 而非 /640：面板展示尺寸只有 20~28px，640 原图约 9KB、100 约 1.6KB，
+    // 群多时差别可观
     return "https://p.qlogo.cn/gh/" + std::to_string(groupId) + "/" +
-           std::to_string(groupId) + "/640";
+           std::to_string(groupId) + "/100";
 }
 
 void GroupListService::poll(std::int64_t now)

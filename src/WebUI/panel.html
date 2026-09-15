@@ -778,6 +778,24 @@
       border-radius: 5px;
       object-fit: cover;
       background: var(--line);
+      flex: none;
+    }
+
+    /* 群选择浮层的条内头像：固定小尺寸（无此约束会按 qlogo 原图尺寸渲染） */
+    .pick-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: var(--line);
+      flex: none;
+    }
+
+    /* 长群名不撑破浮层：单行省略 */
+    .pick-opt>span:last-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .chip {
@@ -2268,39 +2286,46 @@
       function renderPicker(filter) {
         pickList.textContent = "";
         const keyword = (filter || "").trim().toLowerCase();
-        for (const info of groupCatalog) {
+        const shown = groupCatalog.filter((info) => {
           const id = String(info.group_id);
-          if (keyword &&
-              !info.group_name.toLowerCase().includes(keyword) && !id.includes(keyword))
-            continue;
-          const item = document.createElement("label");
-          item.className = "model-pick-item";
-          const box = document.createElement("input");
-          box.type = "checkbox";
-          box.checked = groupIds.includes(id);
-          box.addEventListener("change", () => {
-            if (box.checked) {
-              if (!groupIds.includes(id)) groupIds.push(id);
-            } else {
-              groupIds = groupIds.filter((existing) => existing !== id);
-            }
-            renderChips();
-          });
+          return !keyword || (info.group_name || "").toLowerCase().includes(keyword) ||
+            id.includes(keyword);
+        });
+        if (!shown.length) {
+          const empty = document.createElement("div");
+          empty.className = "model-pick-empty";
+          empty.textContent = keyword ? "没有匹配的群"
+            : "群列表为空：机器人离线或尚未拉取";
+          pickList.appendChild(empty);
+          return;
+        }
+        for (const info of shown) {
+          const id = String(info.group_id);
+          // 与模型供应商页同款条目：pick-opt + tick，点击原地切换不关闭浮层
+          const option = document.createElement("button");
+          option.type = "button";
+          option.className = "pick-opt" + (groupIds.includes(id) ? " selected" : "");
+          const tick = document.createElement("span");
+          tick.className = "tick";
+          tick.textContent = "◈";
           const avatar = document.createElement("img");
+          avatar.className = "pick-avatar";  // 必须带尺寸类：无约束会按原图尺寸撑爆行高
           avatar.src = info.avatar_url || "";
           avatar.alt = "";
           avatar.referrerPolicy = "no-referrer";
           const label = document.createElement("span");
           label.textContent = (info.group_name || "（未命名群）") + " · " + id +
             " · " + (info.member_count || 0) + "人";
-          item.append(box, avatar, label);
-          pickList.appendChild(item);
-        }
-        if (!pickList.children.length) {
-          const empty = document.createElement("div");
-          empty.className = "model-note";
-          empty.textContent = keyword ? "没有匹配的群" : "群列表为空：机器人离线或尚未拉取";
-          pickList.appendChild(empty);
+          option.append(tick, avatar, label);
+          option.addEventListener("click", () => {
+            if (groupIds.includes(id))
+              groupIds = groupIds.filter((existing) => existing !== id);
+            else
+              groupIds.push(id);
+            renderChips();
+            option.classList.toggle("selected", groupIds.includes(id));
+          });
+          pickList.appendChild(option);
         }
       }
       pickButton.addEventListener("click", async () => {
