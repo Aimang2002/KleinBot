@@ -342,6 +342,28 @@ std::string ChatService::buildOnceWith(const ModelEndpointOptions &worker,
     return utils::trim(response.content);
 }
 
+ChatResponse ChatService::requestInCharacter(uint64_t personaSourceId, const std::string &systemNote,
+                                             const std::vector<ChatMessage> &history,
+                                             const std::vector<std::string> &toolSchemas)
+{
+    auto bundleOpt = this->userSession.buildChatRequest(personaSourceId);
+    if (!bundleOpt)
+    {
+        LOG_ERROR("ChatService::requestInCharacter 模型未注册，user_id=" +
+                  std::to_string(personaSourceId));
+        return {};
+    }
+    auto &bundle = *bundleOpt;
+
+    // 人格与服务契约照常装配；历史与工具完全由调用方给定，不读会话镜像、
+    // 不落库、不入长期记忆——话题会话是公共临时上下文，与任何真人会话无关
+    bundle.request.history = history;
+    bundle.request.tools = toolSchemas;
+    bundle.request.system_prompt += systemNote;
+
+    return this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request);
+}
+
 std::string ChatService::replyInCharacter(uint64_t user_id, const std::string &prompt)
 {
     auto bundleOpt = this->userSession.buildChatRequest(user_id);

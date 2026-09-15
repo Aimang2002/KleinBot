@@ -47,6 +47,12 @@ public:
     // worker 端点已配置则直连该端点，否则回退默认模型。失败返回空串
     std::string buildOnceWith(const ModelEndpointOptions &worker,
                               const std::string &systemPrompt, const std::string &userPrompt);
+    // 会话轮请求（群聊话题跟进）：人格 system（用户人格/soul 兜底 + 服务契约）
+    // + systemNote 追加，history 与工具表由调用方给定，单次请求返回原始
+    // ChatResponse（工具调用由调用方执行）。不落库、不入记忆、不写会话
+    ChatResponse requestInCharacter(uint64_t personaSourceId, const std::string &systemNote,
+                                    const std::vector<ChatMessage> &history,
+                                    const std::vector<std::string> &toolSchemas);
 
 private:
     Dock &dock;
