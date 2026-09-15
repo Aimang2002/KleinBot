@@ -305,8 +305,8 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
         response.set_content(maskSecrets(document).dump(), "application/json");
     });
 
-    server->Post("/api/config", [configPath, &store, writer](const httplib::Request &request,
-                                                             httplib::Response &response) {
+    server->Post("/api/config", [configPath, &store, writer, groups](const httplib::Request &request,
+                                                                    httplib::Response &response) {
         json candidate;
         try
         {
@@ -330,6 +330,10 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
         }
 
         const ConfigReloadResult reload = store.reload();
+        // 观察白名单落库（T7c）：保存后把 group_cache.monitored 同步为 0/1，
+        // 与 .config.json 一致；实际观察生效仍需重启（Rebuild 级）
+        if (groups != nullptr && reload.success && reload.snapshot != nullptr)
+            groups->applyWhitelist(reload.snapshot->runtime.perception.observeGroups);
         const json body = {{"diff", diffToArray(reload.diff)},
                            {"counts", {{"dynamic", reload.diff.count(ConfigChangeImpact::Dynamic)},
                                        {"rebuild", reload.diff.count(ConfigChangeImpact::Rebuild)},

@@ -42,7 +42,7 @@ GroupListService::GroupListService(const std::string &dbPath, OneBotApiChannel &
         " name TEXT NOT NULL DEFAULT '',"
         " member_count INTEGER NOT NULL DEFAULT 0,"
         " avatar_url TEXT NOT NULL DEFAULT '',"
-        " monitored INTEGER NOT NULL DEFAULT 0,"
+        " monitored INTEGER NOT NULL DEFAULT 0,"   // 0/1：1=该群在观察白名单内
         " refreshed_ts INTEGER NOT NULL DEFAULT 0);";
     char *err = nullptr;
     if (sqlite3_exec(db, ddl, nullptr, nullptr, &err) != SQLITE_OK)
@@ -54,6 +54,8 @@ GroupListService::GroupListService(const std::string &dbPath, OneBotApiChannel &
         return;
     }
     rebuildMirrorFromDisk();
+    // 启动即把配置白名单落到 monitored 列：库内 0/1 与 .config.json 一致
+    applyWhitelist(options.observeGroups);
 }
 
 GroupListService::~GroupListService()
@@ -137,22 +139,20 @@ void GroupListService::applyFetchedList(const std::vector<GroupListEntry> &fetch
     if (fetched.empty())
         return;
 
-    // monitored 是用户意志，刷新只覆写协议端数据列，勾选保留
-    std::map<std::uint64_t, bool> previousMonitored;
+    // monitored 由配置白名单派生（唯一真值来源）：刷新只覆写协议端数据列，
+    // 监控标记重新按当前白名单标注——不能"保留旧值"，因为首次拉取时镜像
+    // 还是空的，白名单标注会丢失
     std::vector<GroupListEntry> merged = fetched;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (const GroupListEntry &entry : mirror_)
-            previousMonitored[entry.groupId] = entry.monitored;
+        const std::set<std::uint64_t> observing(options.observeGroups.begin(),
+                                                options.observeGroups.end());
         for (GroupListEntry &entry : merged)
-        {
-            const auto it = previousMonitored.find(entry.groupId);
-            entry.monitored = it != previousMonitored.end() ? it->second
-                                                            : entry.monitored;
-        }
+            entry.monitored = observing.find(entry.groupId) != observing.end();
         mirror_ = merged;
         ready_ = true;
         nextAttemptTs_ = now + kRefreshIntervalSeconds; // 成功后降频为日级刷新
+        persistMonitoredUnderLock();
     }
 
     if (sqlite3_exec(db, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr) != SQLITE_OK)
@@ -183,13 +183,57 @@ void GroupListService::applyFetchedList(const std::vector<GroupListEntry> &fetch
     LOG_INFO("群列表已刷新：" + std::to_string(merged.size()) + " 个群");
 }
 
+void GroupListService::applyWhitelist(const std::vector<std::uint64_t> &observeGroups)
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        options.observeGroups = observeGroups;
+        const std::set<std::uint64_t> observing(observeGroups.begin(), observeGroups.end());
+        for (GroupListEntry &entry : mirror_)
+            entry.monitored = observing.find(entry.groupId) != observing.end();
+        persistMonitoredUnderLock();
+    }
+}
+
+void GroupListService::persistMonitoredUnderLock()
+{
+    if (db == nullptr)
+        return;
+    // 全量归零 + 白名单置 1（幂等）：monitored 是 0/1 布尔，
+    // 白名单群不在 group_cache 里（机器人不在该群）时无行可写，
+    // 只影响落盘副本，不影响实际观察
+    if (sqlite3_exec(db, "UPDATE group_cache SET monitored = 0;", nullptr, nullptr,
+                     nullptr) != SQLITE_OK)
+    {
+        LOG_ERROR("group_cache.monitored 归零失败：" + std::string(sqlite3_errmsg(db)));
+        return;
+    }
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, "UPDATE group_cache SET monitored = 1 WHERE group_id = ?1;",
+                           -1, &statement, nullptr) != SQLITE_OK)
+        return;
+    int marked = 0;
+    for (const GroupListEntry &entry : mirror_)
+    {
+        if (!entry.monitored)
+            continue;
+        sqlite3_reset(statement);
+        sqlite3_clear_bindings(statement);
+        sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(entry.groupId));
+        if (sqlite3_step(statement) == SQLITE_DONE)
+            marked += sqlite3_changes(db);
+    }
+    sqlite3_finalize(statement);
+    LOG_INFO("观察白名单已落库：monitored=1 的群 " + std::to_string(marked) + " 个");
+}
+
 std::vector<GroupListEntry> GroupListService::snapshot() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<GroupListEntry> result = mirror_;
-    // monitored 实时对齐当前配置白名单（配置保存与缓存刷新两条写路，展示以配置为准）
-    std::set<std::uint64_t> observing(options.observeGroups.begin(),
-                                      options.observeGroups.end());
+    // monitored 以当前白名单为准（与落库副本一致；配置是唯一真值来源）
+    const std::set<std::uint64_t> observing(options.observeGroups.begin(),
+                                            options.observeGroups.end());
     for (GroupListEntry &entry : result)
         entry.monitored = observing.find(entry.groupId) != observing.end();
     std::sort(result.begin(), result.end(),
@@ -201,6 +245,5 @@ std::vector<GroupListEntry> GroupListService::snapshot() const
 
 void GroupListService::onOptionsChanged(const PerceptionOptions &options)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    this->options = options;
+    applyWhitelist(options.observeGroups);
 }

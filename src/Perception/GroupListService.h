@@ -21,7 +21,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <ctime>
-#include <map>
 #include <mutex>
 #include <set>
 #include <string>
@@ -58,13 +57,20 @@ public:
     // pollingThread：未就绪时尝试刷新（失败/未连接按冷却静默重试）
     void poll(std::int64_t now);
 
-    // 配置热更新对齐：observe_groups 变化后由组合根调用（当前默认配置
-    // 无热应用，此接口为后续版本预留；monitored 标注始终实时对齐）
+    // 白名单落库（用户定规：monitored 0/1，1=开启监控）：
+    // 把观察白名单同步进 group_cache.monitored——配置仍是唯一真值来源
+    // （.config.json），本列是它的落盘副本，供直接查库与审计。
+    // 启动时与面板保存配置后各调一次；不在机器人群列表里的白名单群号
+    // 无行可写（只影响落盘副本，不影响实际观察）。
+    void applyWhitelist(const std::vector<std::uint64_t> &observeGroups);
+
+    // 配置变化入口（组合根/面板调用）：等价于 applyWhitelist + 记住新选项
     void onOptionsChanged(const PerceptionOptions &options);
 
 private:
     void rebuildMirrorFromDisk();
     void applyFetchedList(const std::vector<GroupListEntry> &fetched, std::int64_t now);
+    void persistMonitoredUnderLock();
     static std::string avatarUrlFor(std::uint64_t groupId);
 
     sqlite3 *db = nullptr;
