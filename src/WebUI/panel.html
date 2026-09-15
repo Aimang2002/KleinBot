@@ -1500,9 +1500,10 @@
     const SECTION_KEY_ORDER = {
       bot: ["id", "manager_id", "name"],
       chat: ["max_message_tokens", "worker_threads", "message_survival_seconds"],
-      models: ["drawing", "vision"],
+      models: ["drawing", "vision", "worker"],
       drawing: ["model", "endpoint", "api_key", "api_standard"],
       vision: ["model", "endpoint", "api_key", "api_standard"],
+      worker: ["model", "endpoint", "api_key", "api_standard"],
       voice: ["enabled", "host", "port", "reference_audio", "reference_text"],
       memory: ["enabled", "model", "batch_turns", "idle_minutes", "recall_limit"],
       web_search: ["enabled", "provider", "endpoint", "api_key", "search_depth", "max_results",
