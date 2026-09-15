@@ -25,6 +25,7 @@
  */
 #include "../Application/BotIdentity.h"
 #include "GroupContextStore.h"
+#include "../../Library/nlohmann/json.hpp"
 #include "../Port/ChatRequest.h"
 #include "../Port/ChatResponse.h"
 #include "../Port/MessageSenderPort.h"
@@ -56,6 +57,9 @@ struct EngagementSession
     int turnCount = 0;
     int consecutivePasses = 0;
     int newMessagesSinceTurn = 0;    // lull 轮次触发的新消息门槛
+    int recallUsed = 0;              // 上下文召回预算（每会话 1 次）
+    std::string digest;              // 已压缩部分的滚动摘要
+    std::int64_t compressedUpToTs = 0; // 摘要覆盖到的时刻（之后为原文窗口）
     bool addressPending = false;     // 被点名/被回复，待回应（优先触发）
     bool entryPending = false;       // 软激活后的入场轮待执行（@ 激活无入场轮）
     std::string endReason;
@@ -124,10 +128,23 @@ public:
     // 宽容视为说话（模型偶尔不带工具直出），空文字 = pass
     static EngagementTurn parseTurn(const ChatResponse &response);
 
+    // token 启发式估算（预算门控用，非精确计价）：CJK 码点 ≈1 token/字，
+    // ASCII ≈1 token/4 字符
+    static std::size_t estimateTokens(const std::string &text);
+
     // 调试/测试观测
     std::optional<EngagementSession> sessionOf(std::uint64_t groupId) const;
 
 private:
+    struct PreparedContext
+    {
+        std::string material;
+        std::string digest;
+        std::int64_t compressedUpToTs = 0;
+        bool digestUpdated = false;
+        std::vector<std::int64_t> shownSeqs; // 材料里出现过的消息（召回排除用）
+    };
+
     void createSessionLocked(std::uint64_t groupId, const std::string &topicLine,
                              std::int64_t now, const char *source);
     void endSessionLocked(EngagementSession &session, std::int64_t now,
@@ -137,8 +154,13 @@ private:
                                 std::int64_t now);
     bool replyToSelf(const GroupMessageRecord &record) const;
     bool allowJudgeLocked(std::uint64_t groupId, std::int64_t now);
-    std::string buildMaterial(const std::vector<GroupMessageRecord> &records,
-                              std::size_t maxMessages) const;
+    // 材料装配：原文窗口（超长占位）+ 预算内直灌；超预算把最旧一段经
+    // worker 合并进滚动摘要，只留原文尾巴。worker 调用在锁外由调用方保证
+    PreparedContext prepareContext(const std::vector<GroupMessageRecord> &records,
+                                   const std::string &digest,
+                                   std::int64_t compressedUpToTs) const;
+    std::string runContextRecall(const nlohmann::json &arguments, std::uint64_t groupId,
+                                 const std::vector<std::int64_t> &shownSeqs) const;
 
     const BotIdentity bot;
     GroupContextStore *const store;

@@ -99,6 +99,10 @@ struct Harness
     std::vector<std::uint64_t> submittedTurns;
     std::vector<std::uint64_t> submittedJudges;
     std::vector<ChatResponse> turnResponses; // 依次弹出；空则默认 pass
+    std::vector<std::string> agentContracts; // 主 Agent 每次请求的 system 注记
+    std::vector<std::vector<ChatMessage>> agentHistories;
+    std::vector<std::string> workerSystems; // 杂务模型调用记录
+    std::vector<std::string> workerUsers;
 
     explicit Harness(BotIdentity bot = {987654321, 123456789, "Klein"})
         : store(std::make_unique<GroupContextStore>(directory.path() + "/conversation.db")),
@@ -108,17 +112,25 @@ struct Harness
     {
         service->setSubmitTurn([this](std::uint64_t group) { submittedTurns.push_back(group); });
         service->setSubmitJudge([this](std::uint64_t group) { submittedJudges.push_back(group); });
-        service->setMainAgent([this](const std::string &, const std::vector<ChatMessage> &,
-                                     const std::vector<std::string> &)
-                              {
-                                  if (turnResponses.empty())
-                                      return passResponse();
-                                  ChatResponse response = turnResponses.front();
-                                  turnResponses.erase(turnResponses.begin());
-                                  return response;
-                              });
-        service->setWorker([](const std::string &, const std::string &)
-                           { return std::string{}; });
+        service->setMainAgent(
+            [this](const std::string &contract, const std::vector<ChatMessage> &history,
+                   const std::vector<std::string> &)
+            {
+                agentContracts.push_back(contract);
+                agentHistories.push_back(history);
+                if (turnResponses.empty())
+                    return passResponse();
+                ChatResponse response = turnResponses.front();
+                turnResponses.erase(turnResponses.begin());
+                return response;
+            });
+        service->setWorker(
+            [this](const std::string &system, const std::string &user)
+            {
+                workerSystems.push_back(system);
+                workerUsers.push_back(user);
+                return std::string{};
+            });
     }
 
     void feed(std::uint64_t group, const std::string &text, std::int64_t ts,
@@ -127,6 +139,12 @@ struct Harness
         GroupMessageRecord value = record(group, 42, "小白", text, ts, mentionsBot);
         store->append(value);
         service->onGroupMessage(value, atMentioned);
+    }
+
+    void feedRaw(std::uint64_t group, const std::string &text, std::int64_t ts)
+    {
+        GroupMessageRecord value = record(group, 42, "小白", text, ts);
+        store->append(value); // 只入库不喂会话（构造超窗口材料用）
     }
 };
 
@@ -137,6 +155,14 @@ BotIdentity botIdentity()
     bot.managerId = 123456789;
     bot.name = "Klein";
     return bot;
+}
+
+std::string repeatUtf8(const std::string &unit, int times)
+{
+    std::string text;
+    for (int index = 0; index < times; ++index)
+        text += unit;
+    return text;
 }
 } // namespace
 
@@ -410,4 +436,117 @@ TEST(EngagementSessionTest, SelfActivityResetsPassCounterAndBeat)
     // 她经正常路径发言（@ 回复）：重置节拍
     harness.service->onSelfActivity(8823, harness.now + 30);
     EXPECT_EQ(harness.service->sessionOf(8823)->consecutivePasses, 0);
+}
+
+TEST(EngagementContextTest, EstimateTokensHeuristic)
+{
+    EXPECT_EQ(EngagementService::estimateTokens("abcd"), 1U);   // ASCII 4:1
+    EXPECT_EQ(EngagementService::estimateTokens("一二三四"), 4U); // CJK 1:1
+    EXPECT_EQ(EngagementService::estimateTokens("ab一二"), 2U);
+}
+
+TEST(EngagementContextTest, OversizedMessageReplacedByPlaceholder)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "正常消息", harness.now);
+    harness.feed(8823, repeatUtf8("超导", 600), harness.now + 1); // 1200 token > 1000
+    harness.turnResponses.push_back(sayResponse("收到"));
+    harness.service->runTurn(8823);
+
+    ASSERT_FALSE(harness.agentHistories.empty());
+    const std::string &material = harness.agentHistories.front().front().content;
+    EXPECT_NE(material.find("[超长消息已省略]"), std::string::npos);
+    EXPECT_EQ(material.find(repeatUtf8("超导", 600)), std::string::npos)
+        << "原文不进材料";
+    EXPECT_NE(material.find("正常消息"), std::string::npos);
+}
+
+TEST(EngagementContextTest, OverBudgetWindowCompressedToDigestPlusTail)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    // 10 条 × 350 个汉字 ≈ 3500 token > 3000 预算
+    for (int index = 0; index < 10; ++index)
+        harness.feedRaw(8823, "消息" + std::to_string(index) + repeatUtf8("讨论", 175),
+                        harness.now + index);
+    harness.service->setWorker([&harness](const std::string &system, const std::string &user)
+                               {
+                                   harness.workerSystems.push_back(system);
+                                   harness.workerUsers.push_back(user);
+                                   return std::string("合并后的摘要");
+                               });
+    harness.turnResponses.push_back(sayResponse("了解了"));
+    harness.service->runTurn(8823);
+
+    // 杂务模型收到压缩任务
+    ASSERT_FALSE(harness.workerSystems.empty());
+    EXPECT_NE(harness.workerSystems.front().find("压缩器"), std::string::npos);
+    EXPECT_NE(harness.workerUsers.front().find("消息0"), std::string::npos);
+
+    // 材料 = 摘要 + 尾巴原文（最后 3 条），被压缩的旧消息原文不出现
+    const std::string &material = harness.agentHistories.front().front().content;
+    EXPECT_NE(material.find("合并后的摘要"), std::string::npos);
+    EXPECT_NE(material.find("消息9"), std::string::npos);
+    EXPECT_EQ(material.find("消息0论"), std::string::npos) << "已压缩部分不再以原文出现";
+
+    // 滚动水位落库到会话
+    auto session = harness.service->sessionOf(8823);
+    EXPECT_EQ(session->digest, "合并后的摘要");
+    EXPECT_EQ(session->compressedUpToTs, harness.now + 6);
+}
+
+TEST(EngagementContextTest, RecallSearchesBeyondWindowOncePerSession)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    // 32 条：窗口只装最后 30 条，最早 2 条只能靠召回
+    for (int index = 0; index < 32; ++index)
+    {
+        const std::string text = index < 2 ? "船新版本介绍" + std::to_string(index)
+                                           : "闲聊" + std::to_string(index);
+        harness.feedRaw(8823, text, harness.now + index);
+    }
+
+    ChatResponse recallCall;
+    recallCall.code = 200;
+    recallCall.finish_reason = "tool_calls";
+    recallCall.tool_calls.push_back({"rc-1", "recall_context",
+                                     R"({"keywords":["船新","版本"]})"});
+    harness.turnResponses.push_back(recallCall);
+    harness.turnResponses.push_back(sayResponse("是那个船新版本吗"));
+    harness.service->runTurn(8823);
+
+    // 第一次请求的材料里没有窗口外的消息；第二次请求带回了召回结果
+    ASSERT_GE(harness.agentHistories.size(), 2U);
+    const std::string &firstMaterial = harness.agentHistories[0].front().content;
+    EXPECT_EQ(firstMaterial.find("船新版本介绍"), std::string::npos);
+    ASSERT_GE(harness.agentHistories[1].size(), 3U);
+    const std::string &toolResult = harness.agentHistories[1][2].content;
+    EXPECT_NE(toolResult.find("船新版本介绍0"), std::string::npos);
+    EXPECT_EQ(harness.service->sessionOf(8823)->recallUsed, 1);
+    ASSERT_FALSE(harness.sender->texts.empty());
+    EXPECT_EQ(harness.sender->texts.back(), "是那个船新版本吗");
+
+    // 第二次召回：预算用尽，不再请求模型检索
+    ChatResponse recallAgain;
+    recallAgain.code = 200;
+    recallAgain.finish_reason = "tool_calls";
+    recallAgain.tool_calls.push_back({"rc-2", "recall_context",
+                                      R"({"keywords":["船新"]})"});
+    harness.turnResponses.push_back(recallAgain);
+    harness.service->runTurn(8823);
+    ASSERT_GE(harness.agentHistories.size(), 3U);
+    // 预算用尽：schema 都不给，模型无从发起——但万一发起，回灌预算提示
+    EXPECT_GT(harness.agentContracts.size(), 2U);
+}
+
+TEST(EngagementContextTest, RecallNoteReflectsBudgetInContract)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(sayResponse("第一轮"));
+    harness.service->runTurn(8823);
+    EXPECT_NE(harness.agentContracts.front().find("还有 1 次上下文召回"), std::string::npos);
 }
