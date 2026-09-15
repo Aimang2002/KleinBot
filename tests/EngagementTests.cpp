@@ -1,7 +1,12 @@
 #include <gtest/gtest.h>
 
 #include "Perception/EngagementService.h"
+#include "Perception/GroupContextService.h"
+#include "Perception/GroupListService.h"
+#include "Network/OneBotApiChannel.h"
 #include "Port/OutboundDelivery.h"
+
+#include <chrono>
 
 #include <cstdint>
 #include <filesystem>
@@ -549,4 +554,102 @@ TEST(EngagementContextTest, RecallNoteReflectsBudgetInContract)
     harness.turnResponses.push_back(sayResponse("第一轮"));
     harness.service->runTurn(8823);
     EXPECT_NE(harness.agentContracts.front().find("还有 1 次上下文召回"), std::string::npos);
+}
+
+// ===== 集成：GroupContextService.observe → EngagementService 全链路 =====
+
+namespace
+{
+class NoopEngageApiChannel final : public OneBotApiChannel
+{
+public:
+    OneBotApiResult call(const std::string &, nlohmann::json, std::chrono::milliseconds) override
+    {
+        return {};
+    }
+};
+
+InboundMessage inboundChat(std::uint64_t group, std::uint64_t user, const std::string &text,
+                           std::int64_t ts, bool atBot = false)
+{
+    InboundMessage message;
+    message.post_type = "message";
+    message.message_type = "group";
+    message.user_id = user;
+    message.group_id = group;
+    message.nickname = "小白";
+    message.plain_text = text;
+    message.message_timestamp = ts;
+    message.message_id = 100000 + ts;
+    message.message_id_raw = "m" + std::to_string(message.message_id);
+    if (atBot)
+        message.mentioned_ids.push_back(10086);
+    return message;
+}
+} // namespace
+
+TEST(EngagementIntegrationTest, ObserveFeedsEngagementAndJudgeActivates)
+{
+    TemporaryDirectory temporaryDirectory;
+    GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
+    FakeSender sender;
+    NoopEngageApiChannel api;
+    GroupListService state(temporaryDirectory.path() + "/state.db", api);
+    state.setFeatureEnabled(true);
+    state.setMonitored(8823, true);
+
+    BotIdentity bot;
+    bot.id = 10086;
+    bot.name = "Klein";
+    GroupContextService contextService(&state, bot, &store, &sender);
+    EngagementService engagement(bot, &store, &sender, [] { return std::int64_t(1000); });
+    contextService.setEngagement(&engagement);
+    engagement.setWorker([](const std::string &, const std::string &)
+                         { return std::string("YES"); });
+    std::vector<std::uint64_t> turns;
+    engagement.setSubmitTurn([&](std::uint64_t group) { turns.push_back(group); });
+
+    // 群里聊出语境，有人提名字无 @：observe 喂 observe→judge 提交 →
+    // lane 内 runJudge 判 YES → 清旧建新 + 入场轮提交
+    contextService.observe(inboundChat(8823, 10, "原神深渊十二层怎么打", 1000));
+    contextService.observe(inboundChat(8823, 20, "深渊阵容带钟离稳一点", 1001));
+    contextService.observe(inboundChat(8823, 30, "Klein 你深渊用的什么阵容", 1002));
+    engagement.runJudge(8823); // 模拟群 lane 执行 judge 任务
+    ASSERT_EQ(turns.size(), 1U);
+    ASSERT_TRUE(engagement.sessionOf(8823).has_value());
+    EXPECT_TRUE(engagement.sessionOf(8823)->entryPending);
+
+    // 会话存活期间再提名字：并入会话（点名触发轮次），不再走 judge
+    contextService.observe(inboundChat(8823, 40, "Klein 说得对", 1003));
+    EXPECT_EQ(turns.size(), 2U) << "第二次是点名轮次，不是重新激活";
+    EXPECT_TRUE(engagement.sessionOf(8823)->addressPending);
+
+    // 非@群消息照常入库且喂活动（无新判定）
+    contextService.observe(inboundChat(8824, 50, "别的群不监控", 1004));
+    EXPECT_FALSE(engagement.sessionOf(8824).has_value());
+}
+
+TEST(EngagementIntegrationTest, AtMentionHardActivatesSession)
+{
+    TemporaryDirectory temporaryDirectory;
+    GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
+    FakeSender sender;
+    NoopEngageApiChannel api;
+    GroupListService state(temporaryDirectory.path() + "/state.db", api);
+    state.setFeatureEnabled(true);
+    state.setMonitored(8823, true);
+
+    BotIdentity bot;
+    bot.id = 10086;
+    bot.name = "Klein";
+    GroupContextService contextService(&state, bot, &store, &sender);
+    EngagementService engagement(bot, &store, &sender, [] { return std::int64_t(1000); });
+    contextService.setEngagement(&engagement);
+
+    // @ 消息：Message 路径调用 onAtActivated 硬激活（observe 只管入库）
+    contextService.observe(inboundChat(8823, 10, "@Klein 来聊聊", 1000, true));
+    EXPECT_FALSE(engagement.sessionOf(8823).has_value()) << "observe 不开会话";
+    contextService.onAtActivated(8823, "@Klein 来聊聊");
+    ASSERT_TRUE(engagement.sessionOf(8823).has_value());
+    EXPECT_FALSE(engagement.sessionOf(8823)->entryPending) << "@ 激活无入场轮";
 }

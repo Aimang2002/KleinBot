@@ -100,9 +100,10 @@ void Message::handleMessage(const InboundMessage &current_data)
 		// 数据注记走 user 尾部而非 system，管理员前缀缓存保持逐字稳定
 		if (current_data.message_type == "group")
 		{
-			// @ 到达即开/刷话题槽（T7b 状态机入口；anchor 用触发句+相关上下文）
+			// @ 硬激活（意志层 v2）：回答走下方既有回复路径；话题会话的
+			// 开启/合并由 EngagementService 决定
 			if (this->groupContext != nullptr)
-				this->groupContext->onAtTriggered(current_data.group_id, current_data.plain_text);
+				this->groupContext->onAtActivated(current_data.group_id, current_data.plain_text);
 
 			std::string contextNote;
 			if (this->groupContext != nullptr)
@@ -179,8 +180,6 @@ void Message::handleMessage(const InboundMessage &current_data)
 		{
 			LOG_INFO("群聊收敛：本轮判定无增量，静默不回应（群 " +
 					 std::to_string(current_data.group_id) + "）");
-			if (this->groupContext != nullptr)
-				this->groupContext->onSuppressed(current_data.group_id);
 			return;
 		}
 
