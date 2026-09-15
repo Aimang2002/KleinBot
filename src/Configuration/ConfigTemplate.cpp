@@ -56,6 +56,7 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
                 }
             }
         },
+        "perception": {"enabled": false, "observe_groups": []},
         "webui": {"enabled": true, "bind": "127.0.0.1"}
     })");
     document["webui"]["port"] = kDefaultWebUiPort;

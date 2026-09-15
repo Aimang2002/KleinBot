@@ -68,6 +68,10 @@
         "cache_ttl_seconds": 900,
         "cache_max_entries": 32
     },
+    "perception": {
+        "enabled": false,
+        "observe_groups": []
+    },
     "storage": {
         "conversation_database": "source/.conversations.db",
         "image_assets": "source/image_assets"
