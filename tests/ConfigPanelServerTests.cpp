@@ -1,9 +1,15 @@
 #include <gtest/gtest.h>
 
+#include "../../Library/nlohmann/json.hpp"
+
+using json = nlohmann::json;
+
 #include "Bootstrap/ConfigSnapshotStore.h"
 #include "Configuration/ConfigLoader.h"
 #include "Configuration/ConfigWriter.h"
 #include "ModelRegistry/ModelRegistry.h"
+#include "Network/OneBotApiChannel.h"
+#include "Perception/GroupListService.h"
 #include "WebUI/ConfigPanelServer.h"
 #include "../Library/httplib/httplib.h"
 
@@ -94,11 +100,15 @@ protected:
         settings.bind = "127.0.0.1";
         settings.port = 0;
 
-        server = ConfigPanelServer::buildServer(settings, configPath.string(), *store, *registry);
+        server = ConfigPanelServer::buildServer(settings, configPath.string(), *store,
+                                                *registry, groupsService);
         port = server->bind_to_any_port("127.0.0.1");
         ASSERT_GT(port, 0);
         serverThread = std::make_unique<std::thread>([this]() { server->listen_after_bind(); });
     }
+
+    std::unique_ptr<ModelRegistry> registry;
+    std::unique_ptr<ConfigSnapshotStore> store;
 
     void TearDown() override
     {
@@ -142,12 +152,12 @@ protected:
     std::filesystem::path originalCwd;
     std::filesystem::path configPath;
     std::filesystem::path registryPath;
-    std::unique_ptr<ConfigSnapshotStore> store;
-    std::unique_ptr<ModelRegistry> registry;
     WebUiSettings settings;
     std::unique_ptr<httplib::Server> server;
     std::unique_ptr<std::thread> serverThread;
     int port = 0;
+    GroupListService *groupsService = nullptr;  // 默认空：/api/groups 返回空列表
+    std::unique_ptr<GroupListService> groupsOwner;
 };
 }
 
@@ -701,4 +711,71 @@ TEST_F(PanelServerFixture, PostModelsValidatesVisionCapabilityForms)
     const nlohmann::json body = nlohmann::json::parse(accepted->body);
     ASSERT_FALSE(body["warnings"].empty());
     EXPECT_NE(body["warnings"].dump().find("typo-model"), std::string::npos);
+}
+
+namespace
+{
+class PanelGroupsFakeApiChannel final : public OneBotApiChannel
+{
+public:
+    OneBotApiResult call(const std::string &action, nlohmann::json params,
+                         std::chrono::milliseconds) override
+    {
+        (void)action;
+        (void)params;
+        return result;
+    }
+
+    OneBotApiResult result;
+};
+}
+
+// 群列表选择器数据端点（T7c）：注入服务返回镜像；未注入返回空列表
+TEST_F(PanelServerFixture, GetGroupsReturnsInjectedServiceSnapshot)
+{
+    PanelGroupsFakeApiChannel api;
+    api.result.retcode = 0;
+    api.result.data = nlohmann::json::array({
+        {{"group_id", 8823}, {"group_name", "原神群"}, {"member_count", 420}},
+    });
+    PerceptionOptions options;
+    options.enabled = true;
+    options.observeGroups = {8823};
+    groupsOwner = std::make_unique<GroupListService>(dir.string() + "/conversation.db",
+                                                     api, options);
+    groupsOwner->poll(1000);
+    groupsService = groupsOwner.get();
+    // 重建 server 以携带注入（fixture 的 server 已在 SetUp 起好，此处替换）
+    server->stop();
+    serverThread->join();
+    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store,
+                                            *registry, groupsService);
+    port = server->bind_to_any_port("127.0.0.1");
+    serverThread = std::make_unique<std::thread>([this]() { server->listen_after_bind(); });
+
+    httplib::Client client("127.0.0.1", port);
+    client.set_bearer_token_auth("panel-token");
+    const auto result = client.Get("/api/groups");
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    const json body = json::parse(result->body);
+    ASSERT_TRUE(body.contains("groups"));
+    ASSERT_EQ(body["groups"].size(), 1U);
+    EXPECT_EQ(body["groups"][0]["group_id"], 8823ULL);
+    EXPECT_EQ(body["groups"][0]["group_name"], "原神群");
+    EXPECT_EQ(body["groups"][0]["monitored"], true);
+    EXPECT_NE(std::string(body["groups"][0]["avatar_url"]).find("p.qlogo.cn"),
+              std::string::npos);
+}
+
+TEST_F(PanelServerFixture, GetGroupsWithoutServiceReturnsEmptyList)
+{
+    httplib::Client client("127.0.0.1", port);
+    client.set_bearer_token_auth("panel-token");
+    const auto result = client.Get("/api/groups");
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->status, 200);
+    const json body = json::parse(result->body);
+    EXPECT_TRUE(body["groups"].is_array());
+    EXPECT_TRUE(body["groups"].empty());
 }

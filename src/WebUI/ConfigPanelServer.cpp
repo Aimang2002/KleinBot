@@ -4,6 +4,7 @@
 #include "../Log/Log.h"
 #include "../ModelRegistry/ModelRegistry.h"
 #include "../Network/BearerAuth.h"
+#include "../Perception/GroupListService.h"
 #include "../../Library/httplib/httplib.h"
 
 #include <algorithm>
@@ -247,7 +248,8 @@ std::string resolveProviderApiKey(const json &body, ConfigSnapshotStore &store)
 std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSettings &settings,
                                                                 const std::string &configPath,
                                                                 ConfigSnapshotStore &store,
-                                                                ModelRegistry &models)
+                                                                ModelRegistry &models,
+                                                                GroupListService *groups)
 {
     auto server = std::make_unique<httplib::Server>();
     const std::shared_ptr<ConfigWriter> writer = std::make_shared<ConfigWriter>();
@@ -597,12 +599,31 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
         response.set_content(responseBody.dump(), "application/json");
     });
 
+    // 群列表选择器数据（T7c）：内存镜像快照（群名/人数/头像/monitored 标注）。
+    // 未注入（观察通道关闭）时返回空列表——前端隐藏选择器，保留手动输入
+    server->Get("/api/groups", [groups](const httplib::Request &, httplib::Response &response) {
+        json items = json::array();
+        if (groups != nullptr)
+        {
+            for (const GroupListEntry &entry : groups->snapshot())
+            {
+                items.push_back({{"group_id", entry.groupId},
+                                 {"group_name", entry.name},
+                                 {"member_count", entry.memberCount},
+                                 {"avatar_url", entry.avatarUrl},
+                                 {"monitored", entry.monitored}});
+            }
+        }
+        response.set_content(json({{"groups", std::move(items)}}).dump(),
+                             "application/json");
+    });
+
     return server;
 }
 
 void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
                             ConfigSnapshotStore &store, ModelRegistry &models,
-                            const std::atomic<bool> &running)
+                            GroupListService *groups, const std::atomic<bool> &running)
 {
     // 页面是面板唯一入口：缺失时报错并放弃启动，不起一个只会回 500 的空服务；
     // 运行中文件被删的场景仍由 GET / 的 500 分支兜底
@@ -619,7 +640,8 @@ void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
              std::to_string(settings.port) + "/（访问令牌来自 webui.access_token）");
     while (running.load())
     {
-        std::unique_ptr<httplib::Server> server = buildServer(settings, configPath, store, models);
+        std::unique_ptr<httplib::Server> server =
+            buildServer(settings, configPath, store, models, groups);
         std::atomic<bool> serverActive{true};
         // 看门狗：running 置假后调 stop() 让阻塞中的 listen() 返回
         std::thread watchdog([&running, &serverActive, &server]() {

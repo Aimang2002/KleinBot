@@ -30,6 +30,7 @@
 #include "Perception/PerceptionStore.h"
 #include "Perception/GroupContextStore.h"
 #include "Perception/GroupContextService.h"
+#include "Perception/GroupListService.h"
 #include "MessageSender/QueuedMessageSender.h"
 #include "MessageQueue/OutboundMessageQueue.h"
 #include "Port/OutboundMessage.h"
@@ -132,6 +133,7 @@ bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::millisecon
 void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 				   ReminderService &reminders, CapabilityBroker &capabilities,
 				   PerceptionChannel &perception, GroupContextStore *groupContext,
+				   GroupListService *groupList,
 				   GroupContextService &groupContextService,
 				   uint64_t managerId, const std::atomic<bool> &running)
 {
@@ -184,6 +186,9 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 		// 群内容库 TTL 清理（T7b）：删除 24h 前的消息行（镜像+磁盘）；关闭时无库
 		if (groupContext != nullptr)
 			groupContext->prune(nowSeconds());
+		// 群列表刷新（T7c）：OneBot 就绪后拉取，失败冷却重试；关闭时无服务
+		if (groupList != nullptr)
+			groupList->poll(static_cast<std::int64_t>(now));
 		// 话题状态机 pump（T7b）：时间衰减 + lull 检测，到期群经 evaluator 提交
 		groupContextService.pump(nowSeconds());
 
@@ -476,10 +481,15 @@ int main(int argc, char **argv)
 	// 须在 Message 之前构造：Message 持其指针在 @ 消息上注入话题注记
 	std::unique_ptr<PerceptionStore> perceptionStore;
 	std::unique_ptr<GroupContextStore> groupContextStore;
+	std::unique_ptr<GroupListService> groupListService;
 	if (settings.perception.observing())
 	{
 		perceptionStore = std::make_unique<PerceptionStore>(dbPath);
 		groupContextStore = std::make_unique<GroupContextStore>(dbPath);
+		// 群列表缓存（T7c）：启动即重建镜像，面板白名单选择器数据源；
+		// OneBot 就绪后由 pollingThread 拉取覆写
+		groupListService = std::make_unique<GroupListService>(dbPath, activeApiChannel,
+															  settings.perception);
 		LOG_INFO("观察通道已启用，白名单群 " + std::to_string(settings.perception.observeGroups.size()) +
 				 " 个（群内容短时缓冲：每群300条/24小时）");
 	}
@@ -538,7 +548,7 @@ int main(int argc, char **argv)
 		std::to_string(settings.messageExecution.initialWorkerThreads) +
 		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
 		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), std::ref(groupContextService), settings.bot.managerId, std::cref(running));
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), groupListService.get(), std::ref(groupContextService), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)
@@ -576,7 +586,8 @@ int main(int argc, char **argv)
 	{
 		panelThread = std::thread(
 			ConfigPanelServer::run,
-			settings.webUi, configPath, std::ref(configStore), std::ref(models), std::cref(running));
+			settings.webUi, configPath, std::ref(configStore), std::ref(models),
+			groupListService.get(), std::cref(running));
 	}
 
 	while (running.load())
