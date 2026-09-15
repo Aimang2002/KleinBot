@@ -2,13 +2,12 @@
 #define GROUP_CONTEXT_STORE_H
 
 /*
- * 群聊内容库（T7b，D7 修订版）：白名单群的短时消息原文缓冲。
- * 上限：每群最近 300 条 + 24 小时 TTL（用户定规）；speaker 存加盐
- * 哈希伪名（SpeakerIdentity），昵称随消息快照（摘要可读性需要）；
+ * 群聊内容库（T7b，D7 修订版）：监控群的短时消息原文缓冲。
+ * 上限：每群最近 300 条 + 24 小时 TTL（用户定规）；user_id 存原始 QQ
+ * （用户定规 2026-09-15：不做伪名化），昵称随消息快照（摘要可读性）；
  * 永不进入长期记忆与日志。读路径走内存镜像（每群 deque），SQLite
  * 仅 write-through 落盘供重启恢复；写发生在 worker 观察路径。
  */
-#include "SpeakerIdentity.h"
 
 #include <cstdint>
 #include <deque>
@@ -24,7 +23,7 @@ struct GroupMessageRecord
 {
     std::int64_t seq = 0;            // 全局自增，群内时间序
     std::uint64_t groupId = 0;
-    std::string speakerId;           // 伪名哈希（Klein 自己的出站同样哈希）
+    std::uint64_t userId = 0;        // 原始 QQ（Klein 自己的出站为 bot.id）
     std::string nickname;            // 发言人昵称/名片快照（或 "Klein"）
     std::string text;                // 原文或出站占位符（[图片]/[语音]…）
     std::int64_t timestamp = 0;
@@ -45,11 +44,6 @@ public:
 
     bool isOpen() const { return db != nullptr; }
 
-    std::string speakerHash(std::uint64_t qq) const
-    {
-        return perception::speakerIdOf(salt, qq);
-    }
-
     // 追加一条消息（入站或 Klein 出站），返回 seq；群超上限时淘汰最旧并同步删库
     std::int64_t append(const GroupMessageRecord &record);
 
@@ -61,7 +55,6 @@ public:
 
 private:
     sqlite3 *db = nullptr;
-    std::string salt;
     mutable std::mutex mutex;
     std::map<std::uint64_t, std::deque<GroupMessageRecord>> mirrors;
     std::int64_t nextSeq = 1;

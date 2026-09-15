@@ -40,6 +40,31 @@ GroupContextStore::GroupContextStore(const std::string &dbPath)
     sqlite3_busy_timeout(db, 5000);
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
 
+    // 旧版本以加盐哈希伪名列 speaker_id 存发言人（T7b 的伪名化）——哈希不可逆、
+    // 旧行无法还原为 QQ，且该结构从未发布（用户定规 2026-09-15 改存原始 QQ），
+    // 检测到即整表重建（群内容本身是 24h 短时缓冲，成本可忽略）
+    {
+        sqlite3_stmt *probe = nullptr;
+        bool legacy = false;
+        if (sqlite3_prepare_v2(db, "PRAGMA table_info(group_messages);", -1, &probe,
+                              nullptr) == SQLITE_OK)
+        {
+            while (sqlite3_step(probe) == SQLITE_ROW)
+            {
+                const unsigned char *name = sqlite3_column_text(probe, 1);
+                if (name != nullptr &&
+                    std::string(reinterpret_cast<const char *>(name)) == "speaker_id")
+                    legacy = true;
+            }
+            sqlite3_finalize(probe);
+        }
+        if (legacy)
+        {
+            LOG_WARNING("group_messages 旧伪名化结构已废弃（改存原始 QQ），整表重建");
+            sqlite3_exec(db, "DROP TABLE IF EXISTS group_messages;", nullptr, nullptr, nullptr);
+        }
+    }
+
     const char *ddl =
         "CREATE TABLE IF NOT EXISTS perception_meta ("
         " key TEXT PRIMARY KEY,"
@@ -47,7 +72,7 @@ GroupContextStore::GroupContextStore(const std::string &dbPath)
         "CREATE TABLE IF NOT EXISTS group_messages ("
         " seq INTEGER PRIMARY KEY,"
         " group_id INTEGER NOT NULL,"
-        " speaker_id TEXT NOT NULL,"
+        " user_id INTEGER NOT NULL,"
         " nickname TEXT NOT NULL,"
         " text TEXT NOT NULL,"
         " ts INTEGER NOT NULL,"
@@ -67,12 +92,10 @@ GroupContextStore::GroupContextStore(const std::string &dbPath)
         return;
     }
 
-    salt = perception::loadOrCreateSpeakerSalt(db);
-
     // 冷启动重建镜像：按 seq 升序读回全部存活行，nextSeq 接续
     sqlite3_stmt *statement = nullptr;
     if (sqlite3_prepare_v2(db,
-                           "SELECT seq, group_id, speaker_id, nickname, text, ts,"
+                           "SELECT seq, group_id, user_id, nickname, text, ts,"
                            " mentions_bot, is_self, message_id, reply_to_message_id"
                            " FROM group_messages ORDER BY seq;",
                            -1, &statement, nullptr) == SQLITE_OK)
@@ -82,7 +105,7 @@ GroupContextStore::GroupContextStore(const std::string &dbPath)
             GroupMessageRecord record;
             record.seq = sqlite3_column_int64(statement, 0);
             record.groupId = static_cast<std::uint64_t>(sqlite3_column_int64(statement, 1));
-            record.speakerId = reinterpret_cast<const char *>(sqlite3_column_text(statement, 2));
+            record.userId = static_cast<std::uint64_t>(sqlite3_column_int64(statement, 2));
             record.nickname = reinterpret_cast<const char *>(sqlite3_column_text(statement, 3));
             record.text = reinterpret_cast<const char *>(sqlite3_column_text(statement, 4));
             record.timestamp = sqlite3_column_int64(statement, 5);
@@ -131,14 +154,14 @@ std::int64_t GroupContextStore::append(const GroupMessageRecord &record)
         sqlite3_stmt *statement = nullptr;
         if (sqlite3_prepare_v2(db,
                                "INSERT INTO group_messages"
-                               " (seq, group_id, speaker_id, nickname, text, ts,"
+                               " (seq, group_id, user_id, nickname, text, ts,"
                                "  mentions_bot, is_self, message_id, reply_to_message_id)"
                                " VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10);",
                                -1, &statement, nullptr) == SQLITE_OK)
         {
             sqlite3_bind_int64(statement, 1, seq);
             sqlite3_bind_int64(statement, 2, static_cast<sqlite3_int64>(record.groupId));
-            sqlite3_bind_text(statement, 3, record.speakerId.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(statement, 3, static_cast<sqlite3_int64>(record.userId));
             sqlite3_bind_text(statement, 4, record.nickname.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(statement, 5, record.text.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_int64(statement, 6, record.timestamp);

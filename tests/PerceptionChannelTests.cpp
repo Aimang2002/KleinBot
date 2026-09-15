@@ -96,13 +96,13 @@ std::vector<std::string> readAffinityRows(const std::string &dbPath)
     }
     sqlite3_stmt *statement = nullptr;
     if (sqlite3_prepare_v2(database,
-                           "SELECT speaker_id, group_id, observed_count, interaction_count,"
-                           " last_seen_ts FROM affinity ORDER BY speaker_id;",
+                           "SELECT user_id, group_id, observed_count, interaction_count,"
+                           " last_seen_ts FROM affinity ORDER BY user_id;",
                            -1, &statement, nullptr) == SQLITE_OK)
     {
         while (sqlite3_step(statement) == SQLITE_ROW)
         {
-            rows.push_back(std::string(reinterpret_cast<const char *>(sqlite3_column_text(statement, 0))) + "," +
+            rows.push_back(std::to_string(sqlite3_column_int64(statement, 0)) + "," +
                            std::to_string(sqlite3_column_int64(statement, 1)) + "," +
                            std::to_string(sqlite3_column_int64(statement, 2)) + "," +
                            std::to_string(sqlite3_column_int64(statement, 3)) + "," +
@@ -167,12 +167,8 @@ TEST(PerceptionChannelTest, AffinityAggregatesAndFlushesToStore)
     channel.flushDue(100000);
     const auto rows = readAffinityRows(dbPath);
     ASSERT_EQ(rows.size(), 2U);
-    const std::string speaker10 = store.speakerHash(10);
-    const std::string speaker20 = store.speakerHash(20);
-    EXPECT_EQ(rows[0], (speaker20 < speaker10 ? speaker20 : speaker10) +
-                          ",8823," + (speaker20 < speaker10 ? "1,0,1000" : "2,1,1010"));
-    EXPECT_EQ(rows[1], (speaker20 < speaker10 ? speaker10 : speaker20) +
-                          ",8823," + (speaker20 < speaker10 ? "2,1,1010" : "1,0,1000"));
+    EXPECT_EQ(rows[0], "10,8823,2,1,1010");
+    EXPECT_EQ(rows[1], "20,8823,1,0,1000");
 
     // 节流：间隔不足 30s 且未达 delta 阈值，新计数滞留内存不写库
     channel.observeMessage(groupMessage(10, 8823, "再来一条", 1015));
@@ -183,16 +179,7 @@ TEST(PerceptionChannelTest, AffinityAggregatesAndFlushesToStore)
     channel.flushDue(100031);
     const auto accumulated = readAffinityRows(dbPath);
     ASSERT_EQ(accumulated.size(), 2U);
-    bool speaker10Updated = false;
-    for (const auto &row : accumulated)
-    {
-        if (row.rfind(speaker10 + ",8823,", 0) == 0)
-        {
-            EXPECT_EQ(row, speaker10 + ",8823,3,1,1015");
-            speaker10Updated = true;
-        }
-    }
-    EXPECT_TRUE(speaker10Updated);
+    EXPECT_EQ(accumulated[0], "10,8823,3,1,1015");
 }
 
 TEST(PerceptionChannelTest, WindowEvictsByCount)

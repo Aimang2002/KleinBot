@@ -13,9 +13,8 @@ constexpr std::int64_t kRefreshIntervalSeconds = 24 * 60 * 60;
 // 面板展示的群数上限防御（正常部署远小于此）
 constexpr std::size_t kMaxGroups = 2000;
 
-// perception_meta 键名
+// perception_meta 键名（观察通道运行时状态）
 constexpr const char *kFeatureEnabledKey = "feature_enabled";
-constexpr const char *kSaltKey = "speaker_salt";
 
 std::string columnText(sqlite3_stmt *statement, int column)
 {

@@ -46,7 +46,7 @@ GroupMessageRecord record(std::uint64_t group, std::uint64_t qq, const std::stri
 {
     GroupMessageRecord value;
     value.groupId = group;
-    value.speakerId = "qq-" + std::to_string(qq); // 哈希由调用方负责，测试直接占位
+    value.userId = qq;
     value.nickname = nickname;
     value.text = text;
     value.timestamp = ts;
@@ -125,16 +125,12 @@ TEST(GroupContextStoreTest, RestartRebuildsWithFieldsAndSharesSalt)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
 
-    std::string qq10Hash;
     {
         GroupContextStore store(dbPath);
         ASSERT_TRUE(store.isOpen());
-        qq10Hash = store.speakerHash(10);
-        EXPECT_EQ(qq10Hash.size(), 40U);
-
         GroupMessageRecord inbound;
         inbound.groupId = 8823;
-        inbound.speakerId = qq10Hash;
+        inbound.userId = 10;
         inbound.nickname = "小白";
         inbound.text = "原神深渊打不过";
         inbound.timestamp = 1000;
@@ -148,11 +144,9 @@ TEST(GroupContextStoreTest, RestartRebuildsWithFieldsAndSharesSalt)
     {
         GroupContextStore store(dbPath);
         ASSERT_TRUE(store.isOpen());
-        EXPECT_EQ(store.speakerHash(10), qq10Hash) << "与 PerceptionStore 同盐同值";
-
         auto rebuilt = store.snapshot(8823);
         ASSERT_EQ(rebuilt.size(), 2U);
-        EXPECT_EQ(rebuilt[0].speakerId, qq10Hash);
+        EXPECT_EQ(rebuilt[0].userId, 10U) << "user_id 即原始 QQ（不伪名化）";
         EXPECT_EQ(rebuilt[0].nickname, "小白");
         EXPECT_EQ(rebuilt[0].text, "原神深渊打不过");
         EXPECT_TRUE(rebuilt[0].mentionsBot);

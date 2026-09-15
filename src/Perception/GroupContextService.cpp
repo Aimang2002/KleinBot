@@ -74,7 +74,7 @@ void GroupContextService::observe(const InboundMessage &message)
 
     GroupMessageRecord record;
     record.groupId = message.group_id;
-    record.speakerId = store->speakerHash(message.user_id);
+    record.userId = message.user_id;
     record.nickname = message.card.empty() ? message.nickname : message.card;
     record.text = message.plain_text.empty() ? "[图片]" : message.plain_text;
     if (!message.message_data_url.empty())
@@ -130,7 +130,7 @@ void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMe
 
     GroupMessageRecord record;
     record.groupId = groupId;
-    record.speakerId = store->speakerHash(bot.id);
+    record.userId = bot.id;
     record.nickname = bot.name;
     if (const auto *text = std::get_if<TextMessage>(&outbound))
         record.text = text->content;

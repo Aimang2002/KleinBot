@@ -537,14 +537,14 @@ std::vector<std::string> readAffinityRows(const std::string &dbPath)
         return rows;
     }
     const char *query =
-        "SELECT speaker_id, group_id, observed_count, interaction_count, last_seen_ts"
-        " FROM affinity ORDER BY speaker_id;";
+        "SELECT user_id, group_id, observed_count, interaction_count, last_seen_ts"
+        " FROM affinity ORDER BY user_id;";
     sqlite3_stmt *statement = nullptr;
     if (sqlite3_prepare_v2(database, query, -1, &statement, nullptr) == SQLITE_OK)
     {
         while (sqlite3_step(statement) == SQLITE_ROW)
         {
-            rows.push_back(std::string(reinterpret_cast<const char *>(sqlite3_column_text(statement, 0))) + "," +
+            rows.push_back(std::to_string(sqlite3_column_int64(statement, 0)) + "," +
                            std::to_string(sqlite3_column_int64(statement, 1)) + "," +
                            std::to_string(sqlite3_column_int64(statement, 2)) + "," +
                            std::to_string(sqlite3_column_int64(statement, 3)) + "," +
@@ -587,16 +587,9 @@ TEST(PerceptionStoreIntegrationTest, AffinityUpsertAccumulatesAcrossFlushes)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
 
-    std::string speaker10;
-    std::string speaker20;
     {
         PerceptionStore store(dbPath);
         ASSERT_TRUE(store.isOpen());
-        speaker10 = store.speakerHash(10);
-        speaker20 = store.speakerHash(20);
-        EXPECT_NE(speaker10, speaker20);
-        EXPECT_EQ(speaker10.size(), 40U) << "HMAC-SHA1 → 40 位十六进制";
-
         store.upsertBatch({
             {10, 8823, 5, 1, 1000},
             {20, 8823, 2, 0, 1001},
@@ -607,11 +600,10 @@ TEST(PerceptionStoreIntegrationTest, AffinityUpsertAccumulatesAcrossFlushes)
         });
     }
 
-    // 对象销毁重开：验证持久化而非内存态；盐也持久化——哈希跨实例稳定
+    // 对象销毁重开：验证持久化而非内存态
     {
         PerceptionStore store(dbPath);
         ASSERT_TRUE(store.isOpen());
-        EXPECT_EQ(store.speakerHash(10), speaker10) << "盐持久化，伪名化确定性";
         store.upsertBatch({
             {10, 8823, 1, 1, 3000},
         });
@@ -619,28 +611,13 @@ TEST(PerceptionStoreIntegrationTest, AffinityUpsertAccumulatesAcrossFlushes)
 
     const auto rows = readAffinityRows(dbPath);
     ASSERT_EQ(rows.size(), 2U);
-    // 哈希排序随机：按前缀定位而非位置假设
-    bool foundSpeaker10 = false;
-    bool foundSpeaker20 = false;
-    for (const auto &row : rows)
-    {
-        if (row.rfind(speaker10 + ",8823,", 0) == 0)
-        {
-            EXPECT_EQ(row, speaker10 + ",8823,9,4,3000");
-            foundSpeaker10 = true;
-        }
-        else if (row.rfind(speaker20 + ",8823,", 0) == 0)
-        {
-            EXPECT_EQ(row, speaker20 + ",8823,2,0,1001");
-            foundSpeaker20 = true;
-        }
-    }
-    EXPECT_TRUE(foundSpeaker10);
-    EXPECT_TRUE(foundSpeaker20);
+    EXPECT_EQ(rows[0], "10,8823,9,4,3000");
+    EXPECT_EQ(rows[1], "20,8823,2,0,1001");
 
+    // 用户定规 2026-09-15：不做伪名化，user_id 即原始 QQ
     const auto columns = readAffinityColumns(dbPath);
     EXPECT_EQ(columns,
-              (std::vector<std::string>{"speaker_id", "group_id", "observed_count",
+              (std::vector<std::string>{"user_id", "group_id", "observed_count",
                                         "interaction_count", "last_seen_ts"}))
-        << "affinity 表不允许出现明文 QQ 列";
+        << "affinity 存原始 QQ 号（整型列）";
 }
