@@ -779,3 +779,28 @@ TEST_F(PanelServerFixture, GetGroupsWithoutServiceReturnsEmptyList)
     EXPECT_TRUE(body["groups"].is_array());
     EXPECT_TRUE(body["groups"].empty());
 }
+
+// perception 配置往返：observe_groups 数组与 enabled 经 GET/POST 保存正确落盘
+// （前端标签输入的收集契约等价于直接 POST 该结构）
+TEST_F(PanelServerFixture, PostPerceptionWhitelistRoundtripPersistsArray)
+{
+    httplib::Client client("127.0.0.1", port);
+    const auto fetched = client.Get("/api/config", authHeaders());
+    ASSERT_TRUE(fetched != nullptr);
+    ASSERT_EQ(fetched->status, 200);
+
+    nlohmann::json candidate = nlohmann::json::parse(fetched->body);
+    candidate["perception"] = {{"enabled", true},
+                               {"observe_groups", nlohmann::json::array({8823, 9001})}};
+    const auto posted = client.Post("/api/config", authHeaders(),
+                                    candidate.dump(), "application/json");
+    ASSERT_TRUE(posted != nullptr);
+    ASSERT_EQ(posted->status, 200);
+
+    const nlohmann::json written = nlohmann::json::parse(readFile());
+    ASSERT_TRUE(written.contains("perception"));
+    EXPECT_EQ(written["perception"]["enabled"], true);
+    ASSERT_EQ(written["perception"]["observe_groups"].size(), 2U);
+    EXPECT_EQ(written["perception"]["observe_groups"][0], 8823ULL);
+    EXPECT_EQ(written["perception"]["observe_groups"][1], 9001ULL);
+}
