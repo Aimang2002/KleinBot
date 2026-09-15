@@ -2,6 +2,7 @@
 
 #include "Perception/GroupContextStore.h"
 #include "Perception/GroupContextService.h"
+#include "Perception/GroupListService.h"
 #include "Perception/TopicTracker.h"
 #include "Port/InboundMessage.h"
 #include "Port/MessageSenderPort.h"
@@ -9,6 +10,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -166,12 +168,27 @@ TEST(GroupContextStoreTest, RestartRebuildsWithFieldsAndSharesSalt)
 
 namespace
 {
-PerceptionOptions contextOptions()
+// 观察状态的最小假通道：仅满足构造，测试不触发任何协议调用
+class NoopApiChannel final : public OneBotApiChannel
 {
-    PerceptionOptions options;
-    options.enabled = true;
-    options.observeGroups = {8823};
-    return options;
+public:
+    OneBotApiResult call(const std::string &, nlohmann::json, std::chrono::milliseconds) override
+    {
+        return {};
+    }
+};
+
+// 观察状态服务（总开关 + 监控群集入库）：默认让 8823 处于监控中
+std::unique_ptr<GroupListService> observingState(const std::string &dbPath,
+                                                 bool enabled = true,
+                                                 std::uint64_t groupId = 8823)
+{
+    static NoopApiChannel api;
+    auto state = std::make_unique<GroupListService>(dbPath, api);
+    state->setFeatureEnabled(enabled);
+    if (enabled && groupId != 0)
+        state->setMonitored(groupId, true);
+    return state;
 }
 
 BotIdentity testBot()
@@ -210,7 +227,8 @@ TEST(GroupContextServiceTest, AssembleSeparatesParallelTopicsByRelevance)
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(contextOptions(), testBot(), &store);
+    auto state = observingState(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(state.get(), testBot(), &store);
 
     // 话题 A：原神剧情（A/B/C/E）
     for (int index = 0; index < 6; ++index)
@@ -242,7 +260,8 @@ TEST(GroupContextServiceTest, AssembleAlwaysIncludesWatermarkAndMailbox)
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(contextOptions(), testBot(), &store);
+    auto state = observingState(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(state.get(), testBot(), &store);
 
     service.observe(chat(10, "甲", "原神深渊十二层阵容讨论", 1000));
     service.observe(chat(20, "乙", "完全无关的天气闲聊", 1100));
@@ -267,7 +286,8 @@ TEST(GroupContextServiceTest, OutboundRecordedAndAlwaysIncluded)
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(contextOptions(), testBot(), &store);
+    auto state = observingState(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(state.get(), testBot(), &store);
 
     service.observe(chat(10, "甲", "原神抽卡保底歪了", 1000));
     service.recordOutbound(8823, TextMessage{"哎呀歪了呀，下一个up值得等"}); // 时间戳取 now
@@ -285,17 +305,22 @@ TEST(GroupContextServiceTest, EmptyTriggerYieldsEmptyAssembly)
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(contextOptions(), testBot(), &store);
+    auto state = observingState(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(state.get(), testBot(), &store);
 
     service.observe(chat(10, "甲", "原神深渊阵容", 1000));
     EXPECT_TRUE(service.assemble(8823, "").empty());
     // 纯标点触发：无实词但仍带水位线上下文（比关键词注记更有用）
     EXPECT_FALSE(service.assemble(8823, "？？！！！").empty());
 
-    // 关闭/非白名单：一律空
-    PerceptionOptions off;
-    GroupContextService closed(off, testBot(), &store);
-    EXPECT_TRUE(closed.assemble(8823, "原神深渊阵容").empty());
+    // 总开关关闭 / 该群未监控：一律空（状态实时查询，无需重启）
+    auto disabledState = observingState(temporaryDirectory.path() + "/disabled.db", false);
+    GroupContextService disabled(disabledState.get(), testBot(), &store);
+    EXPECT_TRUE(disabled.assemble(8823, "原神深渊阵容").empty());
+
+    auto otherGroupState = observingState(temporaryDirectory.path() + "/other.db", true, 9999);
+    GroupContextService otherGroup(otherGroupState.get(), testBot(), &store);
+    EXPECT_TRUE(otherGroup.assemble(8823, "原神深渊阵容").empty());
 }
 
 // 摘要层：材料超直灌门槛时走 summarizer seam；失败退回截断原文
@@ -304,7 +329,8 @@ TEST(GroupContextServiceTest, LargeMaterialGoesThroughSummarizer)
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(contextOptions(), testBot(), &store);
+    auto state = observingState(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(state.get(), testBot(), &store);
 
     std::string filler(600, 'x');
     for (int index = 0; index < 10; ++index)
@@ -432,7 +458,8 @@ TEST(GroupContextServiceTest, JoinSignalSpeaksOpensSlotAndDelivers)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
     RecordingSender sender;
-    GroupContextService service(contextOptions(), testBot(), &store, &sender);
+    auto state = observingState(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(state.get(), testBot(), &store, &sender);
 
     std::vector<std::uint64_t> evaluated;
     std::vector<std::string> prompts;
@@ -478,7 +505,8 @@ TEST(GroupContextServiceTest, JoinDeclinedLeavesNoSlotAndNoDelivery)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
     RecordingSender sender;
-    GroupContextService service(contextOptions(), testBot(), &store, &sender);
+    auto state = observingState(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(state.get(), testBot(), &store, &sender);
     service.setEvaluator([&](std::uint64_t groupId) { service.evaluateGroup(groupId); });
     service.setResponder([](const std::string &) { return "[不回应]"; });
 

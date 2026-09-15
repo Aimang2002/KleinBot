@@ -330,10 +330,6 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
         }
 
         const ConfigReloadResult reload = store.reload();
-        // 观察白名单落库（T7c）：保存后把 group_cache.monitored 同步为 0/1，
-        // 与 .config.json 一致；实际观察生效仍需重启（Rebuild 级）
-        if (groups != nullptr && reload.success && reload.snapshot != nullptr)
-            groups->applyWhitelist(reload.snapshot->runtime.perception.observeGroups);
         const json body = {{"diff", diffToArray(reload.diff)},
                            {"counts", {{"dynamic", reload.diff.count(ConfigChangeImpact::Dynamic)},
                                        {"rebuild", reload.diff.count(ConfigChangeImpact::Rebuild)},
@@ -603,12 +599,14 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
         response.set_content(responseBody.dump(), "application/json");
     });
 
-    // 群列表选择器数据（T7c）：内存镜像快照（群名/人数/头像/monitored 标注）。
-    // 未注入（观察通道关闭）时返回空列表——前端隐藏选择器，保留手动输入
+    // 观察通道面板数据：总开关 + 群列表（含 monitored 标注）。
+    // 全部读自数据库（唯一真值），未注入服务时返回空列表+关闭态
     server->Get("/api/groups", [groups](const httplib::Request &, httplib::Response &response) {
         json items = json::array();
+        bool enabled = false;
         if (groups != nullptr)
         {
+            enabled = groups->featureEnabled();
             for (const GroupListEntry &entry : groups->snapshot())
             {
                 items.push_back({{"group_id", entry.groupId},
@@ -618,7 +616,94 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
                                  {"monitored", entry.monitored}});
             }
         }
-        response.set_content(json({{"groups", std::move(items)}}).dump(),
+        response.set_content(json({{"enabled", enabled}, {"groups", std::move(items)}}).dump(),
+                             "application/json");
+    });
+
+    // 总开关（即时生效，落库；无需重启）
+    server->Post("/api/perception/enabled", [groups](const httplib::Request &request,
+                                                     httplib::Response &response) {
+        if (groups == nullptr)
+        {
+            response.status = 503;
+            response.set_content(json({{"error", "观察状态服务不可用（数据库未打开）"}}).dump(),
+                                 "application/json");
+            return;
+        }
+        json body;
+        try
+        {
+            body = json::parse(request.body);
+        }
+        catch (const std::exception &error)
+        {
+            response.status = 400;
+            response.set_content(
+                json({{"error", std::string("请求体不是有效 JSON：") + error.what()}}).dump(),
+                "application/json");
+            return;
+        }
+        if (!body.is_object() || !body.contains("enabled") || !body["enabled"].is_boolean())
+        {
+            response.status = 400;
+            response.set_content(json({{"error", "缺少布尔字段 enabled"}}).dump(),
+                                 "application/json");
+            return;
+        }
+        const bool enabled = body["enabled"].get<bool>();
+        if (!groups->setFeatureEnabled(enabled))
+        {
+            response.status = 500;
+            response.set_content(json({{"error", "写入数据库失败"}}).dump(),
+                                 "application/json");
+            return;
+        }
+        response.set_content(json({{"enabled", enabled}}).dump(), "application/json");
+    });
+
+    // 单群监控开关（即时生效，落库；无需重启）
+    server->Post("/api/perception/monitored", [groups](const httplib::Request &request,
+                                                       httplib::Response &response) {
+        if (groups == nullptr)
+        {
+            response.status = 503;
+            response.set_content(json({{"error", "观察状态服务不可用（数据库未打开）"}}).dump(),
+                                 "application/json");
+            return;
+        }
+        json body;
+        try
+        {
+            body = json::parse(request.body);
+        }
+        catch (const std::exception &error)
+        {
+            response.status = 400;
+            response.set_content(
+                json({{"error", std::string("请求体不是有效 JSON：") + error.what()}}).dump(),
+                "application/json");
+            return;
+        }
+        if (!body.is_object() || !body.contains("group_id") ||
+            !body["group_id"].is_number_unsigned() || !body.contains("monitored") ||
+            !body["monitored"].is_boolean())
+        {
+            response.status = 400;
+            response.set_content(
+                json({{"error", "需要 group_id（非负整数）与 monitored（布尔）"}}).dump(),
+                "application/json");
+            return;
+        }
+        const std::uint64_t groupId = body["group_id"].get<std::uint64_t>();
+        const bool monitored = body["monitored"].get<bool>();
+        if (groupId == 0 || !groups->setMonitored(groupId, monitored))
+        {
+            response.status = 400;
+            response.set_content(json({{"error", "群号非法或写入数据库失败"}}).dump(),
+                                 "application/json");
+            return;
+        }
+        response.set_content(json({{"group_id", groupId}, {"monitored", monitored}}).dump(),
                              "application/json");
     });
 

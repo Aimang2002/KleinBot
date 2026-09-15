@@ -83,12 +83,9 @@ TEST(ConfigTemplateTest, CreateIfMissingGeneratesLoadableConfig)
     const nlohmann::json document = nlohmann::json::parse(file.read());
     EXPECT_EQ(document["webui"]["access_token"],
               nlohmann::json({{"literal", token}}));
-    // 观察通道节进骨架：键名可见、默认关闭且白名单为空（面板白名单选择器的挂载点）
-    ASSERT_TRUE(document.contains("perception"));
-    EXPECT_EQ(document["perception"]["enabled"], false);
-    EXPECT_TRUE(document["perception"]["observe_groups"].is_array());
-    EXPECT_TRUE(document["perception"]["observe_groups"].empty());
-    EXPECT_FALSE(loaded.config->perception.enabled);
+    // 观察通道不进配置骨架（用户定规 2026-09-15）：开关与监控群集是运行时
+    // 状态，由数据库独占管理，配置体系不再有 perception 节
+    EXPECT_FALSE(document.contains("perception"));
 
 #if !defined(_WIN32)
     using std::filesystem::perms;

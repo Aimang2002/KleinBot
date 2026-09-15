@@ -54,21 +54,23 @@ std::vector<std::int64_t> parseSeqHeader(const std::string &header)
 }
 }
 
-GroupContextService::GroupContextService(PerceptionOptions options, BotIdentity bot,
+GroupContextService::GroupContextService(GroupListService *state, BotIdentity bot,
                                          GroupContextStore *store, MessageSenderPort *sender)
-    : options(options), bot(bot), store(store), sender(sender),
-      whitelist(options.observeGroups.begin(), options.observeGroups.end()),
+    : state(state), bot(bot), store(store), sender(sender),
       tracker([] { return static_cast<std::int64_t>(std::time(nullptr)); })
 {
 }
 
+bool GroupContextService::observingGroup(std::uint64_t groupId) const
+{
+    return state != nullptr && state->featureEnabled() && state->isMonitored(groupId);
+}
+
 void GroupContextService::observe(const InboundMessage &message)
 {
-    if (!options.observing() || message.message_type != "group" ||
-        whitelist.find(message.group_id) == whitelist.end() || store == nullptr)
-    {
+    if (message.message_type != "group" || !observingGroup(message.group_id) ||
+        store == nullptr)
         return;
-    }
 
     GroupMessageRecord record;
     record.groupId = message.group_id;
@@ -123,11 +125,8 @@ void GroupContextService::observe(const InboundMessage &message)
 
 void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMessage &outbound)
 {
-    if (!options.observing() || whitelist.find(groupId) == whitelist.end() ||
-        store == nullptr)
-    {
+    if (!observingGroup(groupId) || store == nullptr)
         return;
-    }
 
     GroupMessageRecord record;
     record.groupId = groupId;
@@ -150,7 +149,7 @@ void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMe
 
 void GroupContextService::onAtTriggered(std::uint64_t groupId, const std::string &triggerText)
 {
-    if (!options.observing() || whitelist.find(groupId) == whitelist.end())
+    if (!observingGroup(groupId))
         return;
 
     // anchor 上下文：触发句相关的近期文本（快速选择，top8）
@@ -190,7 +189,7 @@ void GroupContextService::onSuppressed(std::uint64_t groupId)
 
 void GroupContextService::pump(std::int64_t now)
 {
-    if (!options.observing() || evaluator == nullptr)
+    if (state == nullptr || !state->featureEnabled() || evaluator == nullptr)
         return;
     for (std::uint64_t groupId : tracker.pump(now))
         evaluator(groupId);
@@ -198,11 +197,8 @@ void GroupContextService::pump(std::int64_t now)
 
 void GroupContextService::evaluateGroup(std::uint64_t groupId)
 {
-    if (!options.observing() || whitelist.find(groupId) == whitelist.end() ||
-        store == nullptr || responder == nullptr)
-    {
+    if (!observingGroup(groupId) || store == nullptr || responder == nullptr)
         return;
-    }
     const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
 
     // 路径一：在跟槽位到期（lull）——槽位成员消息作材料
@@ -274,11 +270,8 @@ void GroupContextService::deliverGroupText(std::uint64_t groupId, const std::str
 std::string GroupContextService::assemble(std::uint64_t groupId,
                                            const std::string &triggerText) const
 {
-    if (!options.observing() || whitelist.find(groupId) == whitelist.end() ||
-        store == nullptr)
-    {
+    if (!observingGroup(groupId) || store == nullptr)
         return {};
-    }
 
     const std::vector<GroupMessageRecord> messages = store->snapshot(groupId);
     if (messages.empty())

@@ -2,23 +2,20 @@
 #define GROUP_LIST_SERVICE_H
 
 /*
- * 群列表缓存服务（T7c）：get_group_list 的本地缓存 + 内存镜像，
- * 供 WebUI 白名单选择器展示群名称/人数/头像/是否监控。
+ * 观察通道状态与群列表的唯一所有者（用户定规 2026-09-15：群号相关操作
+ * 一律入库，不进配置文件）。
  *
- * 生命周期：启动即从 group_cache 表建镜像（OneBot 未握手也有数据）；
- * OneBot 就绪后（组合根在 CapabilityBroker 探测完成后调 refresh）经
- * get_group_list 拉取，成功整表覆写并同步镜像，失败保留旧缓存按
- * 冷却重试（同能力探测的 polling 模式）。纯缓存非用户数据——换机器人
- * 后旧群自然被覆写，消失的群在刷新时清除。
+ * 数据库是唯一真值来源：
+ *   - perception_meta.feature_enabled  → 观察通道总开关（0/1）
+ *   - group_cache.monitored            → 每群是否监控（0/1，1=开启）
+ * 配置体系不再有 perception 节；面板改动直接落库并**即时生效**，无需重启。
  *
- * monitored 标记是白名单选择器的持久勾选状态（用户定规：入库字段）：
- * 前端勾选/取消只改这一列，perception.observe_groups 的配置真值仍由
- * 面板保存流程写 .config.json——两者经 GET /api/groups 对齐展示。
+ * 群列表只是状态服务的附属缓存：启动即从 group_cache 重建镜像（OneBot 未
+ * 握手也有数据），就绪后 get_group_list 整表覆写并降频为日级刷新。
  */
-#include "PerceptionOptions.h"
+
 #include "../Network/OneBotApiChannel.h"
 
-#include <algorithm>
 #include <cstdint>
 #include <ctime>
 #include <mutex>
@@ -41,8 +38,7 @@ struct GroupListEntry
 class GroupListService
 {
 public:
-    GroupListService(const std::string &dbPath, OneBotApiChannel &api,
-                     const PerceptionOptions &options);
+    GroupListService(const std::string &dbPath, OneBotApiChannel &api);
 
     ~GroupListService();
 
@@ -51,34 +47,43 @@ public:
 
     bool isOpen() const { return db != nullptr; }
 
-    // 面板读路径：内存镜像快照（monitored 与当前配置白名单对齐标注）
+    // ---- 观察通道运行状态（DB 为唯一真值；读取即当前生效值）----
+
+    // 总开关：关闭时所有观察入口 no-op（群列表缓存与面板选择器不受影响）
+    bool featureEnabled() const;
+    bool setFeatureEnabled(bool enabled);
+
+    // 单群监控状态：1=开启。未在群列表中的群号也会落一行（元数据为空），
+    // 使手动输入的群号同样可被监控
+    bool isMonitored(std::uint64_t groupId) const;
+    bool setMonitored(std::uint64_t groupId, bool monitored);
+
+    std::size_t monitoredCount() const;
+    std::vector<std::uint64_t> monitoredGroups() const;
+
+    // 面板读路径：镜像快照（monitored 取自库），按人数降序
     std::vector<GroupListEntry> snapshot() const;
 
     // pollingThread：未就绪时尝试刷新（失败/未连接按冷却静默重试）
     void poll(std::int64_t now);
 
-    // 白名单落库（用户定规：monitored 0/1，1=开启监控）：
-    // 把观察白名单同步进 group_cache.monitored——配置仍是唯一真值来源
-    // （.config.json），本列是它的落盘副本，供直接查库与审计。
-    // 启动时与面板保存配置后各调一次；不在机器人群列表里的白名单群号
-    // 无行可写（只影响落盘副本，不影响实际观察）。
-    void applyWhitelist(const std::vector<std::uint64_t> &observeGroups);
-
-    // 配置变化入口（组合根/面板调用）：等价于 applyWhitelist + 记住新选项
-    void onOptionsChanged(const PerceptionOptions &options);
-
 private:
+    void loadStateFromDisk();
     void rebuildMirrorFromDisk();
     void applyFetchedList(const std::vector<GroupListEntry> &fetched, std::int64_t now);
+    void persistEnabledUnderLock();
     void persistMonitoredUnderLock();
+    bool writeMeta(const std::string &key, const std::string &value);
+    std::string readMeta(const std::string &key) const;
     static std::string avatarUrlFor(std::uint64_t groupId);
 
     sqlite3 *db = nullptr;
     OneBotApiChannel &api;
-    PerceptionOptions options; // mutex_ 下读写
     mutable std::mutex mutex_;
     std::vector<GroupListEntry> mirror_;
-    bool ready_ = false;      // get_group_list 首次成功
+    bool enabled_ = false;              // mutex_ 保护
+    std::set<std::uint64_t> monitored_; // mutex_ 保护：监控中的群号集合
+    bool ready_ = false;                // get_group_list 首次成功
     std::int64_t nextAttemptTs_ = 0;
 };
 

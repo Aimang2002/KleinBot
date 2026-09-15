@@ -8,7 +8,7 @@
  * 任何成员结构、任何落库字段都不保留原文。
  * observe* 在 worker 线程调用、flushDue 在 pollingThread 调用，内部 mutex 保护。
  */
-#include "PerceptionOptions.h"
+#include "GroupListService.h"
 #include "PerceptionStore.h"
 #include "../Port/InboundMessage.h"
 
@@ -25,8 +25,9 @@
 class PerceptionChannel
 {
 public:
-    // store 允许为空：功能关闭时组合根不建库，所有入口一律 no-op
-    PerceptionChannel(PerceptionOptions options, PerceptionStore *store = nullptr);
+    // state：观察状态（总开关 + 监控群集）唯一真值来源，逐步查询以支持即时生效；
+    // store 允许为空：无库时所有入口一律 no-op
+    PerceptionChannel(GroupListService *state, PerceptionStore *store = nullptr);
 
     // 非 @ 群消息（workingThread 过滤失败路径）
     void observeMessage(const InboundMessage &message);
@@ -43,6 +44,8 @@ public:
     std::string topicNoteFor(std::uint64_t groupId) const;
 
 private:
+    // 该群此刻是否在观察（总开关 + 监控集，实时查询以便即时生效）
+    bool observingGroup(std::uint64_t groupId) const;
     struct HeatWindow
     {
         // 每条消息一个 (事件时间, 该消息贡献的 n-gram)；淘汰时按 count 递减
@@ -61,9 +64,8 @@ private:
     void pruneWindow(HeatWindow &window, std::time_t now) const;
     static std::vector<std::string> extractNgrams(const std::string &plainText);
 
-    const PerceptionOptions options;
+    GroupListService *const state;
     PerceptionStore *const store;
-    const std::unordered_set<std::uint64_t> whitelist;
 
     mutable std::mutex mutex;
     std::unordered_map<std::uint64_t, HeatWindow> windows;

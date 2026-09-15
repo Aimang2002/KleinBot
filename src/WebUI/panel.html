@@ -1309,6 +1309,11 @@
         <div class="note" id="registryInfo">正在加载模型注册表……</div>
         <div id="providers"></div>
       </div>
+      <div id="perceptionView" style="display:none">
+        <h2>观察通道</h2>
+        <p class="pane-hint">白名单群的只读观察与话题跟进。总开关与群选择都是<b>运行时状态</b>，改动写入数据库并<b>立即生效</b>，无需保存配置、无需重启。私聊与非监控群完全不被观察。</p>
+        <div id="perceptionBody"></div>
+      </div>
       <footer>保存后立即写盘并刷新内存快照；标注“需重启”的项在机器人重启后生效。密钥字段留空表示保持原值。
         <span class="tagline">KLEIN · MOBIUS LAB TERMINAL</span>
       </footer>
@@ -1338,6 +1343,7 @@
     const API_STANDARDS = ["OpenAI", "Anthropic"];
     const TOKEN_STORAGE = "klein_webui_token";
     const MODELS_KEY = "__models__";
+    const PERCEPTION_KEY = "__perception__";
     let activePane = "";
     let modelsLoaded = false;
     let loadedSchemaVersion; // 原样保留的 schema_version：面板不提供编辑，保存时写回原值
@@ -1368,8 +1374,7 @@
       image_assets: "图片资产目录", proxy: "代理服务器", protocol: "协议",
       active_transport: "连接方式", transports: "传输配置", defaults: "高级参数",
       api: "API 调用", events: "事件接收", secret: "签名密钥", base_url: "Base URL",
-      type: "类型", options: "选项", literal: "字面值", from_env: "环境变量名",
-      observe_groups: "观察白名单"
+      type: "类型", options: "选项", literal: "字面值", from_env: "环境变量名"
     };
     const IMPACT_LABELS = { dynamic: "动态生效", rebuild: "需重建", restart: "需重启" };
 
@@ -1892,6 +1897,20 @@
       return item;
     }
 
+    function perceptionNavItem() {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "nav-item";
+      item.dataset.key = PERCEPTION_KEY;
+      item.innerHTML =
+        '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+        '<g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">' +
+        '<path d="M1.5 8 C3.6 4.6 5.8 3 8 3 C10.2 3 12.4 4.6 14.5 8 C12.4 11.4 10.2 13 8 13 C5.8 13 3.6 11.4 1.5 8 Z"/>' +
+        '<circle cx="8" cy="8" r="2.2"/></g></svg><span>观察通道</span>';
+      item.addEventListener("click", () => selectPane(PERCEPTION_KEY));
+      return item;
+    }
+
     function selectPane(key) {
       activePane = key;
       for (const item of document.querySelectorAll(".nav-item"))
@@ -1899,7 +1918,11 @@
       for (const pane of document.querySelectorAll(".pane"))
         pane.classList.toggle("active", pane.dataset.key === key);
       $("modelsView").style.display = key === MODELS_KEY ? "" : "none";
+      $("perceptionView").style.display = key === PERCEPTION_KEY ? "" : "none";
+      $("save").hidden = key === PERCEPTION_KEY;   // 该页无配置可保存（改动即落库）
+      $("reload").textContent = key === PERCEPTION_KEY ? "刷新状态" : "重新加载";
       if (key === MODELS_KEY && !modelsLoaded) loadModels();
+      if (key === PERCEPTION_KEY) loadPerception();
       $("banner").className = "";
     }
 
@@ -2043,15 +2066,6 @@
           result[pane.dataset.key] = modelFields ? collectFrom(modelFields) : {};
           continue;
         }
-        if (pane.dataset.custom === "perception") {
-          // “观察通道”模块：enabled 走通用收集，observe_groups 从标签区数据取回
-          const inner = collectFrom(pane.querySelector(".fields"));
-          const zone = pane.querySelector(".model-zone");
-          inner.observe_groups = zone && zone.dataset.collected
-            ? JSON.parse(zone.dataset.collected) : [];
-          result[pane.dataset.key] = inner;
-          continue;
-        }
         const inner = collectFrom(pane.querySelector(".fields"));
         if (pane.dataset.mergeInto) {
           // 展示在独立模块、但属于原分组的字段（功能开关 → bot）
@@ -2155,46 +2169,68 @@
       return true;
     }
 
-    // “观察通道”模块（T7c）：observe_groups 从 JSON textarea 升级为群选择
-    // 标签输入；enabled 与白名单的联动因果就地提示（后端白名单空时强制关闭）
-    function buildPerceptionPane(pane, perception) {
-      pane.dataset.custom = "perception";
-      const fields = pane.querySelector(".fields");
+    // “观察通道”独立页（用户定规 2026-09-15：群号相关操作一律入库、不进配置文件）：
+    // 总开关与群监控状态都是运行时状态，改动直接 POST 落库并立即生效，无"保存"语义
+    async function loadPerception() {
+      const body = $("perceptionBody");
+      body.textContent = "";
+      body.appendChild(Object.assign(document.createElement("div"),
+        { className: "note", textContent: "正在读取观察状态……" }));
+      let data;
+      try {
+        const response = await request("/api/groups", { method: "GET" });
+        if (!response.ok) {
+          body.textContent = "";
+          body.appendChild(Object.assign(document.createElement("div"),
+            { className: "note", textContent: "读取失败：HTTP " + response.status }));
+          return;
+        }
+        data = await response.json();
+      } catch (error) {
+        body.textContent = "";
+        body.appendChild(Object.assign(document.createElement("div"),
+          { className: "note", textContent: "无法连接面板服务：" + error.message }));
+        return;
+      }
+      const groups = Array.isArray(data.groups) ? data.groups : [];
+      let enabled = data.enabled === true;
+      let monitored = groups.filter((g) => g.monitored).map((g) => String(g.group_id));
+      body.textContent = "";
 
-      // enabled 行（普通 checkbox，随通用收集写回 perception.enabled）
-      const enabledRow = rowFor("perception.enabled", KEY_LABELS.enabled || "启用",
-                                "总开关；白名单为空时即使勾选也不会观察任何群。");
-      const enabledInput = document.createElement("input");
-      enabledInput.type = "checkbox";
-      enabledInput.checked = perception.enabled === true;
-      enabledInput.dataset.kind = "bool";
-      enabledInput.dataset.path = "perception.enabled";
-      enabledRow.appendChild(enabledInput);
-      fields.appendChild(enabledRow);
+      const statusLine = document.createElement("div");
+      statusLine.className = "note";
 
-      // 白名单标签区
-      const row = rowFor("perception.observe_groups", KEY_LABELS.observe_groups || "观察白名单",
-                         "从机器人所在的群里勾选要观察的群；机器人离线时用手动输入群号兜底。");
+      // 总开关：切换即落库生效
+      const switchRow = document.createElement("div");
+      switchRow.className = "row";
+      const switchLabel = document.createElement("label");
+      switchLabel.textContent = "启用观察通道";
+      switchLabel.dataset.hint = "关闭时所有观察入口立即停用（群列表与下方勾选保留）；开启后按勾选的群观察。";
+      const switchInput = document.createElement("input");
+      switchInput.type = "checkbox";
+      switchInput.checked = enabled;
+      switchRow.appendChild(switchLabel);
+      switchRow.appendChild(switchInput);
+      body.appendChild(switchRow);
+
+      // 群勾选区（chips + 浮层选择，交互与模型供应商页一致）
       const zone = document.createElement("div");
       zone.className = "model-zone";
-
       const chips = document.createElement("div");
       chips.className = "model-chips";
-      const noteLine = document.createElement("span");
-      noteLine.className = "model-note";
-
       const actions = document.createElement("div");
       actions.className = "model-actions";
       const pickButton = document.createElement("button");
       pickButton.type = "button";
       pickButton.className = "mini-btn";
-      pickButton.textContent = "⊕ 从群列表选择";
-      pickButton.title = "从机器人已拉取的群列表中勾选（启动并连上 OneBot 后自动刷新）";
+      pickButton.textContent = "⊕ 选择要观察的群";
       const manualToggle = document.createElement("button");
       manualToggle.type = "button";
       manualToggle.className = "mini-btn";
-      manualToggle.textContent = "+ 手动输入群号";
-      actions.append(pickButton, manualToggle, noteLine);
+    manualToggle.textContent = "+ 手动输入群号";
+      const panelNote = document.createElement("span");
+      panelNote.className = "model-note";
+      actions.append(pickButton, manualToggle, panelNote);
 
       const manual = document.createElement("div");
       manual.className = "model-manual";
@@ -2217,42 +2253,66 @@
       const pickList = document.createElement("div");
       pickList.className = "model-pick-list";
       picker.append(search, pickList);
-
       zone.append(chips, actions, manual, picker);
-      row.appendChild(zone);
-      fields.appendChild(row);
+      body.appendChild(zone);
+      body.appendChild(statusLine);
 
-      let groupIds = Array.isArray(perception.observe_groups)
-        ? perception.observe_groups.map((id) => String(id))
-        : [];
-      let groupCatalog = []; // GET /api/groups 的镜像：{group_id, group_name, member_count, avatar_url, monitored}
-
-      function syncCollected() {
-        // 收集契约：data-path + kind=json，collectFrom 走 JSON.parse 分支
-        zone.dataset.collected = JSON.stringify(groupIds.map((id) => Number(id)));
-        enabledInput.dispatchEvent(new CustomEvent("perception-linkage"));
+      async function post(path, payload) {
+        try {
+          const response = await request(path, { method: "POST", body: JSON.stringify(payload) });
+          if (!response.ok) {
+            const detail = await response.json().catch(() => ({}));
+            panelNote.textContent = "操作失败：" + (detail.error || ("HTTP " + response.status));
+            return false;
+          }
+          panelNote.textContent = "";
+          return true;
+        } catch (error) {
+          panelNote.textContent = "操作失败：" + error.message;
+          return false;
+        }
       }
+
+      async function toggleGroup(groupId, next) {
+        if (!await post("/api/perception/monitored", { group_id: Number(groupId), monitored: next }))
+          return;
+        monitored = next ? monitored.concat([String(groupId)])
+                         : monitored.filter((id) => id !== String(groupId));
+        renderChips();
+        renderPicker(search.value);
+        syncStatus();
+      }
+
+      function syncStatus() {
+        statusLine.textContent = monitored.length
+          ? (enabled ? "正在观察 " + monitored.length + " 个群。"
+                     : "已勾选 " + monitored.length + " 个群，但总开关关闭——开启后才会观察。")
+          : "尚未选择任何群：观察通道不会处理任何消息。";
+        panelNote.textContent = "";
+      }
+
+      function groupInfo(groupId) {
+        return groups.find((g) => String(g.group_id) === String(groupId)) || null;
+      }
+
       function renderChips() {
         chips.textContent = "";
-        if (!groupIds.length) {
+        if (!monitored.length) {
           const empty = document.createElement("span");
           empty.className = "chip chip-empty";
-          empty.textContent = groupCatalog.length
-            ? "尚未选择任何群" : "群列表为空：机器人离线或未拉取，可手动输入群号";
+          empty.textContent = groups.length ? "尚未选择任何群" : "群列表为空：机器人离线或尚未拉取，可手动输入群号";
           chips.appendChild(empty);
         }
-        for (const id of groupIds) {
-          const info = groupCatalog.find((g) => String(g.group_id) === id);
+        for (const id of monitored) {
+          const info = groupInfo(id);
           const chip = document.createElement("span");
           chip.className = "chip";
-          if (info && info.avatar_url) {
-            const avatar = document.createElement("img");
-            avatar.className = "chip-avatar";
-            avatar.src = info.avatar_url;
-            avatar.alt = "";
-            avatar.referrerPolicy = "no-referrer";
-            chip.appendChild(avatar);
-          }
+          const avatar = document.createElement("img");
+          avatar.className = "chip-avatar";
+          avatar.src = info ? info.avatar_url : "";
+          avatar.alt = "";
+          avatar.referrerPolicy = "no-referrer";
+          chip.appendChild(avatar);
           const text = document.createElement("span");
           text.textContent = info && info.group_name ? info.group_name + " (" + id + ")" : id;
           chip.appendChild(text);
@@ -2260,56 +2320,37 @@
           removeChip.type = "button";
           removeChip.className = "chip-x";
           removeChip.textContent = "✕";
-          removeChip.setAttribute("aria-label", "移除群 " + id);
-          removeChip.addEventListener("click", () => {
-            groupIds = groupIds.filter((existing) => existing !== id);
-            renderChips();
-            syncCollected();
-          });
+          removeChip.setAttribute("aria-label", "停止观察群 " + id);
+          removeChip.addEventListener("click", () => toggleGroup(id, false));
           chip.appendChild(removeChip);
           chips.appendChild(chip);
         }
-        syncCollected();
       }
-      function addGroupId(raw) {
-        const id = String(raw || "").trim();
-        if (!/^\d{5,}$/.test(id)) {
-          noteLine.textContent = "群号须为纯数字";
-          return;
-        }
-        noteLine.textContent = "";
-        if (!groupIds.includes(id)) {
-          groupIds.push(id);
-          renderChips();
-        }
-      }
+
       function renderPicker(filter) {
         pickList.textContent = "";
         const keyword = (filter || "").trim().toLowerCase();
-        const shown = groupCatalog.filter((info) => {
+        const shown = groups.filter((info) => {
           const id = String(info.group_id);
-          return !keyword || (info.group_name || "").toLowerCase().includes(keyword) ||
-            id.includes(keyword);
+          return !keyword || (info.group_name || "").toLowerCase().includes(keyword) || id.includes(keyword);
         });
         if (!shown.length) {
           const empty = document.createElement("div");
           empty.className = "model-pick-empty";
-          empty.textContent = keyword ? "没有匹配的群"
-            : "群列表为空：机器人离线或尚未拉取";
+          empty.textContent = keyword ? "没有匹配的群" : "群列表为空：机器人离线或尚未拉取";
           pickList.appendChild(empty);
           return;
         }
         for (const info of shown) {
           const id = String(info.group_id);
-          // 与模型供应商页同款条目：pick-opt + tick，点击原地切换不关闭浮层
           const option = document.createElement("button");
           option.type = "button";
-          option.className = "pick-opt" + (groupIds.includes(id) ? " selected" : "");
+          option.className = "pick-opt" + (monitored.includes(id) ? " selected" : "");
           const tick = document.createElement("span");
           tick.className = "tick";
           tick.textContent = "◈";
           const avatar = document.createElement("img");
-          avatar.className = "pick-avatar";  // 必须带尺寸类：无约束会按原图尺寸撑爆行高
+          avatar.className = "pick-avatar";
           avatar.src = info.avatar_url || "";
           avatar.alt = "";
           avatar.referrerPolicy = "no-referrer";
@@ -2317,65 +2358,54 @@
           label.textContent = (info.group_name || "（未命名群）") + " · " + id +
             " · " + (info.member_count || 0) + "人";
           option.append(tick, avatar, label);
-          option.addEventListener("click", () => {
-            if (groupIds.includes(id))
-              groupIds = groupIds.filter((existing) => existing !== id);
-            else
-              groupIds.push(id);
-            renderChips();
-            option.classList.toggle("selected", groupIds.includes(id));
-          });
+          option.addEventListener("click", () => toggleGroup(id, !monitored.includes(id)));
           pickList.appendChild(option);
         }
       }
-      pickButton.addEventListener("click", async () => {
-        if (zone.classList.contains("open")) { closePicker(); return; }
-        zone.classList.add("open");
-        document.addEventListener("pointerdown", onOutsidePick, true);
-        pickList.textContent = "";
-        pickList.appendChild(Object.assign(document.createElement("div"), {
-          className: "model-note", textContent: "加载群列表…"
-        }));
-        try {
-          const response = await request("/api/groups", { method: "GET" });
-          const body = await response.json();
-          groupCatalog = Array.isArray(body.groups) ? body.groups : [];
-        } catch (error) {
-          groupCatalog = [];
-        }
-        renderPicker(search.value);
-      });
-      function onOutsidePick(event) {
-        if (!zone.contains(event.target)) closePicker();
-      }
-      function onPickKeydown(event) {
-        if (event.key === "Escape" && zone.classList.contains("open")) closePicker();
-      }
+
       function closePicker() {
         zone.classList.remove("open");
         document.removeEventListener("pointerdown", onOutsidePick, true);
       }
-      document.addEventListener("keydown", onPickKeydown);
+      function onOutsidePick(event) {
+        if (!zone.contains(event.target)) closePicker();
+      }
+      pickButton.addEventListener("click", () => {
+        if (zone.classList.contains("open")) return closePicker();
+        zone.classList.add("open");
+        document.addEventListener("pointerdown", onOutsidePick, true);
+        renderPicker(search.value);
+      });
       search.addEventListener("input", () => renderPicker(search.value));
       manualToggle.addEventListener("click", () => { manual.hidden = !manual.hidden; });
-      const submitManual = () => { addGroupId(manualInput.value); manualInput.value = ""; };
+      const submitManual = () => {
+        const id = manualInput.value.trim();
+        manualInput.value = "";
+        if (!/^\d{5,}$/.test(id)) {
+          panelNote.textContent = "群号须为纯数字";
+          return;
+        }
+        if (monitored.includes(id)) return;
+        toggleGroup(id, true);
+      };
       manualAdd.addEventListener("click", submitManual);
       manualInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") { event.preventDefault(); submitManual(); }
       });
-
-      // enabled 联动提示：白名单空时提示开关不生效
-      function syncLinkage() {
-        noteLine.textContent = groupIds.length ? ""
-          : "白名单为空：即使启用，观察通道也保持关闭。";
-      }
-      enabledInput.addEventListener("change", syncLinkage);
-      enabledInput.addEventListener("perception-linkage", syncLinkage);
+      switchInput.addEventListener("change", async () => {
+        if (!await post("/api/perception/enabled", { enabled: switchInput.checked })) {
+          switchInput.checked = !switchInput.checked;   // 落库失败回滚界面
+          return;
+        }
+        enabled = switchInput.checked;
+        syncStatus();
+      });
 
       renderChips();
-      syncLinkage();
-      return true;
+      syncStatus();
     }
+
+
 
     async function loadConfig() {
       try {
@@ -2421,11 +2451,9 @@
             // bot 分组只展示身份字段，群聊开关挪进紧随其后的“功能开关”模块
             // chat 分组只展示消息处理字段，模型相关参数挪进“模型设置”模块
             const skipKeys = key === "bot" ? new Set(["group_chat_enabled"])
-              : key === "chat" ? new Set(CHAT_MODEL_FIELDS)
-              : key === "perception" ? new Set(["observe_groups"]) : null;
+              : key === "chat" ? new Set(CHAT_MODEL_FIELDS) : null;
             if (!(key === "communication" && buildCommunicationPane(pane, value)) &&
-                !(key === "models" && buildModelsPane(pane, value, document_)) &&
-                !(key === "perception" && buildPerceptionPane(pane, value)))
+                !(key === "models" && buildModelsPane(pane, value, document_)))
               for (const [childKey, childValue] of orderedEntries(value, key))
                 if (!skipKeys || !skipKeys.has(childKey))
                   renderValue(fields, childKey, childValue, key + "." + childKey, false);
@@ -2442,6 +2470,7 @@
         const sep = document.createElement("div");
         sep.className = "nav-sep";
         nav.appendChild(sep);
+        nav.appendChild(perceptionNavItem());
         nav.appendChild(modelsNavItem());
         const versionChip = document.createElement("div");
         versionChip.className = "nav-version";
@@ -2450,7 +2479,7 @@
         else
           versionChip.textContent = "配置文件版本 v" + loadedSchemaVersion;
         nav.appendChild(versionChip);
-        const known = activePane === MODELS_KEY ||
+        const known = activePane === MODELS_KEY || activePane === PERCEPTION_KEY ||
           document.querySelectorAll('.pane[data-key="' + activePane + '"]').length > 0;
         selectPane(known && activePane ? activePane : (firstKey || MODELS_KEY));
         $("banner").className = "";
@@ -3034,7 +3063,11 @@
     /* ---------- 入口 ---------- */
 
     $("save").addEventListener("click", () => activePane === MODELS_KEY ? saveModels() : saveConfig());
-    $("reload").addEventListener("click", () => activePane === MODELS_KEY ? loadModels() : loadConfig());
+    $("reload").addEventListener("click", () => {
+      if (activePane === MODELS_KEY) return loadModels();
+      if (activePane === PERCEPTION_KEY) return loadPerception();
+      loadConfig();
+    });
     $("addProvider").addEventListener("click", () => {
       const card = addProviderCard(null);
       card.scrollIntoView({ behavior: "smooth", block: "center" });

@@ -477,24 +477,24 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));
 	commandRegistry.registryCommand(std::make_unique<RemoveContextCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
-	// 观察通道（T7）：只看不说、0 LLM；白名单起步，功能关闭时不建库不动用户数据。
-	// 须在 Message 之前构造：Message 持其指针在 @ 消息上注入话题注记
+	// 观察通道状态与群列表（唯一真值在数据库，见 GroupListService）：
+	// 总开关与监控群集都是运行时状态，面板改动即时生效、无需重启；
+	// 状态服务恒构造（群列表选择器在功能关闭时也要可用）
+	std::unique_ptr<GroupListService> groupListService =
+		std::make_unique<GroupListService>(dbPath, activeApiChannel);
+	// 各 Store 仅在功能启用时构造：关闭时不动用户数据库（不改状态、不写表）
 	std::unique_ptr<PerceptionStore> perceptionStore;
 	std::unique_ptr<GroupContextStore> groupContextStore;
-	if (settings.perception.observing())
+	if (groupListService->featureEnabled())
 	{
 		perceptionStore = std::make_unique<PerceptionStore>(dbPath);
 		groupContextStore = std::make_unique<GroupContextStore>(dbPath);
-		LOG_INFO("观察通道已启用，白名单群 " + std::to_string(settings.perception.observeGroups.size()) +
+		LOG_INFO("观察通道已启用，监控群 " +
+				 std::to_string(groupListService->monitoredCount()) +
 				 " 个（群内容短时缓冲：每群300条/24小时）");
 	}
-	// 群列表缓存（T7c）：白名单选择器的配置辅助，与观察通道开关解耦——
-	// 它的用途恰是帮用户从零挑白名单，绑在"已启用"上会死锁（没配置→没数据→没法配置）。
-	// 纯缓存表无隐私顾虑，只要有面板就构造；OneBot 就绪后由 pollingThread 拉取
-	std::unique_ptr<GroupListService> groupListService =
-		std::make_unique<GroupListService>(dbPath, activeApiChannel, settings.perception);
-	PerceptionChannel perceptionChannel(settings.perception, perceptionStore.get());
-	GroupContextService groupContextService(settings.perception, settings.bot,
+	PerceptionChannel perceptionChannel(groupListService.get(), perceptionStore.get());
+	GroupContextService groupContextService(groupListService.get(), settings.bot,
 											groupContextStore.get(), &messageSender);
 	groupContextService.setSummarizer([&chatService](const std::string &systemPrompt,
 													 const std::string &userPrompt)

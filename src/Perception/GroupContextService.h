@@ -21,7 +21,7 @@
  */
 #include "TopicTracker.h"
 #include "GroupContextStore.h"
-#include "PerceptionOptions.h"
+#include "GroupListService.h"
 #include "../Application/BotIdentity.h"
 #include "../Port/InboundMessage.h"
 #include "../Port/OutboundMessage.h"
@@ -48,7 +48,8 @@ public:
     // KeyedTaskScheduler::submit，按群占 lane；测试注入同步执行器）
     using Evaluator = std::function<void(std::uint64_t groupId)>;
 
-    GroupContextService(PerceptionOptions options, BotIdentity bot,
+    // state：观察状态（总开关 + 监控群集）唯一真值来源，逐步查询以支持即时生效
+    GroupContextService(GroupListService *state, BotIdentity bot,
                         GroupContextStore *store, MessageSenderPort *sender = nullptr);
 
     void setSummarizer(Summarizer summarizer) { this->summarizer = std::move(summarizer); }
@@ -91,19 +92,20 @@ private:
         double score = 0.0;
     };
 
+    // 该群此刻是否在观察（总开关 + 监控集，实时查询以便即时生效）
+    bool observingGroup(std::uint64_t groupId) const;
     std::string formatRecords(const std::vector<GroupMessageRecord> &records,
                               std::int64_t watermarkTs) const;
     std::string digestRecords(const std::vector<GroupMessageRecord> &records) const;
     void deliverGroupText(std::uint64_t groupId, const std::string &text);
 
-    const PerceptionOptions options;
+    GroupListService *const state;
     const BotIdentity bot;
     GroupContextStore *const store;
     MessageSenderPort *const sender;
     Summarizer summarizer;
     Responder responder;
     Evaluator evaluator;
-    std::set<std::uint64_t> whitelist;
     TopicTracker tracker;
     mutable std::mutex mutex;
     std::map<std::uint64_t, std::string> pendingJoin; // join 信号触发文本，评估时消费

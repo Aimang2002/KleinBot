@@ -1,11 +1,14 @@
 #include <gtest/gtest.h>
 
+#include "Network/OneBotApiChannel.h"
+#include "Perception/GroupListService.h"
 #include "Perception/PerceptionChannel.h"
 #include "Perception/PerceptionStore.h"
 
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <fstream>
 #include <sqlite3.h>
 #include <string>
@@ -61,12 +64,25 @@ InboundMessage privateMessage(std::uint64_t user, const std::string &text)
     return message;
 }
 
-PerceptionOptions whitelistOptions()
+// 观察状态的最小假通道：仅满足构造，测试不触发协议调用
+class NoopApiChannel final : public OneBotApiChannel
 {
-    PerceptionOptions options;
-    options.enabled = true;
-    options.observeGroups = {8823};
-    return options;
+public:
+    OneBotApiResult call(const std::string &, nlohmann::json, std::chrono::milliseconds) override
+    {
+        return {};
+    }
+};
+
+// 观察状态服务（数据库真值）：默认开启总开关并监控 8823
+std::unique_ptr<GroupListService> observingState(const std::string &dbPath, bool enabled = true)
+{
+    static NoopApiChannel api;
+    auto state = std::make_unique<GroupListService>(dbPath, api);
+    state->setFeatureEnabled(enabled);
+    if (enabled)
+        state->setMonitored(8823, true);
+    return state;
 }
 
 std::vector<std::string> readAffinityRows(const std::string &dbPath)
@@ -116,10 +132,8 @@ TEST(PerceptionChannelTest, ObservesOnlyWhitelistedEnabledGroups)
     PerceptionStore store(dbPath);
 
     // 总开关关闭：一切 no-op
-    PerceptionOptions disabled;
-    disabled.enabled = false;
-    disabled.observeGroups = {8823};
-    PerceptionChannel closed(disabled, &store);
+    auto disabledState = observingState(temporaryDirectory.path() + "/disabled.db", false);
+    PerceptionChannel closed(disabledState.get(), &store);
     closed.observeMessage(groupMessage(10, 8823, "你好", 1000));
     closed.observeInteraction(groupMessage(10, 8823, "在吗", 1001));
     closed.flushDue(100000);
@@ -127,7 +141,8 @@ TEST(PerceptionChannelTest, ObservesOnlyWhitelistedEnabledGroups)
     EXPECT_TRUE(closed.hotTopics(8823, 5).empty());
 
     // 开启但群不在白名单 / 私聊：不观察
-    PerceptionChannel channel(whitelistOptions(), &store);
+    auto state = observingState(temporaryDirectory.path() + "/state.db");
+    PerceptionChannel channel(state.get(), &store);
     channel.observeMessage(groupMessage(10, 9999, "别的群", 1000));
     channel.observeInteraction(privateMessage(10, "私聊不算群观察"));
     channel.flushDue(100000);
@@ -141,7 +156,8 @@ TEST(PerceptionChannelTest, AffinityAggregatesAndFlushesToStore)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
     PerceptionStore store(dbPath);
-    PerceptionChannel channel(whitelistOptions(), &store);
+    auto state = observingState(temporaryDirectory.path() + "/state.db");
+    PerceptionChannel channel(state.get(), &store);
 
     channel.observeMessage(groupMessage(10, 8823, "早上好", 1000));
     channel.observeMessage(groupMessage(10, 8823, "吃什么", 1005));
@@ -183,7 +199,8 @@ TEST(PerceptionChannelTest, WindowEvictsByCount)
 {
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
-    PerceptionChannel channel(whitelistOptions(), nullptr);
+    auto state = observingState(temporaryDirectory.path() + "/state.db");
+    PerceptionChannel channel(state.get(), nullptr);
 
     // 600 条不同 ASCII 词消息：条数上限 500，最旧 100 条连同计数淘汰
     for (int index = 0; index < 600; ++index)
@@ -210,7 +227,8 @@ TEST(PerceptionChannelTest, WindowEvictsByTime)
 {
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
-    PerceptionChannel channel(whitelistOptions(), nullptr);
+    auto state = observingState(temporaryDirectory.path() + "/state.db");
+    PerceptionChannel channel(state.get(), nullptr);
 
     channel.observeMessage(groupMessage(10, 8823, "旧话题", 100000));
     // 2 小时窗口外的新消息触发对旧条目的淘汰
@@ -242,7 +260,8 @@ TEST(PerceptionChannelTest, RedLinePlaintextNeverPersisted)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
     PerceptionStore store(dbPath);
-    PerceptionChannel channel(whitelistOptions(), &store);
+    auto state = observingState(temporaryDirectory.path() + "/state.db");
+    PerceptionChannel channel(state.get(), &store);
 
     // 全小写标记：normalizeText 只小写化 ASCII，避免大小写转换让碎片对不上原文
     const std::string secret = "绝密原文标记zeroonetwo不要外传";
@@ -267,7 +286,8 @@ TEST(PerceptionChannelTest, HotTopicsReturnsTopNOrdered)
 {
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
-    PerceptionChannel channel(whitelistOptions(), nullptr);
+    auto state = observingState(temporaryDirectory.path() + "/state.db");
+    PerceptionChannel channel(state.get(), nullptr);
 
     for (int index = 0; index < 3; ++index)
         channel.observeMessage(groupMessage(10, 8823, "苹果", 1000 + index));
@@ -287,7 +307,8 @@ TEST(PerceptionChannelTest, ExtractNgramsFiltersStopTerms)
 {
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
-    PerceptionChannel channel(whitelistOptions(), nullptr);
+    auto state = observingState(temporaryDirectory.path() + "/state.db");
+    PerceptionChannel channel(state.get(), nullptr);
 
     // 高频功能词出现最多，但不是话题：不进热度
     for (int index = 0; index < 5; ++index)
@@ -309,15 +330,14 @@ TEST(PerceptionChannelTest, TopicNoteGatesAndFormat)
     ASSERT_FALSE(temporaryDirectory.path().empty());
 
     // 关闭：不生成注记
-    PerceptionOptions disabled;
-    disabled.enabled = false;
-    disabled.observeGroups = {8823};
-    PerceptionChannel closed(disabled, nullptr);
+    auto disabledState = observingState(temporaryDirectory.path() + "/disabled.db", false);
+    PerceptionChannel closed(disabledState.get(), nullptr);
     closed.observeMessage(groupMessage(10, 8823, "苹果", 1000));
     closed.observeMessage(groupMessage(10, 8823, "苹果", 1001));
     EXPECT_TRUE(closed.topicNoteFor(8823).empty());
 
-    PerceptionChannel channel(whitelistOptions(), nullptr);
+    auto state = observingState(temporaryDirectory.path() + "/state.db");
+    PerceptionChannel channel(state.get(), nullptr);
 
     // 只出现过一次的碎片：不算"常聊"，不给注记
     channel.observeMessage(groupMessage(10, 8823, "苹果", 1000));
@@ -348,7 +368,8 @@ TEST(PerceptionChannelTest, PerfSmokeTenThousandMessages)
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
     PerceptionStore store(temporaryDirectory.path() + "/conversation.db");
-    PerceptionChannel channel(whitelistOptions(), &store);
+    auto state = observingState(temporaryDirectory.path() + "/state.db");
+    PerceptionChannel channel(state.get(), &store);
 
     const auto started = std::chrono::steady_clock::now();
     for (int index = 0; index < 10000; ++index)

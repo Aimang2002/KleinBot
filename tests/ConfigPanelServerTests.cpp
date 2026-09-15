@@ -738,12 +738,10 @@ TEST_F(PanelServerFixture, GetGroupsReturnsInjectedServiceSnapshot)
     api.result.data = nlohmann::json::array({
         {{"group_id", 8823}, {"group_name", "原神群"}, {"member_count", 420}},
     });
-    PerceptionOptions options;
-    options.enabled = true;
-    options.observeGroups = {8823};
-    groupsOwner = std::make_unique<GroupListService>(dir.string() + "/conversation.db",
-                                                     api, options);
-    groupsOwner->poll(1000);
+    groupsOwner = std::make_unique<GroupListService>(dir.string() + "/conversation.db", api);
+    groupsOwner->poll(1000);                    // 拉取群列表（含 8823）
+    groupsOwner->setFeatureEnabled(true);       // 总开关入库
+    groupsOwner->setMonitored(8823, true);      // 监控状态入库
     groupsService = groupsOwner.get();
     // 重建 server 以携带注入（fixture 的 server 已在 SetUp 起好，此处替换）
     server->stop();
@@ -760,6 +758,7 @@ TEST_F(PanelServerFixture, GetGroupsReturnsInjectedServiceSnapshot)
     EXPECT_EQ(result->status, 200);
     const json body = json::parse(result->body);
     ASSERT_TRUE(body.contains("groups"));
+    EXPECT_EQ(body["enabled"], true);
     ASSERT_EQ(body["groups"].size(), 1U);
     EXPECT_EQ(body["groups"][0]["group_id"], 8823ULL);
     EXPECT_EQ(body["groups"][0]["group_name"], "原神群");
@@ -780,27 +779,105 @@ TEST_F(PanelServerFixture, GetGroupsWithoutServiceReturnsEmptyList)
     EXPECT_TRUE(body["groups"].empty());
 }
 
-// perception 配置往返：observe_groups 数组与 enabled 经 GET/POST 保存正确落盘
-// （前端标签输入的收集契约等价于直接 POST 该结构）
-TEST_F(PanelServerFixture, PostPerceptionWhitelistRoundtripPersistsArray)
+// 观察通道状态端点：总开关与单群监控直接落库并即时生效（不再走配置）
+TEST_F(PanelServerFixture, PerceptionEndpointsToggleStateImmediately)
+{
+    PanelGroupsFakeApiChannel api;
+    api.result.retcode = 0;
+    api.result.data = nlohmann::json::array({
+        {{"group_id", 8823}, {"group_name", "甲群"}, {"member_count", 10}},
+        {{"group_id", 9001}, {"group_name", "乙群"}, {"member_count", 20}},
+    });
+    groupsOwner = std::make_unique<GroupListService>(dir.string() + "/conversation.db", api);
+    groupsOwner->poll(1000);
+    groupsService = groupsOwner.get();
+    server->stop();
+    serverThread->join();
+    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store,
+                                            *registry, groupsService);
+    port = server->bind_to_any_port("127.0.0.1");
+    serverThread = std::make_unique<std::thread>([this]() { server->listen_after_bind(); });
+
+    httplib::Client client("127.0.0.1", port);
+    client.set_bearer_token_auth("panel-token");
+
+    // 初始：关闭且无群被监控
+    {
+        const auto response = client.Get("/api/groups");
+        ASSERT_TRUE(response);
+        const json body = json::parse(response->body);
+        EXPECT_EQ(body["enabled"], false);
+        for (const auto &group : body["groups"])
+            EXPECT_EQ(group["monitored"], false);
+    }
+
+    // 开启总开关
+    {
+        const auto response = client.Post("/api/perception/enabled", authHeaders(),
+                                          json({{"enabled", true}}).dump(), "application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 200);
+        EXPECT_TRUE(groupsService->featureEnabled()) << "落库即时生效，无需重启";
+    }
+    // 勾选一个群
+    {
+        const auto response = client.Post("/api/perception/monitored", authHeaders(),
+                                          json({{"group_id", 8823}, {"monitored", true}}).dump(),
+                                          "application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 200);
+        EXPECT_TRUE(groupsService->isMonitored(8823));
+        EXPECT_FALSE(groupsService->isMonitored(9001));
+    }
+    // 回读：GET 反映最新状态
+    {
+        const auto response = client.Get("/api/groups");
+        ASSERT_TRUE(response);
+        const json body = json::parse(response->body);
+        EXPECT_EQ(body["enabled"], true);
+        for (const auto &group : body["groups"])
+            EXPECT_EQ(group["monitored"], group["group_id"] == 8823U);
+    }
+    // 取消勾选
+    {
+        const auto response = client.Post("/api/perception/monitored", authHeaders(),
+                                          json({{"group_id", 8823}, {"monitored", false}}).dump(),
+                                          "application/json");
+        ASSERT_TRUE(response);
+        EXPECT_FALSE(groupsService->isMonitored(8823));
+    }
+    // 参数校验：缺字段/类型错 → 400
+    {
+        const auto missing = client.Post("/api/perception/monitored", authHeaders(),
+                                         json({{"group_id", 8823}}).dump(), "application/json");
+        ASSERT_TRUE(missing);
+        EXPECT_EQ(missing->status, 400);
+        const auto badType = client.Post("/api/perception/enabled", authHeaders(),
+                                         json({{"enabled", "yes"}}).dump(), "application/json");
+        ASSERT_TRUE(badType);
+        EXPECT_EQ(badType->status, 400);
+    }
+}
+
+// 未注入状态服务：/api/groups 返回关闭态空列表，写端点 503（不改任何状态）
+TEST_F(PanelServerFixture, PerceptionEndpointsWithoutServiceFailSafely)
 {
     httplib::Client client("127.0.0.1", port);
-    const auto fetched = client.Get("/api/config", authHeaders());
-    ASSERT_TRUE(fetched != nullptr);
-    ASSERT_EQ(fetched->status, 200);
-
-    nlohmann::json candidate = nlohmann::json::parse(fetched->body);
-    candidate["perception"] = {{"enabled", true},
-                               {"observe_groups", nlohmann::json::array({8823, 9001})}};
-    const auto posted = client.Post("/api/config", authHeaders(),
-                                    candidate.dump(), "application/json");
-    ASSERT_TRUE(posted != nullptr);
-    ASSERT_EQ(posted->status, 200);
-
-    const nlohmann::json written = nlohmann::json::parse(readFile());
-    ASSERT_TRUE(written.contains("perception"));
-    EXPECT_EQ(written["perception"]["enabled"], true);
-    ASSERT_EQ(written["perception"]["observe_groups"].size(), 2U);
-    EXPECT_EQ(written["perception"]["observe_groups"][0], 8823ULL);
-    EXPECT_EQ(written["perception"]["observe_groups"][1], 9001ULL);
+    client.set_bearer_token_auth("panel-token");
+    {
+        const auto response = client.Get("/api/groups");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 200);
+        const json body = json::parse(response->body);
+        EXPECT_EQ(body["enabled"], false);
+        EXPECT_TRUE(body["groups"].is_array());
+        EXPECT_TRUE(body["groups"].empty());
+    }
+    {
+        const auto response = client.Post("/api/perception/monitored", authHeaders(),
+                                          json({{"group_id", 8823}, {"monitored", true}}).dump(),
+                                          "application/json");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 503);
+    }
 }

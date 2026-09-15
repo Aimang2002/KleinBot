@@ -93,14 +93,6 @@ struct WebFetchSchema
     std::size_t cacheMaxEntries = 32;
 };
 
-// 观察通道（v2.4.1 T7）：只看不说、0 LLM、默认关、白名单起步——
-// observeGroups 为空时即使 enabled 也不观察任何群
-struct PerceptionSchema
-{
-    bool enabled = false;
-    std::vector<std::uint64_t> observeGroups;
-};
-
 struct StorageSchema
 {
     // 数据库与配置文件默认以点前缀隐藏（ls 默认不显示）；老路径无自动迁移，升级需手动改名
@@ -155,7 +147,6 @@ struct SchemaConfig
     MemorySchema memory;
     WebSearchSchema webSearch;
     WebFetchSchema webFetch;
-    PerceptionSchema perception;
     StorageSchema storage;
     std::string proxy;
     CommunicationSchema communication;

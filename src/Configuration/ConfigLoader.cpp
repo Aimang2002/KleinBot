@@ -603,39 +603,14 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
             32, 1, 1024));
     }
 
-    const json *perception = decoder.object(document, "perception", "perception");
-    if (perception != nullptr)
+    // perception 节已迁出配置体系（用户定规 2026-09-15）：观察通道总开关与
+    // 监控群集是运行时状态，由数据库独占管理（perception_meta.feature_enabled
+    // 与 group_cache.monitored），面板改动即时生效、无需重启。
+    // 旧配置里的 perception 节静默忽略，避免升级时产生未知字段告警
+    if (document.contains("perception"))
     {
-        decoder.unknownFields(*perception, {"enabled", "observe_groups"}, "perception");
-        config.perception.enabled = decoder.boolean(
-            *perception, "enabled", "perception.enabled", false);
-        // 解码器没有数组辅助：observe_groups 手工解析，元素须为非负整数
-        if (perception->contains("observe_groups"))
-        {
-            const json &groups = (*perception)["observe_groups"];
-            if (groups.is_array())
-            {
-                for (const auto &entry : groups)
-                {
-                    if (entry.is_number_unsigned())
-                        config.perception.observeGroups.push_back(entry.get<std::uint64_t>());
-                    else
-                        decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
-                                           "perception.observe_groups", "群号须为非负整数，该元素已忽略");
-                }
-            }
-            else
-            {
-                decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
-                                   "perception.observe_groups", "必须是数组");
-            }
-        }
-        if (config.perception.enabled && config.perception.observeGroups.empty())
-        {
-            config.perception.enabled = false;
-            decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Dependency,
-                               "perception.observe_groups", "白名单为空，观察通道保持关闭");
-        }
+        decoder.diagnostic(ConfigSeverity::Info, ConfigErrorCategory::Unknown,
+                           "perception", "观察通道设置已迁至数据库管理，本键已忽略");
     }
 
     const json *storage = decoder.object(document, "storage", "storage");

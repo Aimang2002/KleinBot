@@ -17,10 +17,15 @@ constexpr std::size_t kFlushThresholdDeltas = 100;
 constexpr std::time_t kHourSeconds = 60 * 60;
 } // namespace
 
-PerceptionChannel::PerceptionChannel(PerceptionOptions options, PerceptionStore *store)
-    : options(options), store(store),
-      whitelist(options.observeGroups.begin(), options.observeGroups.end())
+PerceptionChannel::PerceptionChannel(GroupListService *state, PerceptionStore *store)
+    : state(state), store(store)
 {
+}
+
+bool PerceptionChannel::observingGroup(std::uint64_t groupId) const
+{
+    // 逐步查询：面板改动入库后立即生效，无需重启
+    return state != nullptr && state->featureEnabled() && state->isMonitored(groupId);
 }
 
 void PerceptionChannel::observeMessage(const InboundMessage &message)
@@ -35,11 +40,8 @@ void PerceptionChannel::observeInteraction(const InboundMessage &message)
 
 void PerceptionChannel::observe(const InboundMessage &message, bool interaction)
 {
-    if (!options.observing() || message.message_type != "group" ||
-        whitelist.find(message.group_id) == whitelist.end())
-    {
+    if (message.message_type != "group" || !observingGroup(message.group_id))
         return;
-    }
 
     // 原文出栈即弃：n-gram 提取后本函数不再持有 plaintext（D7）
     const std::vector<std::string> ngrams = extractNgrams(message.plain_text);
@@ -131,7 +133,7 @@ std::vector<std::string> PerceptionChannel::extractNgrams(const std::string &pla
 
 void PerceptionChannel::flushDue(std::time_t now)
 {
-    if (!options.observing())
+    if (state == nullptr || !state->featureEnabled())
         return;
 
     // 节流判断与快照同锁：pendingDeltas 由 worker 线程递增，读必须持锁
@@ -210,7 +212,7 @@ std::vector<std::pair<std::string, double>> PerceptionChannel::hotTopics(
     std::uint64_t groupId, std::size_t topN) const
 {
     std::vector<std::pair<std::string, double>> topics;
-    if (!options.observing())
+    if (state == nullptr || !state->featureEnabled())
         return topics;
 
     std::lock_guard<std::mutex> lock(mutex);

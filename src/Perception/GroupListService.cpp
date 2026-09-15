@@ -13,6 +13,10 @@ constexpr std::int64_t kRefreshIntervalSeconds = 24 * 60 * 60;
 // 面板展示的群数上限防御（正常部署远小于此）
 constexpr std::size_t kMaxGroups = 2000;
 
+// perception_meta 键名
+constexpr const char *kFeatureEnabledKey = "feature_enabled";
+constexpr const char *kSaltKey = "speaker_salt";
+
 std::string columnText(sqlite3_stmt *statement, int column)
 {
     const unsigned char *text = sqlite3_column_text(statement, column);
@@ -20,13 +24,12 @@ std::string columnText(sqlite3_stmt *statement, int column)
 }
 }
 
-GroupListService::GroupListService(const std::string &dbPath, OneBotApiChannel &api,
-                                   const PerceptionOptions &options)
-    : api(api), options(options)
+GroupListService::GroupListService(const std::string &dbPath, OneBotApiChannel &api)
+    : api(api)
 {
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK)
     {
-        LOG_ERROR("群列表缓存库打开失败，面板将无法展示群选择器：" +
+        LOG_ERROR("观察状态库打开失败，观察通道与面板群列表不可用：" +
                   std::string(db ? sqlite3_errmsg(db) : "?"));
         if (db != nullptr)
             sqlite3_close(db);
@@ -37,31 +40,87 @@ GroupListService::GroupListService(const std::string &dbPath, OneBotApiChannel &
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
 
     const char *ddl =
+        "CREATE TABLE IF NOT EXISTS perception_meta ("
+        " key TEXT PRIMARY KEY,"
+        " value TEXT NOT NULL);"
         "CREATE TABLE IF NOT EXISTS group_cache ("
         " group_id INTEGER PRIMARY KEY,"
         " name TEXT NOT NULL DEFAULT '',"
         " member_count INTEGER NOT NULL DEFAULT 0,"
         " avatar_url TEXT NOT NULL DEFAULT '',"
-        " monitored INTEGER NOT NULL DEFAULT 0,"   // 0/1：1=该群在观察白名单内
+        " monitored INTEGER NOT NULL DEFAULT 0," // 0/1：1=监控该群
         " refreshed_ts INTEGER NOT NULL DEFAULT 0);";
     char *err = nullptr;
     if (sqlite3_exec(db, ddl, nullptr, nullptr, &err) != SQLITE_OK)
     {
-        LOG_ERROR("群列表缓存建表失败：" + std::string(err ? err : "?"));
+        LOG_ERROR("观察状态库建表失败：" + std::string(err ? err : "?"));
         sqlite3_free(err);
         sqlite3_close(db);
         db = nullptr;
         return;
     }
+    loadStateFromDisk();
     rebuildMirrorFromDisk();
-    // 启动即把配置白名单落到 monitored 列：库内 0/1 与 .config.json 一致
-    applyWhitelist(options.observeGroups);
+    LOG_INFO("观察通道状态（数据库）：" + std::string(enabled_ ? "已启用" : "未启用") +
+             "，监控群 " + std::to_string(monitored_.size()) + " 个");
 }
 
 GroupListService::~GroupListService()
 {
     if (db != nullptr)
         sqlite3_close(db);
+}
+
+std::string GroupListService::readMeta(const std::string &key) const
+{
+    if (db == nullptr)
+        return {};
+    sqlite3_stmt *statement = nullptr;
+    std::string value;
+    if (sqlite3_prepare_v2(db, "SELECT value FROM perception_meta WHERE key=?1;", -1,
+                           &statement, nullptr) == SQLITE_OK)
+    {
+        sqlite3_bind_text(statement, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(statement) == SQLITE_ROW)
+            value = columnText(statement, 0);
+        sqlite3_finalize(statement);
+    }
+    return value;
+}
+
+bool GroupListService::writeMeta(const std::string &key, const std::string &value)
+{
+    if (db == nullptr)
+        return false;
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db,
+                           "INSERT INTO perception_meta(key, value) VALUES (?1, ?2)"
+                           " ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+                           -1, &statement, nullptr) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(statement, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(statement, 2, value.c_str(), -1, SQLITE_TRANSIENT);
+    const bool ok = sqlite3_step(statement) == SQLITE_DONE;
+    sqlite3_finalize(statement);
+    if (!ok)
+        LOG_ERROR("观察状态写入失败：" + std::string(sqlite3_errmsg(db)));
+    return ok;
+}
+
+void GroupListService::loadStateFromDisk()
+{
+    const std::string flag = readMeta(kFeatureEnabledKey);
+    enabled_ = flag == "1";
+
+    // 监控群集（含未在群列表中的群号——手动输入也据此持久化）
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT group_id FROM group_cache WHERE monitored=1;", -1,
+                           &statement, nullptr) == SQLITE_OK)
+    {
+        while (sqlite3_step(statement) == SQLITE_ROW)
+            monitored_.insert(static_cast<std::uint64_t>(sqlite3_column_int64(statement, 0)));
+        sqlite3_finalize(statement);
+    }
 }
 
 void GroupListService::rebuildMirrorFromDisk()
@@ -78,9 +137,9 @@ void GroupListService::rebuildMirrorFromDisk()
             GroupListEntry entry;
             entry.groupId = static_cast<std::uint64_t>(sqlite3_column_int64(statement, 0));
             entry.name = columnText(statement, 1);
-            entry.memberCount = sqlite3_column_int64(statement, 2);
+            entry.memberCount = sqlite3_column_int(statement, 2);
             entry.avatarUrl = columnText(statement, 3);
-            entry.monitored = sqlite3_column_int64(statement, 4) != 0;
+            entry.monitored = sqlite3_column_int(statement, 4) != 0;
             entry.refreshedTs = sqlite3_column_int64(statement, 5);
             restored.push_back(std::move(entry));
         }
@@ -90,11 +149,115 @@ void GroupListService::rebuildMirrorFromDisk()
     mirror_ = std::move(restored);
 }
 
+bool GroupListService::featureEnabled() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return enabled_;
+}
+
+bool GroupListService::setFeatureEnabled(bool enabled)
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (enabled_ == enabled)
+            return true;
+        enabled_ = enabled;
+        if (!writeMeta(kFeatureEnabledKey, enabled ? "1" : "0"))
+            return false;
+    }
+    LOG_INFO(std::string("观察通道总开关已") + (enabled ? "开启" : "关闭") +
+             "（数据库生效，无需重启）");
+    return true;
+}
+
+bool GroupListService::isMonitored(std::uint64_t groupId) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return monitored_.find(groupId) != monitored_.end();
+}
+
+bool GroupListService::setMonitored(std::uint64_t groupId, bool monitored)
+{
+    if (db == nullptr || groupId == 0)
+        return false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const bool already = monitored_.find(groupId) != monitored_.end();
+        if (already == monitored)
+            return true;
+        if (monitored)
+        {
+            monitored_.insert(groupId);
+            // 群列表里没有该群号（机器人不在群里/尚未拉取）也要落行，
+            // 否则监控意图无处保存；元数据留给后续刷新填充
+            sqlite3_exec(db,
+                         ("INSERT OR IGNORE INTO group_cache (group_id, avatar_url)"
+                          " VALUES (" + std::to_string(groupId) + ", '" +
+                          avatarUrlFor(groupId) + "');").c_str(),
+                         nullptr, nullptr, nullptr);
+        }
+        else
+        {
+            monitored_.erase(groupId);
+        }
+        for (GroupListEntry &entry : mirror_)
+        {
+            if (entry.groupId == groupId)
+                entry.monitored = monitored;
+        }
+        persistMonitoredUnderLock();
+    }
+    LOG_INFO("群 " + std::to_string(groupId) + (monitored ? " 已开启监控" : " 已关闭监控") +
+             "（数据库生效，无需重启）");
+    return true;
+}
+
+std::size_t GroupListService::monitoredCount() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return monitored_.size();
+}
+
+std::vector<std::uint64_t> GroupListService::monitoredGroups() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return {monitored_.begin(), monitored_.end()};
+}
+
+void GroupListService::persistEnabledUnderLock()
+{
+    writeMeta(kFeatureEnabledKey, enabled_ ? "1" : "0");
+}
+
+void GroupListService::persistMonitoredUnderLock()
+{
+    if (db == nullptr)
+        return;
+    // 全量归零 + 监控集置 1（幂等）：monitored 是 0/1 布尔
+    if (sqlite3_exec(db, "UPDATE group_cache SET monitored = 0;", nullptr, nullptr,
+                     nullptr) != SQLITE_OK)
+    {
+        LOG_ERROR("group_cache.monitored 归零失败：" + std::string(sqlite3_errmsg(db)));
+        return;
+    }
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, "UPDATE group_cache SET monitored = 1 WHERE group_id = ?1;",
+                           -1, &statement, nullptr) != SQLITE_OK)
+        return;
+    for (std::uint64_t groupId : monitored_)
+    {
+        sqlite3_reset(statement);
+        sqlite3_clear_bindings(statement);
+        sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(groupId));
+        sqlite3_step(statement);
+    }
+    sqlite3_finalize(statement);
+}
+
 std::string GroupListService::avatarUrlFor(std::uint64_t groupId)
 {
     // qlogo 群头像规则 URL（各实现端 get_group_list 不返回头像，构造是通行做法）。
-    // 用 /100 而非 /640：面板展示尺寸只有 20~28px，640 原图约 9KB、100 约 1.6KB，
-    // 群多时差别可观
+    // 用 /100 而非 /640：面板展示尺寸只有 20~28px，640 原图约 9KB、100 约 1.6KB
     return "https://p.qlogo.cn/gh/" + std::to_string(groupId) + "/" +
            std::to_string(groupId) + "/100";
 }
@@ -139,16 +302,29 @@ void GroupListService::applyFetchedList(const std::vector<GroupListEntry> &fetch
     if (fetched.empty())
         return;
 
-    // monitored 由配置白名单派生（唯一真值来源）：刷新只覆写协议端数据列，
-    // 监控标记重新按当前白名单标注——不能"保留旧值"，因为首次拉取时镜像
-    // 还是空的，白名单标注会丢失
     std::vector<GroupListEntry> merged = fetched;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        const std::set<std::uint64_t> observing(options.observeGroups.begin(),
-                                                options.observeGroups.end());
+        // 协议端数据整表覆写，monitored 由监控集派生（唯一真值），
+        // 刷新不得丢失监控状态——含未在列表中的手动群号（补回镜像）
         for (GroupListEntry &entry : merged)
-            entry.monitored = observing.find(entry.groupId) != observing.end();
+            entry.monitored = monitored_.find(entry.groupId) != monitored_.end();
+
+        std::set<std::uint64_t> present;
+        for (const GroupListEntry &entry : merged)
+            present.insert(entry.groupId);
+        for (std::uint64_t groupId : monitored_)
+        {
+            if (present.find(groupId) != present.end())
+                continue;
+            for (const GroupListEntry &existing : mirror_)
+            {
+                if (existing.groupId != groupId)
+                    continue;
+                merged.push_back(existing); // 手动加入但不在机器人群列表里的群号
+                break;
+            }
+        }
         mirror_ = merged;
         ready_ = true;
         nextAttemptTs_ = now + kRefreshIntervalSeconds; // 成功后降频为日级刷新
@@ -183,67 +359,15 @@ void GroupListService::applyFetchedList(const std::vector<GroupListEntry> &fetch
     LOG_INFO("群列表已刷新：" + std::to_string(merged.size()) + " 个群");
 }
 
-void GroupListService::applyWhitelist(const std::vector<std::uint64_t> &observeGroups)
-{
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        options.observeGroups = observeGroups;
-        const std::set<std::uint64_t> observing(observeGroups.begin(), observeGroups.end());
-        for (GroupListEntry &entry : mirror_)
-            entry.monitored = observing.find(entry.groupId) != observing.end();
-        persistMonitoredUnderLock();
-    }
-}
-
-void GroupListService::persistMonitoredUnderLock()
-{
-    if (db == nullptr)
-        return;
-    // 全量归零 + 白名单置 1（幂等）：monitored 是 0/1 布尔，
-    // 白名单群不在 group_cache 里（机器人不在该群）时无行可写，
-    // 只影响落盘副本，不影响实际观察
-    if (sqlite3_exec(db, "UPDATE group_cache SET monitored = 0;", nullptr, nullptr,
-                     nullptr) != SQLITE_OK)
-    {
-        LOG_ERROR("group_cache.monitored 归零失败：" + std::string(sqlite3_errmsg(db)));
-        return;
-    }
-    sqlite3_stmt *statement = nullptr;
-    if (sqlite3_prepare_v2(db, "UPDATE group_cache SET monitored = 1 WHERE group_id = ?1;",
-                           -1, &statement, nullptr) != SQLITE_OK)
-        return;
-    int marked = 0;
-    for (const GroupListEntry &entry : mirror_)
-    {
-        if (!entry.monitored)
-            continue;
-        sqlite3_reset(statement);
-        sqlite3_clear_bindings(statement);
-        sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(entry.groupId));
-        if (sqlite3_step(statement) == SQLITE_DONE)
-            marked += sqlite3_changes(db);
-    }
-    sqlite3_finalize(statement);
-    LOG_INFO("观察白名单已落库：monitored=1 的群 " + std::to_string(marked) + " 个");
-}
-
 std::vector<GroupListEntry> GroupListService::snapshot() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<GroupListEntry> result = mirror_;
-    // monitored 以当前白名单为准（与落库副本一致；配置是唯一真值来源）
-    const std::set<std::uint64_t> observing(options.observeGroups.begin(),
-                                            options.observeGroups.end());
     for (GroupListEntry &entry : result)
-        entry.monitored = observing.find(entry.groupId) != observing.end();
+        entry.monitored = monitored_.find(entry.groupId) != monitored_.end();
     std::sort(result.begin(), result.end(),
               [](const GroupListEntry &left, const GroupListEntry &right) {
                   return left.memberCount > right.memberCount;
               });
     return result;
-}
-
-void GroupListService::onOptionsChanged(const PerceptionOptions &options)
-{
-    applyWhitelist(options.observeGroups);
 }

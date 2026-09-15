@@ -132,11 +132,6 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.memory.recallLimit, candidate.memory.recallLimit,
                  "memory.recall_limit", rebuild);
 
-    addIfChanged(diff, current.perception.enabled, candidate.perception.enabled,
-                 "perception.enabled", rebuild);
-    addIfChanged(diff, current.perception.observeGroups, candidate.perception.observeGroups,
-                 "perception.observe_groups", rebuild);
-
     addIfChanged(diff, current.webSearch.enabled, candidate.webSearch.enabled,
                  "web_search.enabled", rebuild);
     addIfChanged(diff, current.webSearch.provider, candidate.webSearch.provider,
