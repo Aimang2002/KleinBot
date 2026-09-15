@@ -132,6 +132,7 @@ bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::millisecon
 void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 				   ReminderService &reminders, CapabilityBroker &capabilities,
 				   PerceptionChannel &perception, GroupContextStore *groupContext,
+				   GroupContextService &groupContextService,
 				   uint64_t managerId, const std::atomic<bool> &running)
 {
 	while (running.load())
@@ -183,6 +184,8 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 		// 群内容库 TTL 清理（T7b）：删除 24h 前的消息行（镜像+磁盘）；关闭时无库
 		if (groupContext != nullptr)
 			groupContext->prune(nowSeconds());
+		// 话题状态机 pump（T7b）：时间衰减 + lull 检测，到期群经 evaluator 提交
+		groupContextService.pump(nowSeconds());
 
 		sleepWhileRunning(running, std::chrono::seconds(3));
 	}
@@ -482,10 +485,18 @@ int main(int argc, char **argv)
 	}
 	PerceptionChannel perceptionChannel(settings.perception, perceptionStore.get());
 	GroupContextService groupContextService(settings.perception, settings.bot,
-											groupContextStore.get());
+											groupContextStore.get(), &messageSender);
 	groupContextService.setSummarizer([&chatService](const std::string &systemPrompt,
 													 const std::string &userPrompt)
 		{ return chatService.buildOnce(systemPrompt, userPrompt); });
+	if (settings.bot.managerId != 0)
+	{
+		// 主动发言必须是她的声音：responder 走 replyInCharacter（管理员会话
+		// 装配人格，与事件回应同源）；无管理员则不启用主动发言
+		groupContextService.setResponder(
+			[&chatService, managerId = settings.bot.managerId](const std::string &prompt)
+			{ return chatService.replyInCharacter(managerId, prompt); });
+	}
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
 		globalVoice, &typingIndicator, &perceptionChannel, &groupContextService);
@@ -513,11 +524,21 @@ int main(int argc, char **argv)
 				LOG_ERROR("消息处理任务发生未知异常");
 			}
 		});
+	// 主动评估任务提交：按群占独立 lane（高位标志位避免与 user_id 撞车），
+	// 同群串行、跨群并行，评估在 worker 内执行不阻塞 pollingThread
+	groupContextService.setEvaluator([&messageWorkers, &groupContextService](
+										  std::uint64_t groupId)
+		{
+			constexpr std::uint64_t kGroupLaneFlag = 0x8000'0000'0000'0000ULL;
+			messageWorkers.submit(groupId | kGroupLaneFlag,
+				[&groupContextService, groupId]()
+				{ groupContextService.evaluateGroup(groupId); });
+		});
 	LOG_INFO("消息执行器线程：初始 " +
 		std::to_string(settings.messageExecution.initialWorkerThreads) +
 		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
 		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), settings.bot.managerId, std::cref(running));
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), std::ref(groupContextService), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)
