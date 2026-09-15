@@ -481,18 +481,18 @@ int main(int argc, char **argv)
 	// 须在 Message 之前构造：Message 持其指针在 @ 消息上注入话题注记
 	std::unique_ptr<PerceptionStore> perceptionStore;
 	std::unique_ptr<GroupContextStore> groupContextStore;
-	std::unique_ptr<GroupListService> groupListService;
 	if (settings.perception.observing())
 	{
 		perceptionStore = std::make_unique<PerceptionStore>(dbPath);
 		groupContextStore = std::make_unique<GroupContextStore>(dbPath);
-		// 群列表缓存（T7c）：启动即重建镜像，面板白名单选择器数据源；
-		// OneBot 就绪后由 pollingThread 拉取覆写
-		groupListService = std::make_unique<GroupListService>(dbPath, activeApiChannel,
-															  settings.perception);
 		LOG_INFO("观察通道已启用，白名单群 " + std::to_string(settings.perception.observeGroups.size()) +
 				 " 个（群内容短时缓冲：每群300条/24小时）");
 	}
+	// 群列表缓存（T7c）：白名单选择器的配置辅助，与观察通道开关解耦——
+	// 它的用途恰是帮用户从零挑白名单，绑在"已启用"上会死锁（没配置→没数据→没法配置）。
+	// 纯缓存表无隐私顾虑，只要有面板就构造；OneBot 就绪后由 pollingThread 拉取
+	std::unique_ptr<GroupListService> groupListService =
+		std::make_unique<GroupListService>(dbPath, activeApiChannel, settings.perception);
 	PerceptionChannel perceptionChannel(settings.perception, perceptionStore.get());
 	GroupContextService groupContextService(settings.perception, settings.bot,
 											groupContextStore.get(), &messageSender);

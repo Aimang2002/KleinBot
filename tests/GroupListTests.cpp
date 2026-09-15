@@ -104,7 +104,7 @@ TEST(GroupListServiceTest, FetchMergesMonitoredAndPersistsAcrossRestart)
         const GroupListEntry *unmonitored = findEntry(entries, 9001);
         ASSERT_NE(unmonitored, nullptr);
         EXPECT_FALSE(unmonitored->monitored);
-        // 就绪后不再重复探测
+        // 就绪后降频：2 秒后不拉（日级刷新间隔），冷却语义保留
         service.poll(2000);
         EXPECT_EQ(api.actions.size(), 2U);
     }

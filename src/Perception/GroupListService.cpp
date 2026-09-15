@@ -6,8 +6,10 @@
 
 namespace
 {
-// 刷新冷却：探测失败/OneBot 未就绪时的静默重试间隔（同 CapabilityBroker 模式）
+// 刷新冷却：探测失败/OneBot 未就绪时的静默重试间隔（同 CapabilityBroker 模式）；
+// 已就绪后降频为日级刷新（换机器人/群变动最终一致）
 constexpr std::int64_t kRetryCooldownSeconds = 60;
+constexpr std::int64_t kRefreshIntervalSeconds = 24 * 60 * 60;
 // 面板展示的群数上限防御（正常部署远小于此）
 constexpr std::size_t kMaxGroups = 2000;
 
@@ -97,9 +99,9 @@ void GroupListService::poll(std::int64_t now)
 {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (ready_ || now < nextAttemptTs_)
+        if (now < nextAttemptTs_)
             return;
-        nextAttemptTs_ = now + kRetryCooldownSeconds;
+        nextAttemptTs_ = now + (ready_ ? kRefreshIntervalSeconds : kRetryCooldownSeconds);
     }
 
     const OneBotApiResult result = api.call("get_group_list", nlohmann::json::object(),
@@ -148,6 +150,7 @@ void GroupListService::applyFetchedList(const std::vector<GroupListEntry> &fetch
         }
         mirror_ = merged;
         ready_ = true;
+        nextAttemptTs_ = now + kRefreshIntervalSeconds; // 成功后降频为日级刷新
     }
 
     if (sqlite3_exec(db, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr) != SQLITE_OK)
