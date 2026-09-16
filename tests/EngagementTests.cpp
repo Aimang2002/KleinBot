@@ -308,41 +308,42 @@ TEST(EngagementSessionTest, LeaveWithFinalTextDeliversThenEnds)
     EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
 }
 
-TEST(EngagementSessionTest, TurnCountHardCapForcesEndWithoutModelCall)
+TEST(EngagementSessionTest, MessageCapForcesEndWithoutModelCall)
 {
     Harness harness;
-    harness.service->onAtActivated(8823, "话题");
-    harness.feed(8823, "现场消息", harness.now);
-    for (int index = 0; index < 20; ++index)
+    harness.service->onAtActivated(8823, "话题"); // messagesSeen = 0
+
+    // 299 条群消息，每条后跟一轮发言
+    for (int index = 0; index < 299; ++index)
     {
+        harness.feed(8823, "群聊" + std::to_string(index), harness.now + index);
         harness.turnResponses.push_back(sayResponse("第" + std::to_string(index) + "句"));
         harness.service->runTurn(8823);
     }
+    ASSERT_EQ(harness.service->sessionOf(8823)->messagesSeen, 299);
     EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Active);
+    EXPECT_EQ(harness.sender->texts.size(), 299U);
 
-    // 第 21 轮：硬后盖直接结束，不再调模型（push 的响应原样留下未被消费）
-    const std::size_t callsBefore = harness.turnResponses.size();
+    // 第 300 条到量：pump 硬后盖强制收场，不再调模型
     harness.turnResponses.push_back(sayResponse("多余的一句"));
-    harness.service->runTurn(8823);
+    harness.feed(8823, "压垮的最后一根稻草", harness.now + 299);
+    harness.service->pump(harness.now + 299);
     EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
-    ASSERT_EQ(harness.sender->texts.size(), 20U) << "超限轮不发言";
-    EXPECT_EQ(harness.turnResponses.size(), callsBefore + 1) << "超限轮不消费模型响应";
+    EXPECT_EQ(harness.sender->texts.size(), 299U) << "超限不发言";
+    ASSERT_EQ(harness.turnResponses.size(), 1U) << "超限不消费模型响应";
 }
 
-TEST(EngagementSessionTest, PumpEnforcesDurationAndInactivityBackstops)
+
+TEST(EngagementSessionTest, PumpEnforcesInactivityBackstop)
 {
     Harness harness;
     harness.service->onAtActivated(8823, "话题");
 
-    harness.now += 31 * 60;
-    harness.service->pump(harness.now);
-    EXPECT_EQ(harness.service->sessionOf(8823)->endReason, "forced: 跟进时长达上限");
-
-    harness.service->onAtActivated(8824, "另一个群");
     harness.now += 11 * 60;
     harness.service->pump(harness.now);
-    EXPECT_EQ(harness.service->sessionOf(8824)->endReason, "话题沉寂");
+    EXPECT_EQ(harness.service->sessionOf(8823)->endReason, "话题沉寂");
 }
+
 
 TEST(EngagementSessionTest, LullAccumulatedMessagesTriggerTurn)
 {

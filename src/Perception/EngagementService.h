@@ -57,6 +57,7 @@ struct EngagementSession
     int turnCount = 0;
     int consecutivePasses = 0;
     int newMessagesSinceTurn = 0;    // lull 轮次触发的新消息门槛
+    int messagesSeen = 0;            // 会话存活期间经过的群消息量（强制收场上限）
     int recallUsed = 0;              // 上下文召回预算（每会话 1 次）
     std::string digest;              // 已压缩部分的滚动摘要
     std::int64_t compressedUpToTs = 0; // 摘要覆盖到的时刻（之后为原文窗口）
@@ -124,7 +125,7 @@ public:
     // 她经正常路径发言（@ 回复等）：算一轮会话活动
     void onSelfActivity(std::uint64_t groupId, std::int64_t now);
 
-    // pollingThread 每 3s：硬后盖（轮次/时长/不活跃）+ 保留期清扫 + lull 轮次触发
+    // pollingThread 每 3s：硬后盖（消息量/不活跃）+ 保留期清扫 + lull 轮次触发
     void pump(std::int64_t now);
 
     // 群 lane worker 内执行：软激活判定（judge YES → 清旧建新 + 入场轮）

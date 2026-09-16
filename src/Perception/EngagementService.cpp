@@ -19,8 +19,8 @@ constexpr std::size_t kSingleMessageTokenLimit = 1000; // 超长单条占位省�
 constexpr int kRecallBudget = 1;                  // 上下文召回：每会话 1 次
 constexpr std::size_t kRecallTopK = 8;            // 召回返回条数上限
 constexpr double kRecallFloor = 4.0;              // 召回相关性门槛（复用 TextRecall）
-constexpr int kMaxTurnsPerSession = 20;           // 单会话轮次硬上限
-constexpr std::int64_t kMaxSessionSeconds = 30 * 60;  // 单会话时长硬上限
+constexpr int kMaxTurnsPerSession = 20;           // 单会话轮次统计（不再作硬帽，日志观测用）
+constexpr std::int64_t kMaxSessionMessages = 300; // 单会话强制收场：群消息量上限
 constexpr std::int64_t kInactiveSeconds = 10 * 60;    // 群内无新消息收场
 constexpr int kPassLimit = 3;                     // 连续 pass 收场
 constexpr std::int64_t kLullSeconds = 10;         // 新消息后的静默判定
@@ -196,6 +196,7 @@ void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool at
     EngagementSession &session = it->second;
     session.lastActivityTs = now;
     session.newMessagesSinceTurn += 1;
+    session.messagesSeen += 1;
 
     // 点名（@ 或提名字）或引用回复她：待回应，立即触发一轮
     if (!record.isSelf &&
@@ -257,16 +258,10 @@ void EngagementService::pump(std::int64_t now)
                 continue;
             }
 
-            // 硬后盖：不依赖模型自觉
-            if (session.turnCount >= kMaxTurnsPerSession)
+            // 硬后盖：不依赖模型自觉（消息量上限 = 会话最多陪聊 300 条）
+            if (session.messagesSeen >= kMaxSessionMessages)
             {
-                endSessionLocked(session, now, "轮次达上限", true);
-                ++it;
-                continue;
-            }
-            if (now - session.startTs >= kMaxSessionSeconds)
-            {
-                endSessionLocked(session, now, "跟进时长达上限", true);
+                endSessionLocked(session, now, "消息量达上限", true);
                 ++it;
                 continue;
             }
@@ -639,10 +634,9 @@ void EngagementService::runTurn(std::uint64_t groupId)
         EngagementSession &session = it->second;
 
         // 锁内快照触发语境与硬后盖（模型调用在锁外，可能耗时数秒）
-        if (session.turnCount >= kMaxTurnsPerSession ||
-            clock() - session.startTs >= kMaxSessionSeconds)
+        if (session.messagesSeen >= kMaxSessionMessages)
         {
-            endSessionLocked(session, clock(), "轮次/时长达上限", true);
+            endSessionLocked(session, clock(), "消息量达上限", true);
             return;
         }
         kind = session.addressPending ? TurnKind::Address
