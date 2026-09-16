@@ -793,3 +793,111 @@ TEST(EngagementColdTest, ColdPassDecidesNotToJoinAndCooldownApplies)
     flow.spike(12);
     EXPECT_EQ(harness.agentHistories.size(), before) << "冷却期内不应再评估";
 }
+
+TEST(EngagementColdTest, LearningStateSurvivesRestart)
+{
+    TemporaryDirectory temporaryDirectory;
+    const std::string dbPath = temporaryDirectory.path() + "/c.db";
+    BotIdentity bot;
+    bot.id = 987654321;
+    bot.name = "Klein";
+    const std::uint64_t group = 77501;
+
+    std::int64_t now = 1'000'000;
+    auto store1 = std::make_unique<GroupContextStore>(dbPath);
+    EngagementService first(bot, store1.get(), nullptr, [&now] { return now; });
+    first.setMemberProvider([](std::uint64_t) { return 100L; });
+
+    // 学习基线 4 小时（每小时 40 条）
+    for (int hour = 0; hour < 4; ++hour)
+    {
+        for (int i = 0; i < 40; ++i)
+        {
+            now += 900;
+            auto rec = record(group, 42, "小白", "日常" + std::to_string(hour * 40 + i), now);
+            store1->append(rec);
+            first.onGroupMessage(rec, false);
+        }
+        now += 120;
+    }
+    store1.reset(); // "重启"
+
+    // 重启后：武装期与基线从库恢复 → 立即武装，小尖峰直接触发（无需再等 2 小时）
+    auto store2 = std::make_unique<GroupContextStore>(dbPath);
+    EngagementService second(bot, store2.get(), nullptr, [&now] { return now; });
+    second.setMemberProvider([](std::uint64_t) { return 100L; });
+    std::vector<std::uint64_t> submitted;
+    second.setSubmitTurn([&](std::uint64_t g) { submitted.push_back(g); });
+
+    now += 30;
+    for (int i = 0; i < 14; ++i)
+    {
+        now += 8;
+        auto rec = record(group, 42, "小白", "聊爆了" + std::to_string(i), now);
+        store2->append(rec);
+        second.onGroupMessage(rec, false);
+    }
+    now += 61;
+    second.pump(now);
+    ASSERT_FALSE(submitted.empty()) << "重启后武装期不应重置";
+    EXPECT_EQ(submitted.front(), group);
+}
+
+TEST(EngagementColdTest, DailyCapSurvivesRestart)
+{
+    TemporaryDirectory temporaryDirectory;
+    const std::string dbPath = temporaryDirectory.path() + "/c.db";
+    BotIdentity bot;
+    bot.id = 987654321;
+    bot.name = "Klein";
+    const std::uint64_t group = 77502;
+
+    std::int64_t now = 2'000'000;
+    auto store1 = std::make_unique<GroupContextStore>(dbPath);
+    EngagementService first(bot, store1.get(), nullptr, [&now] { return now; });
+    first.setMemberProvider([](std::uint64_t) { return 100L; });
+
+    auto feedBurst = [&](GroupContextStore &store, EngagementService &service, int count)
+    {
+        for (int i = 0; i < count; ++i)
+        {
+            now += 8;
+            auto rec = record(group, 42, "小白", "聊爆" + std::to_string(now + i), now);
+            store.append(rec);
+            service.onGroupMessage(rec, false);
+        }
+        now += 61;
+        service.pump(now);
+    };
+
+    // 武装 + 学习
+    for (int hour = 0; hour < 3; ++hour)
+        for (int i = 0; i < 4; ++i)
+        {
+            now += 900;
+            auto rec = record(group, 42, "小白", "日常" + std::to_string(hour * 4 + i), now);
+            store1->append(rec);
+            first.onGroupMessage(rec, false);
+        }
+    now += 120;
+
+    // 消耗当日帽：3 次冷启动评估，每次后跨过 2h 冷却
+    for (int round = 0; round < 3; ++round)
+    {
+        feedBurst(*store1, first, 12);
+        now += 2 * 60 * 60;
+    }
+    store1.reset(); // "重启"
+
+    // 重启后当日帽仍在（不再有 3 次机会）
+    auto store2 = std::make_unique<GroupContextStore>(dbPath);
+    EngagementService second(bot, store2.get(), nullptr, [&now] { return now; });
+    second.setMemberProvider([](std::uint64_t) { return 100L; });
+    std::vector<std::uint64_t> submitted;
+    second.setSubmitTurn([&](std::uint64_t g) { submitted.push_back(g); });
+
+    now += 61;
+    second.pump(now); // 静默期检查
+    feedBurst(*store2, second, 12);
+    EXPECT_TRUE(submitted.empty()) << "当日帽应跨重启生效";
+}

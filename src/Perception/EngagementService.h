@@ -186,6 +186,8 @@ private:
     // 冷启动：基线学习 + 热度尖峰检测 + 频控（锁内调用，pump 每 3s 触发、
     // 内部 60s 节流）；返回 true 表示命中尖峰、由调用方开冷启动会话
     bool coldCheckLocked(std::uint64_t groupId, ColdState &cold, std::int64_t now);
+    // 学习/频控状态落库（UPSERT engagement_cold；锁内调用，低频）
+    void persistColdLocked(std::uint64_t groupId);
 
     const BotIdentity bot;
     GroupContextStore *const store;

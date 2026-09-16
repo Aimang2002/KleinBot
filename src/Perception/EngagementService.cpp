@@ -124,6 +124,23 @@ EngagementService::EngagementService(BotIdentity bot, GroupContextStore *store,
       clock(clock ? std::move(clock)
                   : [] { return static_cast<std::int64_t>(std::time(nullptr)); })
 {
+    // 自学习状态恢复：EMA/武装期/当日帽/冷却截止持久化在 engagement_cold，
+    // 重启续用（消息桶计数是实时数据，不持久化，从活流量自然回填）
+    if (store == nullptr)
+        return;
+    for (const auto &[groupId, row] : store->loadEngagementCold())
+    {
+        ColdState &cold = colds[groupId];
+        cold.hourlyEma = row.hourlyEma;
+        cold.armedTs = row.armedTs;
+        cold.dayAnchor = row.dayAnchor;
+        cold.coldToday = row.coldToday;
+        cold.emaTs = row.armedTs;
+        if (row.cooldownUntil > 0)
+            coldCooldownUntil[groupId] = row.cooldownUntil;
+    }
+    if (!colds.empty())
+        LOG_INFO("冷启动基线状态已从库恢复：" + std::to_string(colds.size()) + " 个群");
 }
 
 void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool atMentioned)
@@ -138,6 +155,7 @@ void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool at
         cold.armedTs = now;
         cold.dayAnchor = now;
         cold.emaTs = now;
+        persistColdLocked(record.groupId);
     }
     cold.recent.push_back(now);
     cold.hour.push_back(now);
@@ -151,6 +169,7 @@ void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool at
         const double sample = static_cast<double>(cold.hour.size());
         cold.hourlyEma = cold.hourlyEma < 0 ? sample : cold.hourlyEma * 0.7 + sample * 0.3;
         cold.emaTs = now;
+        persistColdLocked(record.groupId);
     }
 
     auto it = sessions.find(record.groupId);
@@ -319,6 +338,7 @@ bool EngagementService::coldCheckLocked(std::uint64_t groupId, ColdState &cold,
     {
         cold.dayAnchor = now;
         cold.coldToday = 0;
+        persistColdLocked(groupId);
     }
     if (cold.coldToday >= kColdDailyCap)
         return false;
@@ -340,11 +360,29 @@ bool EngagementService::coldCheckLocked(std::uint64_t groupId, ColdState &cold,
         return false;
 
     cold.coldToday += 1;
+    persistColdLocked(groupId);
     LOG_INFO("冷启动尖峰命中：群 " + std::to_string(groupId) + "，10 分钟 " +
              std::to_string(cold.recent.size()) + " 条 ≥ 阈值 " +
              std::to_string(threshold) + "（基线 " + std::to_string(baseline) +
              "/桶，人数 " + std::to_string(static_cast<long>(members)) + "）");
     return true;
+}
+
+void EngagementService::persistColdLocked(std::uint64_t groupId)
+{
+    if (store == nullptr)
+        return;
+    auto it = colds.find(groupId);
+    if (it == colds.end())
+        return;
+    EngagementColdRow row;
+    row.hourlyEma = it->second.hourlyEma;
+    row.armedTs = it->second.armedTs;
+    row.dayAnchor = it->second.dayAnchor;
+    row.coldToday = it->second.coldToday;
+    auto cooldown = coldCooldownUntil.find(groupId);
+    row.cooldownUntil = cooldown != coldCooldownUntil.end() ? cooldown->second : 0;
+    store->saveEngagementCold(groupId, row);
 }
 
 void EngagementService::runJudge(std::uint64_t groupId)
@@ -867,6 +905,7 @@ void EngagementService::endSessionLocked(EngagementSession &session, std::int64_
     // 会话结束 → 冷启动冷却（冷启动开启的冷却更久；刚结束就冷启动最讨嫌）
     coldCooldownUntil[session.groupId] =
         now + (session.coldInitiated ? kColdCooldown : kAnyEndCooldown);
+    persistColdLocked(session.groupId);
     LOG_INFO("话题会话结束（" + std::string(forced ? "强制" : "自然") + "）：群 " +
              std::to_string(session.groupId) + "，原因：" + reason + "，保留 24 小时");
 }

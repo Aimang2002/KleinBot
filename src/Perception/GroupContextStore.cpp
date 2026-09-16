@@ -81,7 +81,14 @@ GroupContextStore::GroupContextStore(const std::string &dbPath)
         " message_id TEXT NOT NULL DEFAULT '',"
         " reply_to_message_id TEXT NOT NULL DEFAULT '');"
         "CREATE INDEX IF NOT EXISTS idx_group_messages_group"
-        " ON group_messages(group_id, seq);";
+        " ON group_messages(group_id, seq);"
+        "CREATE TABLE IF NOT EXISTS engagement_cold ("
+        " group_id INTEGER PRIMARY KEY,"
+        " hourly_ema REAL NOT NULL DEFAULT -1,"
+        " armed_ts INTEGER NOT NULL DEFAULT 0,"
+        " day_anchor INTEGER NOT NULL DEFAULT 0,"
+        " cold_today INTEGER NOT NULL DEFAULT 0,"
+        " cooldown_until INTEGER NOT NULL DEFAULT 0);";
     char *err = nullptr;
     if (sqlite3_exec(db, ddl, nullptr, nullptr, &err) != SQLITE_OK)
     {
@@ -215,4 +222,62 @@ std::vector<GroupMessageRecord> GroupContextStore::snapshot(std::uint64_t groupI
     if (it == mirrors.end())
         return {};
     return {it->second.begin(), it->second.end()};
+}
+
+std::map<std::uint64_t, EngagementColdRow> GroupContextStore::loadEngagementCold() const
+{
+    std::map<std::uint64_t, EngagementColdRow> result;
+    if (db == nullptr)
+        return result;
+    std::lock_guard<std::mutex> lock(mutex);
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT group_id, hourly_ema, armed_ts, day_anchor,"
+                           " cold_today, cooldown_until FROM engagement_cold;",
+                           -1, &statement, nullptr) != SQLITE_OK)
+        return result;
+    while (sqlite3_step(statement) == SQLITE_ROW)
+    {
+        EngagementColdRow row;
+        const std::uint64_t groupId =
+            static_cast<std::uint64_t>(sqlite3_column_int64(statement, 0));
+        row.hourlyEma = sqlite3_column_double(statement, 1);
+        row.armedTs = sqlite3_column_int64(statement, 2);
+        row.dayAnchor = sqlite3_column_int64(statement, 3);
+        row.coldToday = sqlite3_column_int(statement, 4);
+        row.cooldownUntil = sqlite3_column_int64(statement, 5);
+        result[groupId] = row;
+    }
+    sqlite3_finalize(statement);
+    return result;
+}
+
+void GroupContextStore::saveEngagementCold(std::uint64_t groupId,
+                                           const EngagementColdRow &row)
+{
+    if (db == nullptr)
+        return;
+    std::lock_guard<std::mutex> lock(mutex);
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db,
+                           "INSERT INTO engagement_cold(group_id, hourly_ema, armed_ts,"
+                           " day_anchor, cold_today, cooldown_until)"
+                           " VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
+                           " ON CONFLICT(group_id) DO UPDATE SET"
+                           " hourly_ema=?2, armed_ts=?3, day_anchor=?4,"
+                           " cold_today=?5, cooldown_until=?6;",
+                           -1, &statement, nullptr) != SQLITE_OK)
+    {
+        LOG_ERROR("冷启动状态落库失败（prepare）");
+        return;
+    }
+    sqlite3_bind_int64(statement, 1, static_cast<std::int64_t>(groupId));
+    sqlite3_bind_double(statement, 2, row.hourlyEma);
+    sqlite3_bind_int64(statement, 3, row.armedTs);
+    sqlite3_bind_int64(statement, 4, row.dayAnchor);
+    sqlite3_bind_int(statement, 5, row.coldToday);
+    sqlite3_bind_int64(statement, 6, row.cooldownUntil);
+    if (sqlite3_step(statement) != SQLITE_DONE)
+        LOG_ERROR("冷启动状态落库失败（step）");
+    sqlite3_finalize(statement);
 }

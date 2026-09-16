@@ -33,6 +33,16 @@ struct GroupMessageRecord
     std::string replyToMessageId;    // 被引用消息的原始 id，空为无引用
 };
 
+// 冷启动自学习状态（每群一行；EMA/武装期/当日帽/冷却截止的持久化形态）
+struct EngagementColdRow
+{
+    double hourlyEma = -1.0;        // 每小时消息数 EMA；-1 = 未学习
+    std::int64_t armedTs = 0;       // 武装期起算（首条消息）
+    std::int64_t dayAnchor = 0;     // 当日帽的日界锚点
+    int coldToday = 0;              // 今日冷启动评估次数
+    std::int64_t cooldownUntil = 0; // 冷启动禁入截止
+};
+
 class GroupContextStore
 {
 public:
@@ -52,6 +62,10 @@ public:
 
     // 某群当前镜像（时间序）；groupContext/选择器读路径，锁内快照拷贝
     std::vector<GroupMessageRecord> snapshot(std::uint64_t groupId) const;
+
+    // 冷启动自学习状态：启动时整表读入，状态变更时 UPSERT（低频）
+    std::map<std::uint64_t, EngagementColdRow> loadEngagementCold() const;
+    void saveEngagementCold(std::uint64_t groupId, const EngagementColdRow &row);
 
 private:
     sqlite3 *db = nullptr;

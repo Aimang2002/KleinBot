@@ -358,3 +358,44 @@ TEST(GroupContextServiceTest, SuppressionMarkerAndContract)
     EXPECT_NE(std::string(contract).find("[不回应]"), std::string::npos);
     EXPECT_NE(std::string(contract).find("不许沉默"), std::string::npos);
 }
+
+TEST(GroupContextStoreTest, EngagementColdRoundtripAndReopen)
+{
+    TemporaryDirectory temporaryDirectory;
+    const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
+    {
+        GroupContextStore store(dbPath);
+        ASSERT_TRUE(store.isOpen());
+        EngagementColdRow row;
+        row.hourlyEma = 37.5;
+        row.armedTs = 1000;
+        row.dayAnchor = 2000;
+        row.coldToday = 2;
+        row.cooldownUntil = 3000;
+        store.saveEngagementCold(77001, row);
+        row.hourlyEma = 5.0;
+        row.armedTs = 1500;
+        store.saveEngagementCold(77002, row);
+    }
+    {
+        // 重开库：整表读回（重启续用的持久化语义）
+        GroupContextStore store(dbPath);
+        auto loaded = store.loadEngagementCold();
+        ASSERT_EQ(loaded.size(), 2U);
+        ASSERT_EQ(loaded.count(77001), 1U);
+        EXPECT_DOUBLE_EQ(loaded[77001].hourlyEma, 37.5);
+        EXPECT_EQ(loaded[77001].armedTs, 1000);
+        EXPECT_EQ(loaded[77001].coldToday, 2);
+        EXPECT_EQ(loaded[77001].cooldownUntil, 3000);
+        EXPECT_DOUBLE_EQ(loaded[77002].hourlyEma, 5.0);
+
+        // UPSERT 覆盖
+        EngagementColdRow updated;
+        updated.hourlyEma = 9.0;
+        updated.armedTs = 1500;
+        store.saveEngagementCold(77002, updated);
+        auto reloaded = store.loadEngagementCold();
+        EXPECT_DOUBLE_EQ(reloaded[77002].hourlyEma, 9.0);
+        EXPECT_EQ(reloaded[77002].coldToday, 0) << "未写字段按默认值覆盖";
+    }
+}
