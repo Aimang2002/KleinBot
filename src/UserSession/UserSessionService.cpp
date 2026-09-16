@@ -396,10 +396,13 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     result.model_name = p.current_model;
 
     // 超参数 + system_prompt：人格 + 服务契约（契约总是包裹在人格外层，含自定义人格）
+    // 采样参数跟随配置实时值（而非建用户时的快照）：改配置+重启后对所有用户生效，
+    // 温度/惩罚项是全局口味，不该被用户创建时刻的旧值钉死。用户级覆盖位保留字段
+    // （person.temperature 等），待未来出现独立调参入口时再启用
     result.request.system_prompt = p.system_prompt + kServiceContractFrame;
-    result.request.temperature = p.temperature;
-    result.request.frequency_penalty = p.frequency_penalty;
-    result.request.presence_penalty = p.presence_penalty;
+    result.request.temperature = this->chatOptions.temperature;
+    result.request.frequency_penalty = this->chatOptions.frequencyPenalty;
+    result.request.presence_penalty = this->chatOptions.presencePenalty;
 
     // ===== 临时裁切算法（占位，待 Phase 3 后期替换） =====
     // 策略：
