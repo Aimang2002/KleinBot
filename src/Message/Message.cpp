@@ -1,6 +1,7 @@
 #include "../ModelApiCaller/Dock.hpp"
 #include "../submodules/CloudMusicID/CloudMusicID.h"
 #include "../utils/Utils.hpp"
+#include "../utils/TextSplit.h"
 #include "../Asset/ImageAssetStore.h"
 #include "../Application/ReplyContextRouting.h"
 #include "../Application/TypingIndicator.h"
@@ -236,53 +237,18 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 
 void Message::dispatchText(const InboundMessage &data, const std::string &text)
 {
-	// 群消息上限 5000 字节，私聊 4096 字符。本函数按 UTF-8 字符切分以避免截断到半个汉字
+	// 群消息上限 5000 字节，私聊 4096 字符。按"一句一条"切分（真人打字习惯：
+	// 换行即分条、代码块整发、空行丢弃），超长段按 UTF-8 字符硬切防截断
 	const bool is_group = (data.message_type == "group");
 	const size_t max_chars = is_group ? 5000 : 4096;
 
-	if (text.size() <= max_chars)
+	const auto segments = splitTextSegments(text, max_chars);
+	for (std::size_t index = 0; index < segments.size(); ++index)
 	{
-		dispatch(data, TextMessage{text});
-		return;
-	}
-
-	LOG_WARNING("文本过长，将使用分批次发送");
-
-	std::string remaining = text;
-	auto cut_utf8_front = [](std::string &str, size_t n) -> std::string
-	{
-		size_t end_byte_pos = 0;
-		size_t char_count = 0;
-		for (size_t i = 0; i < str.length() && char_count < n;)
-		{
-			int len = 1;
-			unsigned char c = str[i];
-			if ((c & 0xF8) == 0xF0)
-				len = 4;
-			else if ((c & 0xF0) == 0xE0)
-				len = 3;
-			else if ((c & 0xE0) == 0xC0)
-				len = 2;
-
-			if (i + len > str.length())
-				break;
-			i += len;
-			end_byte_pos = i;
-			char_count++;
-		}
-		std::string head = str.substr(0, end_byte_pos);
-		str.erase(0, end_byte_pos);
-		return head;
-	};
-
-	while (!remaining.empty())
-	{
-		std::string chunk = cut_utf8_front(remaining, max_chars);
-		dispatch(data, TextMessage{chunk});
-		if (!remaining.empty())
-		{
+		dispatch(data, TextMessage{segments[index]});
+		// 分条间隔：模拟真人连发节奏，也规避实现端风控
+		if (index + 1 < segments.size())
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		}
 	}
 }
 
