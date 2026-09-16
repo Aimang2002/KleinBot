@@ -653,3 +653,143 @@ TEST(EngagementIntegrationTest, AtMentionHardActivatesSession)
     ASSERT_TRUE(engagement.sessionOf(8823).has_value());
     EXPECT_FALSE(engagement.sessionOf(8823)->entryPending) << "@ 激活无入场轮";
 }
+
+
+// ===== 冷启动自动介入：基线模型 + 热度尖峰 + 频控 =====
+// 机制说明：冷启动不经过 worker judge——尖峰命中直接开冷启动会话并跑
+// 入场轮（带人格的主模型三选一自决）。单测 Harness 的 submitTurn 只入队，
+// 因此 spike() 里显式对新增提交逐个 runTurn（模拟群 lane 执行）。
+struct ColdFlow
+{
+    Harness &h;
+    std::int64_t &now;
+    const std::uint64_t group = 77500;
+
+    ColdFlow(Harness &harness) : h(harness), now(harness.now) {}
+
+    void setMembers(long count)
+    {
+        h.service->setMemberProvider([count](std::uint64_t) { return count; });
+    }
+
+    // 低频日常流量：hours 小时、每小时 msgs 条（学习基线，跨整点采样 EMA）
+    void warm(int hours, int msgsPerHour)
+    {
+        for (int hour = 0; hour < hours; ++hour)
+        {
+            for (int i = 0; i < msgsPerHour; ++i)
+            {
+                now += 3600 / msgsPerHour;
+                h.feed(group, "闲聊" + std::to_string(hour * 10 + i), now);
+            }
+            now += 120;
+        }
+    }
+
+    // 10 分钟内突发 count 条，随后跨过检查节流并执行排队的轮次
+    void spike(int count, int step = 8)
+    {
+        const std::size_t before = h.submittedTurns.size();
+        for (int i = 0; i < count; ++i)
+        {
+            now += step;
+            h.feed(group, "话题聊爆了" + std::to_string(i), now);
+        }
+        now += 61;
+        h.service->pump(now);
+        for (std::size_t i = before; i < h.submittedTurns.size(); ++i)
+            h.service->runTurn(h.submittedTurns[i]);
+    }
+};
+
+TEST(EngagementColdTest, ArmedAfterTwoHoursThenSpikeTriggersColdEntry)
+{
+    Harness harness;
+    ColdFlow flow(harness);
+    flow.setMembers(200);
+
+    // 武装期内尖峰不触发
+    flow.spike(12);
+    EXPECT_FALSE(harness.service->sessionOf(77500).has_value()) << "武装期未过不应介入";
+
+    // 学习基线 3 小时（每小时 4 条 → 阈值 = max(6, 200×3%=6, 基线×3) = 6）
+    flow.warm(3, 4);
+    harness.turnResponses.push_back(sayResponse("聊什么呢 我也看看"));
+    flow.spike(12);
+    ASSERT_TRUE(harness.service->sessionOf(77500).has_value()) << "武装期满+尖峰应触发";
+    EXPECT_TRUE(harness.service->sessionOf(77500)->coldInitiated);
+    EXPECT_FALSE(harness.sender->texts.empty()) << "冷入场发言";
+    EXPECT_NE(harness.agentHistories.back().front().content.find("没有任何人点名你"), std::string::npos)
+        << "冷入场应使用人格自决 ask";
+}
+
+TEST(EngagementColdTest, BaselineLearnsAndRaisesThreshold)
+{
+    Harness harness;
+    ColdFlow flow(harness);
+    flow.setMembers(100); // 地板 = max(6, 100×3%=3) = 6
+
+    // 每小时 40 条 → EMA ≈ 40 → 阈值 = max(6, 3, 40×24/144×3=20) = 20
+    flow.warm(4, 40);
+    flow.spike(12);
+    EXPECT_FALSE(harness.service->sessionOf(77500).has_value())
+        << "高基线群里的小突发不应触发";
+    harness.turnResponses.push_back(sayResponse("这么热闹 我也来说两句"));
+    flow.spike(25);
+    EXPECT_TRUE(harness.service->sessionOf(77500).has_value()) << "超阈值真尖峰应触发";
+}
+
+TEST(EngagementColdTest, MemberFloorBlocksSmallBurstsInHugeGroups)
+{
+    Harness harness;
+    ColdFlow flow(harness);
+    flow.setMembers(2000); // 人数地板 = 2000×3% = 60
+
+    flow.warm(3, 2); // 基线极低
+    flow.spike(30);  // 超过 6 与基线×3，但低于人数地板
+    EXPECT_FALSE(harness.service->sessionOf(77500).has_value())
+        << "大群的人数地板应抬高触发门槛";
+}
+
+TEST(EngagementColdTest, DailyCapLimitsColdEvaluations)
+{
+    Harness harness;
+    ColdFlow flow(harness);
+    flow.setMembers(100);
+    flow.warm(3, 4);
+
+    // 3 次冷启动评估：默认 pass → 自决不加入 → 冷却 2h
+    for (int round = 0; round < 3; ++round)
+    {
+        const std::size_t before = harness.agentHistories.size();
+        flow.spike(12);
+        ASSERT_GT(harness.agentHistories.size(), before) << "第 " << round + 1 << " 次应评估";
+        flow.now += 2 * 60 * 60; // 跨过冷启动冷却
+    }
+    const std::size_t callsAfterCap = harness.agentHistories.size();
+
+    // 第 4 次：当日帽拦截，不再发起评估
+    flow.spike(12);
+    EXPECT_EQ(harness.agentHistories.size(), callsAfterCap) << "当日帽应拦截第 4 次";
+}
+
+TEST(EngagementColdTest, ColdPassDecidesNotToJoinAndCooldownApplies)
+{
+    Harness harness;
+    ColdFlow flow(harness);
+    flow.setMembers(100);
+    flow.warm(3, 4);
+
+    // 冷入场轮模型默认 pass → 自决不加入 → 会话即收场
+    flow.spike(12);
+    auto session = harness.service->sessionOf(77500);
+    ASSERT_TRUE(session.has_value());
+    EXPECT_EQ(session->state, EngagementState::Ended);
+    EXPECT_NE(session->endReason.find("冷启动自决"), std::string::npos);
+
+    // 冷却期（2 小时）内再尖峰不再评估
+    const std::size_t before = harness.agentHistories.size();
+    flow.now += 10 * 60;
+    flow.spike(12);
+    EXPECT_EQ(harness.agentHistories.size(), before) << "冷却期内不应再评估";
+}

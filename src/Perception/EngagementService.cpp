@@ -31,6 +31,19 @@ constexpr std::size_t kJudgeHourlyCap = 6;        // judge 每群每小时上限
 constexpr std::int64_t kJudgeFuseWindow = 60 * 60;
 constexpr std::int64_t kRetentionSeconds = 24 * 60 * 60; // 结束后保留期
 
+// 冷启动自动介入（热度尖峰自决；真机再调的初值，零旋钮）
+constexpr std::int64_t kColdCheckInterval = 60;      // 冷启动检查节流
+constexpr std::int64_t kSpikeBucketSeconds = 600;    // 尖峰观察桶：10 分钟
+constexpr double kSpikeRatio = 3.0;                  // 桶计数 ≥ 基线×3 视为尖峰
+constexpr double kSpikeFloor = 6.0;                  // 绝对地板（防死群噪声）
+constexpr double kMemberFloorRatio = 0.03;           // 人数地板：人数 × 3%
+constexpr double kMemberPriorDaily = 0.2;            // 冷启动先验：人数 × 0.2 条/天
+constexpr int kColdDailyCap = 3;                     // 冷启动评估：每群每天上限
+constexpr std::int64_t kColdCooldown = 2 * 60 * 60;  // 冷启动会话结束后冷却
+constexpr std::int64_t kAnyEndCooldown = 60 * 60;    // 任意会话结束后冷却
+constexpr std::int64_t kArmSeconds = 2 * 60 * 60;    // 武装期：观察满 2 小时才启用
+constexpr std::size_t kColdWindowMessages = 15;      // 冷启动入场材料条数
+
 // 会话轮契约：动作三选一，行为约束归 system
 const char *const kEngagementContract =
     "\n\n[系统注] 你正在QQ群里跟进一个话题，你的每轮输出是一次群插话，不是一对一对话："
@@ -59,6 +72,11 @@ const char *const kFollowUpAsk =
 
 const char *const kAddressAsk =
     "\n\n以上是群聊现场。有人点名你或回复你，必须回应：group_say 或离场前说明。";
+
+const char *const kColdEntryAsk =
+    "\n\n以上是群里正在聊的话题。注意：没有任何人点名你，是否主动加入完全由你的性格"
+    "决定——如果你的性格与判断觉得自然、确实有值得说的一句，就用一句话加入；"
+    "高冷、无话可说、话题过于内部化、或时机不对，就 leave_topic，这同样是正确的选择。";
 
 const char *const kSaySchema =
     R"({"type":"function","function":{"name":"group_say","description":"在群里说一句话（原样发出）。要说话时调用，绝不直接用文字回复。","parameters":{"type":"object","properties":{"text":{"type":"string","description":"要说的那句话本身，口语、自然、简短"}},"required":["text"]}}})";
@@ -112,6 +130,28 @@ void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool at
 {
     const std::int64_t now = record.timestamp;
     std::lock_guard<std::mutex> lock(mutex);
+
+    // 冷启动基线喂食：所有入站消息都计数（与会话状态无关）
+    ColdState &cold = colds[record.groupId];
+    if (cold.armedTs == 0)
+    {
+        cold.armedTs = now;
+        cold.dayAnchor = now;
+        cold.emaTs = now;
+    }
+    cold.recent.push_back(now);
+    cold.hour.push_back(now);
+    while (!cold.recent.empty() && now - cold.recent.front() > kSpikeBucketSeconds)
+        cold.recent.pop_front();
+    while (!cold.hour.empty() && now - cold.hour.front() > 3600)
+        cold.hour.pop_front();
+    // 每小时采样一次基线 EMA（一小时消息数）
+    if (now - cold.emaTs >= 3600)
+    {
+        const double sample = static_cast<double>(cold.hour.size());
+        cold.hourlyEma = cold.hourlyEma < 0 ? sample : cold.hourlyEma * 0.7 + sample * 0.3;
+        cold.emaTs = now;
+    }
 
     auto it = sessions.find(record.groupId);
     if (it == sessions.end() || it->second.state != EngagementState::Active)
@@ -178,6 +218,7 @@ void EngagementService::onSelfActivity(std::uint64_t groupId, std::int64_t now)
 void EngagementService::pump(std::int64_t now)
 {
     std::vector<std::uint64_t> dueTurns;
+    std::vector<std::uint64_t> coldTriggers;
     {
         std::lock_guard<std::mutex> lock(mutex);
         for (auto it = sessions.begin(); it != sessions.end();)
@@ -227,10 +268,83 @@ void EngagementService::pump(std::int64_t now)
             }
             ++it;
         }
+
+        // 冷启动检查：仅无存活会话的群（内部 60s 节流 + 武装期 + 频控）
+        for (auto &[groupId, cold] : colds)
+        {
+            auto it = sessions.find(groupId);
+            if (it != sessions.end() && it->second.state == EngagementState::Active)
+                continue;
+            if (coldCheckLocked(groupId, cold, now))
+                coldTriggers.push_back(groupId);
+        }
     }
     if (submitTurn != nullptr)
+    {
         for (std::uint64_t groupId : dueTurns)
             submitTurn(groupId);
+        for (std::uint64_t groupId : coldTriggers)
+        {
+            std::string topic;
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                const auto records = store != nullptr ? store->snapshot(groupId)
+                                                      : std::vector<GroupMessageRecord>{};
+                if (records.empty())
+                    continue;
+                createSessionLocked(groupId, records.back().text, now, "冷启动");
+                sessions[groupId].coldPending = true;
+                sessions[groupId].coldInitiated = true;
+                topic = records.back().text;
+            }
+            LOG_INFO("冷启动热度尖峰：群 " + std::to_string(groupId) +
+                     "，提交自决入场轮（话题：" + topic + "）");
+            submitTurn(groupId);
+        }
+    }
+}
+
+bool EngagementService::coldCheckLocked(std::uint64_t groupId, ColdState &cold,
+                                        std::int64_t now)
+{
+    // 武装期：观察不满 2 小时不启用（基线未成形）
+    if (cold.armedTs == 0 || now - cold.armedTs < kArmSeconds)
+        return false;
+    // 检查节流
+    if (now - cold.lastCheck < kColdCheckInterval)
+        return false;
+    cold.lastCheck = now;
+    // 日界重置
+    if (now - cold.dayAnchor >= 86400)
+    {
+        cold.dayAnchor = now;
+        cold.coldToday = 0;
+    }
+    if (cold.coldToday >= kColdDailyCap)
+        return false;
+    auto cooldownIt = coldCooldownUntil.find(groupId);
+    if (cooldownIt != coldCooldownUntil.end() && now < cooldownIt->second)
+        return false;
+
+    // 阈值模型：人数给地板与先验，EMA 管学习
+    const double members = memberProvider != nullptr
+                               ? static_cast<double>(memberProvider(groupId))
+                               : 0.0;
+    const double emaDaily = cold.hourlyEma >= 0 ? cold.hourlyEma * 24.0 : 0.0;
+    const double expectedDaily = std::max(members * kMemberPriorDaily, emaDaily);
+    const double baseline = expectedDaily / 144.0; // 折算到 10 分钟桶
+    const double threshold = std::max({kSpikeFloor, members * kMemberFloorRatio,
+                                       baseline * kSpikeRatio});
+    const double bucket = static_cast<double>(cold.recent.size());
+    if (bucket < threshold)
+        return false;
+
+    cold.coldToday += 1;
+    LOG_INFO("冷启动尖峰命中：群 " + std::to_string(groupId) + "，10 分钟 " +
+             std::to_string(cold.recent.size()) + " 条 ≥ 阈值 " +
+             std::to_string(threshold) + "（基线 " + std::to_string(baseline) +
+             "/桶，人数 " + std::to_string(static_cast<long>(members)) + "）");
+    return true;
 }
 
 void EngagementService::runJudge(std::uint64_t groupId)
@@ -469,6 +583,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     enum class TurnKind
     {
         Entry,
+        ColdEntry,
         FollowUp,
         Address,
     };
@@ -493,8 +608,9 @@ void EngagementService::runTurn(std::uint64_t groupId)
             return;
         }
         kind = session.addressPending ? TurnKind::Address
-                                      : (session.entryPending ? TurnKind::Entry
-                                                              : TurnKind::FollowUp);
+                                      : (session.coldPending  ? TurnKind::ColdEntry
+                                         : session.entryPending ? TurnKind::Entry
+                                                                : TurnKind::FollowUp);
         startTs = session.startTs;
         digest = session.digest;
         compressedUpToTs = session.compressedUpToTs;
@@ -530,6 +646,8 @@ void EngagementService::runTurn(std::uint64_t groupId)
     const char *ask = kFollowUpAsk;
     if (kind == TurnKind::Entry)
         ask = kEntryAsk;
+    else if (kind == TurnKind::ColdEntry)
+        ask = kColdEntryAsk;
     else if (kind == TurnKind::Address)
         ask = kAddressAsk;
     const std::string contract = std::string(kEngagementContract) +
@@ -610,6 +728,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     EngagementSession &session = it->second;
     session.addressPending = false;
     session.entryPending = false;
+    session.coldPending = false;
     session.lastTurnTs = now;
     session.newMessagesSinceTurn = 0;
 
@@ -644,6 +763,12 @@ void EngagementService::runTurn(std::uint64_t groupId)
         break;
     case EngagementTurn::Kind::Pass:
     default:
+        if (kind == TurnKind::ColdEntry)
+        {
+            // 冷启动自决沉默：等于决定不加入，直接收场（不是 pass 计数）
+            endSessionLocked(session, now, "冷启动自决：暂不介入", false);
+            break;
+        }
         session.consecutivePasses += 1;
         if (session.consecutivePasses >= kPassLimit)
             endSessionLocked(session, now, "连续沉默", false);
@@ -739,6 +864,9 @@ void EngagementService::endSessionLocked(EngagementSession &session, std::int64_
     session.state = EngagementState::Ended;
     session.endTs = now;
     session.endReason = forced ? "forced: " + reason : reason;
+    // 会话结束 → 冷启动冷却（冷启动开启的冷却更久；刚结束就冷启动最讨嫌）
+    coldCooldownUntil[session.groupId] =
+        now + (session.coldInitiated ? kColdCooldown : kAnyEndCooldown);
     LOG_INFO("话题会话结束（" + std::string(forced ? "强制" : "自然") + "）：群 " +
              std::to_string(session.groupId) + "，原因：" + reason + "，保留 24 小时");
 }

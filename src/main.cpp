@@ -518,6 +518,14 @@ int main(int argc, char **argv)
 		[&chatService, worker = settings.models.worker](const std::string &systemPrompt,
 														const std::string &userPrompt)
 		{ return chatService.buildOnceWith(worker, systemPrompt, userPrompt); });
+	// 冷启动阈值的人数地板/先验：从群列表镜像查成员数
+	engagementService.setMemberProvider([&groupListService](std::uint64_t groupId) -> long
+		{
+			for (const GroupListEntry &entry : groupListService->snapshot())
+				if (entry.groupId == groupId)
+					return entry.memberCount;
+			return 0;
+		});
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
 		globalVoice, &typingIndicator, &perceptionChannel, &groupContextService);
