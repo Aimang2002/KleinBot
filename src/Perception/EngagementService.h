@@ -164,7 +164,7 @@ private:
                                 std::int64_t now);
     bool replyToSelf(const GroupMessageRecord &record) const;
     bool allowJudgeLocked(std::uint64_t groupId, std::int64_t now);
-    // 材料装配：原文窗口（超长占位）+ 预算内直灌；超预算把最旧一段经
+    // 材料装配：原文窗口（超长保头截断）+ 预算内直灌；超预算把最旧一段经
     // worker 合并进滚动摘要，只留原文尾巴。worker 调用在锁外由调用方保证
     PreparedContext prepareContext(const std::vector<GroupMessageRecord> &records,
                                    const std::string &digest,

@@ -352,7 +352,7 @@ TEST(EngagementSessionTest, LullAccumulatedMessagesTriggerTurn)
     harness.feed(8823, "一", harness.now);
     harness.feed(8823, "二", harness.now + 1);
     harness.feed(8823, "三", harness.now + 2);
-    harness.now += 60; // 跨过 45s 轮次节流 + 10s lull（最后消息在 now+2）
+    harness.now += 60; // 跨过 20s 轮次节流 + 4s lull（最后消息在 now+2）
     harness.service->pump(harness.now);
     ASSERT_FALSE(harness.submittedTurns.empty());
     EXPECT_EQ(harness.submittedTurns.back(), 8823U);
@@ -451,7 +451,7 @@ TEST(EngagementContextTest, EstimateTokensHeuristic)
     EXPECT_EQ(EngagementService::estimateTokens("ab一二"), 2U);
 }
 
-TEST(EngagementContextTest, OversizedMessageReplacedByPlaceholder)
+TEST(EngagementContextTest, OversizedMessageTruncatedKeepingHead)
 {
     Harness harness;
     harness.service->onAtActivated(8823, "话题");
@@ -462,9 +462,11 @@ TEST(EngagementContextTest, OversizedMessageReplacedByPlaceholder)
 
     ASSERT_FALSE(harness.agentHistories.empty());
     const std::string &material = harness.agentHistories.front().front().content;
-    EXPECT_NE(material.find("[超长消息已省略]"), std::string::npos);
+    EXPECT_NE(material.find("……（后文略）"), std::string::npos) << "截断有省略标记";
+    EXPECT_NE(material.find(repeatUtf8("超导", 60)), std::string::npos)
+        << "保头截断，开头语气仍在";
     EXPECT_EQ(material.find(repeatUtf8("超导", 600)), std::string::npos)
-        << "原文不进材料";
+        << "原文全文不进材料";
     EXPECT_NE(material.find("正常消息"), std::string::npos);
 }
 
