@@ -231,7 +231,7 @@ TEST(EngagementSessionTest, EndedSessionRetainedThenSweptAfterRetention)
     EXPECT_EQ(ended->endReason, "聊完了");
 
     // 保留期内不清理
-    harness.now += 23 * 60 * 60;
+    harness.now += 1 * 60 * 60;
     harness.service->pump(harness.now);
     EXPECT_TRUE(harness.service->sessionOf(8823).has_value());
 
@@ -250,8 +250,8 @@ TEST(EngagementSessionTest, NewActivationReplacesEndedSessionImmediately)
     harness.service->runTurn(8823);
     ASSERT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
 
-    // 保留期内下午再触发：旧上下文立刻让位
-    harness.now += 5 * 60 * 60;
+    // 保留期内稍后再触发：旧上下文立刻让位
+    harness.now += 1 * 60 * 60;
     harness.service->onAtActivated(8823, "下午的新话题");
     auto session = harness.service->sessionOf(8823);
     ASSERT_EQ(session->state, EngagementState::Active);

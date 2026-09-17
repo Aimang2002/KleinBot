@@ -501,7 +501,7 @@ int main(int argc, char **argv)
 	groupContextService.setSummarizer([&chatService](const std::string &systemPrompt,
 													 const std::string &userPrompt)
 		{ return chatService.buildOnce(systemPrompt, userPrompt); });
-	// 话题会话（意志层 v2）：每群至多一个存活会话，激活→轮次→保留 24h；
+	// 话题会话（意志层 v2）：每群至多一个存活会话，激活→轮次→保留 2h；
 	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=judge/压缩），未配管理员
 	// 则无主模型、跟进自动停摆（与主动发言同一底线）
 	EngagementService engagementService(settings.bot, groupContextStore.get(), &messageSender);

@@ -29,7 +29,7 @@ constexpr std::int64_t kTurnCooldown = 45;        // 跨轮次节流
 constexpr std::int64_t kJudgeMinInterval = 60;    // judge 每群最小间隔
 constexpr std::size_t kJudgeHourlyCap = 6;        // judge 每群每小时上限
 constexpr std::int64_t kJudgeFuseWindow = 60 * 60;
-constexpr std::int64_t kRetentionSeconds = 24 * 60 * 60; // 结束后保留期
+constexpr std::int64_t kRetentionSeconds = 2 * 60 * 60; // 结束后保留期
 
 // 冷启动自动介入（热度尖峰自决；真机再调的初值，零旋钮）
 constexpr std::int64_t kColdCheckInterval = 60;      // 冷启动检查节流
@@ -901,7 +901,7 @@ void EngagementService::endSessionLocked(EngagementSession &session, std::int64_
         now + (session.coldInitiated ? kColdCooldown : kAnyEndCooldown);
     persistColdLocked(session.groupId);
     LOG_INFO("话题会话结束（" + std::string(forced ? "强制" : "自然") + "）：群 " +
-             std::to_string(session.groupId) + "，原因：" + reason + "，保留 24 小时");
+             std::to_string(session.groupId) + "，原因：" + reason + "，保留 2 小时");
 }
 
 void EngagementService::deliverText(std::uint64_t groupId, const std::string &text)
