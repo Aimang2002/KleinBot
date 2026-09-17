@@ -237,12 +237,14 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 
 void Message::dispatchText(const InboundMessage &data, const std::string &text)
 {
-	// 群消息上限 5000 字节，私聊 4096 字符。按"一句一条"切分（真人打字习惯：
-	// 换行即分条、代码块整发、空行丢弃），超长段按 UTF-8 字符硬切防截断
+	// 群消息上限 5000 字节，私聊 4096 字符。私聊整条单发（换行原样保留，
+	// 仅超协议上限才按 UTF-8 字符硬切）；群聊按"一句一条"分条（真人打字习惯：
+	// 换行即分条、代码块整发、空行丢弃），超长段硬切防截断
 	const bool is_group = (data.message_type == "group");
 	const size_t max_chars = is_group ? 5000 : 4096;
 
-	const auto segments = splitTextSegments(text, max_chars);
+	const auto segments = is_group ? splitTextSegments(text, max_chars)
+								   : splitTextWhole(text, max_chars);
 	for (std::size_t index = 0; index < segments.size(); ++index)
 	{
 		dispatch(data, TextMessage{segments[index]});

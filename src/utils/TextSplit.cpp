@@ -139,3 +139,13 @@ std::vector<std::string> splitTextSegments(const std::string &text,
         hardSplitUtf8(segment, maxChars, result);
     return result;
 }
+
+std::vector<std::string> splitTextWhole(const std::string &text,
+                                        std::size_t maxChars)
+{
+    std::vector<std::string> result;
+    if (text.empty())
+        return result;
+    hardSplitUtf8(text, maxChars, result);
+    return result;
+}

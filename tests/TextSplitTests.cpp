@@ -81,3 +81,26 @@ TEST(TextSplitTest, EmptyAndWhitespaceOnlyYieldNothing)
     EXPECT_TRUE(splitTextSegments("", 5000).empty());
     EXPECT_TRUE(splitTextSegments("\n \n\t\n", 5000).empty());
 }
+
+TEST(TextSplitTest, WholeKeepsNewlinesAsSingleMessage)
+{
+    const std::string text = "第一段。\n第二段。\n\n```cpp\nint a;\n```";
+    auto parts = splitTextWhole(text, 5000);
+    ASSERT_EQ(parts.size(), 1U);
+    EXPECT_EQ(parts[0], text);
+}
+
+TEST(TextSplitTest, WholeHardSplitsOnlyWhenOverLimit)
+{
+    const std::string longText = "甲乙丙\n丁戊己";
+    auto parts = splitTextWhole(longText, 4);
+    ASSERT_EQ(parts.size(), 2U);
+    EXPECT_EQ(parts[0], "甲乙丙\n");
+    EXPECT_EQ(parts[1], "丁戊己");
+    EXPECT_EQ(join(parts, ""), longText);
+}
+
+TEST(TextSplitTest, WholeEmptyYieldsNothing)
+{
+    EXPECT_TRUE(splitTextWhole("", 5000).empty());
+}

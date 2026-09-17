@@ -14,4 +14,9 @@ std::vector<std::string> splitTextSegments(const std::string &text,
                                            std::size_t maxChars,
                                            std::size_t maxSegments = 10);
 
+// 整段原样单发（私聊路径）：换行不做分条边界，仅超过 maxChars 时
+// 按 UTF-8 字符硬切兜底（防协议截断到半个字符）；空文本返回空序列
+std::vector<std::string> splitTextWhole(const std::string &text,
+                                        std::size_t maxChars);
+
 #endif // TEXT_SPLIT_H
