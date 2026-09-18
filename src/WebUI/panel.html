@@ -539,6 +539,69 @@
       to { transform: scaleX(0); }
     }
 
+    /* 基础信息入口卡：置顶、带机器人头像，视觉上与普通导航项区分 */
+    .nav-botinfo {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      width: auto;
+      margin: 2px 10px 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--line-2);
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(126, 231, 178, .10), rgba(126, 231, 178, .02));
+      color: var(--muted);
+      cursor: pointer;
+      text-align: left;
+      font-family: inherit;
+      transition: border-color .15s ease, background .15s ease, color .15s ease;
+    }
+
+    .nav-botinfo:hover {
+      border-color: var(--mint);
+      color: var(--text);
+    }
+
+    .nav-botinfo.active {
+      border-color: var(--mint);
+      color: var(--text);
+      background: linear-gradient(135deg, rgba(126, 231, 178, .18), rgba(126, 231, 178, .05));
+      box-shadow: 0 0 0 1px var(--mint);
+    }
+
+    .nav-botinfo .botinfo-nav-avatar {
+      flex: none;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 1px solid var(--line-2);
+      object-fit: cover;
+      background: var(--surface-2);
+    }
+
+    .nav-botinfo .botinfo-nav-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .nav-botinfo .botinfo-nav-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: .02em;
+    }
+
+    .nav-botinfo .botinfo-nav-sub {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--faint);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     /* 基础信息页：机器人资料卡 + 运行概况行 */
     .botinfo-card {
       display: flex;
@@ -2155,21 +2218,27 @@
     }
 
     function botInfoNavItem() {
+      // 置顶资料卡：头像（数据到达后自动填充）+ 标题 + 昵称/状态副行，
+      // 无 M 编号（不带 .code 占位符，不影响 CSS counter）
       const item = document.createElement("button");
       item.type = "button";
-      item.className = "nav-item";
+      item.className = "nav-item nav-botinfo";
       item.dataset.key = BOTINFO_KEY;
-      // 与编号模块同构但不带编号：机器人头轮廓 + 双眼
-      item.innerHTML =
-        '<svg viewBox="0 0 16 16" aria-hidden="true">' +
-        '<g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">' +
-        '<rect x="3.2" y="5.4" width="9.6" height="7.2" rx="2"/>' +
-        '<path d="M8 5.2 V3.4"/>' +
-        '<circle cx="8" cy="2.6" r="0.9"/>' +
-        '</g>' +
-        '<circle cx="6.2" cy="9" r="0.9" fill="currentColor" stroke="none"/>' +
-        '<circle cx="9.8" cy="9" r="0.9" fill="currentColor" stroke="none"/>' +
-        '</svg><span>基础信息</span>';
+      const avatar = document.createElement("img");
+      avatar.className = "botinfo-nav-avatar";
+      avatar.alt = "";
+      avatar.src = BOTINFO_AVATAR_FALLBACK;
+      avatar.onerror = () => { avatar.onerror = null; avatar.src = BOTINFO_AVATAR_FALLBACK; };
+      const text = document.createElement("span");
+      text.className = "botinfo-nav-text";
+      const title = document.createElement("span");
+      title.className = "botinfo-nav-title";
+      title.textContent = "基础信息";
+      const sub = document.createElement("span");
+      sub.className = "botinfo-nav-sub";
+      sub.textContent = "机器人资料与运行状态";
+      text.append(title, sub);
+      item.append(avatar, text);
       item.addEventListener("click", () => selectPane(BOTINFO_KEY));
       return item;
     }
@@ -2523,6 +2592,34 @@
       return row;
     }
 
+    // 把协议端查询结果同步到侧边栏入口卡：头像换真身、副行显示昵称或离线状态
+    function applyBotInfoToNav(data) {
+      const avatar = document.querySelector(".nav-botinfo .botinfo-nav-avatar");
+      if (avatar == null)
+        return;
+      const sub = document.querySelector(".nav-botinfo .botinfo-nav-sub");
+      if (data.connected === true && data.user_id) {
+        avatar.src = "https://q1.qlogo.cn/g?b=qq&nk=" + data.user_id + "&s=640";
+        if (sub != null)
+          sub.textContent = data.nickname ? String(data.nickname) : "QQ " + data.user_id;
+      } else {
+        avatar.src = BOTINFO_AVATAR_FALLBACK;
+        if (sub != null)
+          sub.textContent = "未连接协议端";
+      }
+    }
+
+    async function refreshBotInfoNav() {
+      try {
+        const response = await request("/api/botinfo", { method: "GET" });
+        if (!response.ok)
+          return;
+        applyBotInfoToNav(await response.json());
+      } catch (error) {
+        // 静默：导航卡保留占位头像
+      }
+    }
+
     async function loadBotInfo() {
       const body = $("botInfoBody");
       body.textContent = "";
@@ -2589,6 +2686,7 @@
       rows.appendChild(botInfoRow("通信模式", String(data.transport || "?")));
       rows.appendChild(botInfoRow("协议端", connected ? "已连接" : "未连接"));
       body.appendChild(rows);
+      applyBotInfoToNav(data);
     }
 
     async function loadPerception() {
@@ -2914,6 +3012,8 @@
         else
           versionChip.textContent = "配置文件版本 v" + loadedSchemaVersion;
         nav.appendChild(versionChip);
+        // 导航入口卡的头像/昵称异步刷新，不阻塞配置面板渲染
+        refreshBotInfoNav();
         const known = activePane === MODELS_KEY || activePane === PERCEPTION_KEY ||
           activePane === BOTINFO_KEY ||
           document.querySelectorAll('.pane[data-key="' + activePane + '"]').length > 0;
