@@ -1317,7 +1317,7 @@
         <div id="providers"></div>
       </div>
       <div id="perceptionView" style="display:none">
-        <h2>观察通道</h2>
+        <h2>群聊设置</h2>
         <p class="pane-hint">白名单群的只读观察与话题跟进。总开关与群选择都是<b>运行时状态</b>，改动写入数据库并<b>立即生效</b>，无需保存配置、无需重启。私聊与非监控群完全不被观察。</p>
         <div id="perceptionBody"></div>
       </div>
@@ -1925,7 +1925,7 @@
         '<svg viewBox="0 0 16 16" aria-hidden="true">' +
         '<g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">' +
         '<path d="M1.5 8 C3.6 4.6 5.8 3 8 3 C10.2 3 12.4 4.6 14.5 8 C12.4 11.4 10.2 13 8 13 C5.8 13 3.6 11.4 1.5 8 Z"/>' +
-        '<circle cx="8" cy="8" r="2.2"/></g></svg><span>观察通道</span>';
+        '<circle cx="8" cy="8" r="2.2"/></g></svg><span>群聊设置</span>';
       item.addEventListener("click", () => selectPane(PERCEPTION_KEY));
       return item;
     }
@@ -2256,7 +2256,7 @@
       const switchRow = document.createElement("div");
       switchRow.className = "row";
       const switchLabel = document.createElement("label");
-      switchLabel.textContent = "启用观察通道";
+      switchLabel.textContent = "启用群聊观察";
       switchLabel.dataset.hint = "关闭时所有观察入口立即停用（群列表与下方勾选保留）；开启后按勾选的群观察。";
       const switchInput = document.createElement("input");
       switchInput.type = "checkbox";
@@ -2339,7 +2339,7 @@
         statusLine.textContent = monitored.length
           ? (enabled ? "正在观察 " + monitored.length + " 个群。"
                      : "已勾选 " + monitored.length + " 个群，但总开关关闭——开启后才会观察。")
-          : "尚未选择任何群：观察通道不会处理任何消息。";
+          : "尚未选择任何群：群聊观察不会处理任何消息。";
         panelNote.textContent = "";
       }
 
@@ -2476,6 +2476,9 @@
         const panes = $("panes");
         panes.textContent = "";
         let firstKey = "";
+        // 群聊设置（原"观察通道"）固定编为 M05：插在第 4 个配置模块之后
+        // （机器人身份/功能开关/消息处理/模型设置），配置模块不足 4 个时排在末尾
+        let perceptionNavInserted = false;
         // schema_version 不是可编辑项：不生成分区，只在侧边导航底部展示原值，
         // 保存时由 collectConfig 写回（改版本号请直接编辑 .config.json）
         loadedSchemaVersion = typeof document_.schema_version === "number"
@@ -2523,11 +2526,16 @@
             nav.appendChild(navItem("features", SECTION_LABELS.features));
             panes.appendChild(featureTogglesPane(value));
           }
+          if (!perceptionNavInserted &&
+              nav.querySelectorAll(".nav-item").length >= 4) {
+            nav.appendChild(perceptionNavItem());
+            perceptionNavInserted = true;
+          }
         }
+        if (!perceptionNavInserted) nav.appendChild(perceptionNavItem());
         const sep = document.createElement("div");
         sep.className = "nav-sep";
         nav.appendChild(sep);
-        nav.appendChild(perceptionNavItem());
         nav.appendChild(modelsNavItem());
         const versionChip = document.createElement("div");
         versionChip.className = "nav-version";
