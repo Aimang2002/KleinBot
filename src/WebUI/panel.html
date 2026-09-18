@@ -418,11 +418,11 @@
       color: var(--danger);
     }
 
-    /* 非模态通知（toast）：保存结果提醒，右上角滑入（位移+缩放+淡入），
+    /* 非模态通知（toast）：保存结果提醒，右下角滑入（位移+缩放+淡入），
        标题+摘要随通知展示，底部进度条指示自动消失时机；字段清单/诊断走页内横幅 */
     #toasts {
       position: fixed;
-      top: 18px;
+      bottom: 18px;
       right: 18px;
       z-index: 300;
       display: flex;
@@ -1994,7 +1994,7 @@
       banner.className = isError ? "err" : "ok";
     }
 
-    // 非模态通知：右上角滑入（位移+缩放+淡入），标题+摘要一眼可读，
+    // 非模态通知：右下角滑入（位移+缩放+淡入），标题+摘要一眼可读，
     // 底部进度条指示自动消失时机，可手动关闭，最多同时 4 条。
     // 用于保存成功等操作结果；字段清单/诊断等细节走页内横幅，不挤进通知
     function showToast(title, body, isError, lifetimeMs) {
@@ -2301,23 +2301,19 @@
     }
 
     function saveResultParts(body) {
-      // 保存结果拆两层：通知只带"标题 + 一句话生效摘要"，需重启字段清单与
-      // 诊断留在页内横幅——长文本不挤进通知，通知保持一眼可读
+      // 保存结果的生效摘要：只产出通知用的"标题 + 一句话生效情况"，
+      // 不再附字段清单与诊断横幅（用户定规 2026-09-19：不展示）
       const counts = body.counts || {};
       const total = (counts.dynamic || 0) + (counts.rebuild || 0) + (counts.restart || 0);
-      const groups = {};
-      for (const change of body.diff || [])
-        (groups[change.impact] = groups[change.impact] || []).push(change.path);
 
       if (body.reloadSuccess === false)
         return {
           title: "已写盘，快照刷新失败",
           body: "本次变更需重启机器人后才能生效",
-          isError: true,
-          details: ""
+          isError: true
         };
       if (total === 0)
-        return { title: "保存成功", body: "配置内容没有变化", isError: false, details: "" };
+        return { title: "保存成功", body: "配置内容没有变化", isError: false };
 
       const effective = counts.dynamic || 0;
       const delayed = (counts.rebuild || 0) + (counts.restart || 0);
@@ -2328,16 +2324,7 @@
         headline += "，";
       if (delayed > 0)
         headline += delayed + " 项需重启后生效";
-      let details = "";
-      const delayedPaths = (groups.rebuild || []).concat(groups.restart || []);
-      if (delayedPaths.length)
-        details += "【需重启】" + delayedPaths.join("、") + "\n";
-      const dynamicPaths = groups.dynamic || [];
-      if (dynamicPaths.length)
-        details += "【已生效】" + dynamicPaths.join("、") + "\n";
-      const extra = (body.diagnostics || []).concat(body.warnings || []);
-      if (extra.length) details += "诊断：" + diagnosticsText(extra);
-      return { title: "保存成功", body: headline, isError: false, details: details.trim() };
+      return { title: "保存成功", body: headline, isError: false };
     }
 
     // “功能开关”模块：展示上独立成区，保存时经 mergeInto 写回 bot 分组，
@@ -2759,13 +2746,10 @@
         }
         if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
         // 先刷新面板再弹通知：loadConfig 末尾的 selectPane 会清空横幅，
-        // 顺序反了通知会被自己冲掉；保存结果走右上角非模态通知
+        // 顺序反了通知会被自己冲掉；保存结果走右下角非模态通知
         await loadConfig();
         const parts = saveResultParts(body);
         showToast(parts.title, parts.body, parts.isError, 6000);
-        // 字段清单与诊断不进通知：留在页内横幅便于留存对照
-        if (parts.details)
-            showBanner(parts.details, parts.isError);
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
@@ -3334,7 +3318,7 @@
         }
         if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
         // 先刷新视图（loadModels/loadConfig 末尾都会清空横幅）再弹通知，
-        // 否则"已保存并即时生效"的提示会被自己冲掉；结果走右上角非模态通知
+        // 否则"已保存并即时生效"的提示会被自己冲掉；结果走右下角非模态通知
         await loadModels();
         // 注册表已更新：重渲染配置面板，让模型下拉框拿到新名单
         await loadConfig();
@@ -3343,8 +3327,6 @@
                   hotReloaded ? "模型注册表已即时生效，无需重启"
                               : "需重启机器人后生效，进程内暂用旧表继续服务",
                   !hotReloaded, 6200);
-        if ((body.warnings || []).length)
-          showBanner("警告：\n" + diagnosticsText(body.warnings), false);
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
