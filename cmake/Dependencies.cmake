@@ -90,6 +90,18 @@ function(kleinbot_configure_dependencies)
         target_link_libraries(kleinbot_curl INTERFACE CURL::libcurl)
         target_link_libraries(kleinbot_sqlite INTERFACE SQLite::SQLite3)
     endif()
+
+    # Boost.System/Asio ≥1.86 会把编译期源位置（含构建机完整路径）附进错误消息
+    # （"… [asio.misc:2 at /构建路径/xxx.hpp:90 in function '…']"）——对部署排障
+    # 无用且泄漏构建目录布局。BOOST_ASIO_ERROR_LOCATION 是 asio 内部给 error_code
+    # 补挂位置的开关（wine 实证为主通道）；另两个是 throw 侧的 source_location
+    # 形态（Boost 形态在 GCC/MinGW 默认启用，std 形态覆盖 MSVC 等其它工具链）
+    target_compile_definitions(kleinbot_boost INTERFACE
+        BOOST_ASIO_DISABLE_ERROR_LOCATION
+        BOOST_ASIO_DISABLE_BOOST_SOURCE_LOCATION
+        BOOST_ASIO_DISABLE_STD_SOURCE_LOCATION
+        BOOST_ASIO_DISABLE_STD_EXPERIMENTAL_SOURCE_LOCATION
+    )
 endfunction()
 
 function(kleinbot_configure_test_dependencies)

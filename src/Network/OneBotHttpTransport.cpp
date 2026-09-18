@@ -5,6 +5,9 @@
 #include "WebhookSignature.h"
 #include "WebSocketHead.h"
 #include "../Log/Log.h"
+#include "../utils/Encoding.h"
+
+#include <boost/system/system_error.hpp>
 
 #include <curl/curl.h>
 
@@ -318,6 +321,14 @@ void OneBotHttpTransport::runEventServer(
             {
                 sendHttpResponse(stream, request.version(), beast::http::status::bad_request);
             }
+        }
+    }
+    catch (const boost::system::system_error &error)
+    {
+        if (running.load())
+        {
+            // 系统错误消息是本地 ANSI 编码（中文 Windows 为 GBK），转 UTF-8 后再进日志
+            LOG_ERROR("OneBot HTTP事件服务异常：" + utils::localToUtf8(error.what()));
         }
     }
     catch (const std::exception &error)

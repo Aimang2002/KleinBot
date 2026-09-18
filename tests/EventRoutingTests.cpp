@@ -125,6 +125,64 @@ TEST(OneBotEventDecoderNoticeTest, MessageEventUnaffectedByNoticeFields)
     EXPECT_EQ(message->target_id, 0ULL);
 }
 
+// 回归（2026-09-19 真机）：JS 系实现端（LLOneBot/NapCat）会把数字字段字符串化，
+// 标量类型差异不允许抛异常丢整条事件
+TEST(OneBotEventDecoderNoticeTest, StringTypedNumericFieldsStillDecode)
+{
+    OneBotEventDecoder decoder;
+    const auto event = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "private",
+        "user_id": "1472807646",
+        "group_id": "8823",
+        "time": "1757010400",
+        "message_id": "1234567",
+        "raw_message": "test",
+        "message": [{"type": "text", "data": {"text": "test"}}]
+    })");
+
+    ASSERT_TRUE(event.has_value());
+    EXPECT_EQ(event->user_id, 1472807646ULL);
+    EXPECT_EQ(event->group_id, 8823ULL);
+    EXPECT_EQ(event->message_timestamp, 1757010400LL);
+    EXPECT_EQ(event->plain_text, "test");
+    EXPECT_EQ(event->message_id_raw, "1234567");
+}
+
+TEST(OneBotEventDecoderNoticeTest, GarbageNumericFieldFallsBackAndStillDecodes)
+{
+    OneBotEventDecoder decoder;
+    const auto event = decoder.decode(R"({
+        "post_type": "notice",
+        "notice_type": "notify",
+        "sub_type": "poke",
+        "user_id": "not-a-number",
+        "target_id": [1, 2],
+        "time": 1757010500
+    })");
+
+    ASSERT_TRUE(event.has_value());
+    EXPECT_EQ(event->user_id, 0ULL);
+    EXPECT_EQ(event->target_id, 0ULL);
+    EXPECT_EQ(event->message_timestamp, 1757010500LL);
+}
+
+TEST(OneBotEventDecoderNoticeTest, StringTypedEchoStillResolves)
+{
+    OneBotEventDecoder decoder;
+    const auto response = decoder.decodeResponse(R"({
+        "status": "ok",
+        "retcode": "0",
+        "echo": "42",
+        "data": {"message_id": 777}
+    })");
+
+    ASSERT_TRUE(response.has_value());
+    EXPECT_EQ(response->echo, 42LL);
+    EXPECT_EQ(response->retcode, 0LL);
+    EXPECT_EQ(response->status, "ok");
+}
+
 TEST(EventRouterTest, RouteKeyRules)
 {
     InboundMessage poke;

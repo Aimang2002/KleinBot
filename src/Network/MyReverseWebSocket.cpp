@@ -1,6 +1,9 @@
 #include "MyReverseWebSocket.h"
 #include "OneBotWebSocketSession.h"
 #include "BearerAuth.h"
+#include "../utils/Encoding.h"
+
+#include <boost/system/system_error.hpp>
 
 namespace
 {
@@ -131,11 +134,12 @@ void MyReverseWebSocket::connectReverseWebSocket(
             runOneBotWebSocketSession(
                 ws, ioc, inboundQueue, outboundQueue, apiChannel, eventDecoder, messageEncoder, running);
         }
-        catch (beast::system_error const &se)
+        catch (boost::system::system_error const &se)
         {
             if (running.load())
             {
-                LOG_ERROR(se.what());
+                // 系统错误消息是本地 ANSI 编码（中文 Windows 为 GBK），转 UTF-8 后再进日志
+                LOG_ERROR(utils::localToUtf8(se.what()));
             }
         }
         catch (std::exception const &e)

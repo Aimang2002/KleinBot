@@ -4,6 +4,86 @@
 #include "../../utils/Utils.hpp"
 #include "../../../Library/nlohmann/json.hpp"
 
+namespace
+{
+// OneBot 实现端（LLOneBot/NapCat 等 JS 系实现）会把数字字段字符串化（JS number
+// 精度/序列化差异），标量字段统一宽容提取：期望形态直接取，字符串形态解析，
+// 解析不了回退默认值——类型差异绝不允许丢整条事件/响应
+const nlohmann::json *fieldOf(const nlohmann::json &document, const char *key)
+{
+    const auto iterator = document.find(key);
+    return iterator != document.end() ? &*iterator : nullptr;
+}
+
+std::uint64_t uint64Field(const nlohmann::json &document, const char *key, std::uint64_t fallback)
+{
+    const nlohmann::json *value = fieldOf(document, key);
+    if (value == nullptr)
+        return fallback;
+    if (value->is_number_unsigned())
+        return value->get<std::uint64_t>();
+    if (value->is_number_integer())
+    {
+        const std::int64_t signedValue = value->get<std::int64_t>();
+        return signedValue >= 0 ? static_cast<std::uint64_t>(signedValue) : fallback;
+    }
+    if (value->is_number_float())
+        return value->get<double>() >= 0 ? static_cast<std::uint64_t>(value->get<double>()) : fallback;
+    if (value->is_string())
+    {
+        const std::string text = value->get<std::string>();
+        if (!text.empty() && text.find_first_not_of("0123456789") == std::string::npos)
+        {
+            try
+            {
+                return std::stoull(text);
+            }
+            catch (const std::exception &)
+            {
+                return fallback;
+            }
+        }
+    }
+    return fallback;
+}
+
+std::int64_t int64Field(const nlohmann::json &document, const char *key, std::int64_t fallback)
+{
+    const nlohmann::json *value = fieldOf(document, key);
+    if (value == nullptr)
+        return fallback;
+    if (value->is_number_integer())
+        return value->get<std::int64_t>();
+    if (value->is_number_unsigned())
+        return static_cast<std::int64_t>(value->get<std::uint64_t>());
+    if (value->is_number_float())
+        return static_cast<std::int64_t>(value->get<double>());
+    if (value->is_string())
+    {
+        std::string text = value->get<std::string>();
+        if (!text.empty() && text.find_first_not_of("-0123456789") == std::string::npos &&
+            text.find('-', text.front() == '-' ? 1 : 0) == std::string::npos)
+        {
+            try
+            {
+                return std::stoll(text);
+            }
+            catch (const std::exception &)
+            {
+                return fallback;
+            }
+        }
+    }
+    return fallback;
+}
+
+std::string stringField(const nlohmann::json &document, const char *key, const char *fallback)
+{
+    const nlohmann::json *value = fieldOf(document, key);
+    return value != nullptr && value->is_string() ? value->get<std::string>() : fallback;
+}
+}
+
 std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payload) const
 {
     const nlohmann::json document = nlohmann::json::parse(payload);
@@ -12,7 +92,7 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
         return std::nullopt;
     }
 
-    const std::string postType = document.value("post_type", "");
+    const std::string postType = stringField(document, "post_type", "");
     if (postType.empty() || postType == "meta_event")
     {
         return std::nullopt;
@@ -20,35 +100,35 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
 
     InboundMessage message;
     message.payload_size_bytes = payload.size();
-    message.user_id = document.value("user_id", 0ULL);
+    message.user_id = uint64Field(document, "user_id", 0);
     if (document.contains("sender") && document["sender"].is_object())
     {
         const auto &sender = document["sender"];
-        message.nickname = sender.value("nickname", "");
-        message.card = sender.value("card", "");
+        message.nickname = stringField(sender, "nickname", "");
+        message.card = stringField(sender, "card", "");
     }
 
-    message.group_id = document.value("group_id", 0ULL);
-    message.message_type = document.value("message_type", "");
+    message.group_id = uint64Field(document, "group_id", 0);
+    message.message_type = stringField(document, "message_type", "");
     message.post_type = postType;
-    message.raw_message = document.value("raw_message", "");
+    message.raw_message = stringField(document, "raw_message", "");
 
     // notice/request 事件：通用字段之上补齐事件专属字段后直接返回
     if (postType == "notice")
     {
-        message.notice_type = document.value("notice_type", "");
-        message.sub_type = document.value("sub_type", "");
-        message.target_id = document.value("target_id", 0ULL);
-        message.operator_id = document.value("operator_id", 0ULL);
-        message.message_timestamp = document.value("time", 0LL);
+        message.notice_type = stringField(document, "notice_type", "");
+        message.sub_type = stringField(document, "sub_type", "");
+        message.target_id = uint64Field(document, "target_id", 0);
+        message.operator_id = uint64Field(document, "operator_id", 0);
+        message.message_timestamp = int64Field(document, "time", 0);
         return message;
     }
     if (postType == "request")
     {
-        message.request_type = document.value("request_type", "");
-        message.comment = document.value("comment", "");
-        message.flag = document.value("flag", "");
-        message.message_timestamp = document.value("time", 0LL);
+        message.request_type = stringField(document, "request_type", "");
+        message.comment = stringField(document, "comment", "");
+        message.flag = stringField(document, "flag", "");
+        message.message_timestamp = int64Field(document, "time", 0);
         return message;
     }
 
@@ -56,7 +136,7 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
     {
         for (const auto &segment : document["message"])
         {
-            const std::string type = segment.value("type", "");
+            const std::string type = stringField(segment, "type", "");
             if (!segment.contains("data") || !segment["data"].is_object())
             {
                 continue;
@@ -64,11 +144,11 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
 
             if (type == "text")
             {
-                message.plain_text += segment["data"].value("text", "");
+                message.plain_text += stringField(segment["data"], "text", "");
             }
             else if (type == "image")
             {
-                message.message_data_url = segment["data"].value("url", "");
+                message.message_data_url = stringField(segment["data"], "url", "");
             }
             else if (type == "reply")
             {
@@ -137,7 +217,7 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
         LOG_WARNING("入站消息事件缺少 message_id（事件字段：" + keys +
                     "），回应将降级为仅@不引用");
     }
-    message.message_timestamp = document.value("time", 0LL);
+    message.message_timestamp = int64Field(document, "time", 0);
     return message;
 }
 
@@ -150,9 +230,10 @@ std::optional<OneBotApiResult> OneBotEventDecoder::decodeResponse(const std::str
     }
 
     OneBotApiResult result;
-    result.echo = document.value("echo", 0LL);
-    result.status = document.value("status", "");
-    result.retcode = document.value("retcode", 0LL);
+    // echo 实现端可能回传字符串形态（JS number 精度保护），解析回数字才能兑现调用方
+    result.echo = int64Field(document, "echo", 0);
+    result.status = stringField(document, "status", "");
+    result.retcode = int64Field(document, "retcode", 0);
     if (document.contains("data"))
     {
         result.data = document["data"];
