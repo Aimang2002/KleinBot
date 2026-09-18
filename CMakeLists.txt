@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(KleinBot VERSION 2.4.0 LANGUAGES C CXX)
+project(KleinBot VERSION 2.4.1 LANGUAGES C CXX)
 
 # 版本号唯一来源：上方的 project(... VERSION ...)；渠道后缀单独控制，
 # 发布正式版时 -DKLEINBOT_VERSION_SUFFIX="" 或改默认值即可，无需动源码
