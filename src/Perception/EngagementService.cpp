@@ -32,6 +32,7 @@ constexpr int kMoodUpdateEveryTurns = 3;          // 每隔 N 个发言轮经 wo
 constexpr std::int64_t kJudgeMinInterval = 60;    // judge 每群最小间隔
 constexpr std::size_t kJudgeHourlyCap = 6;        // judge 每群每小时上限
 constexpr std::int64_t kJudgeFuseWindow = 60 * 60;
+constexpr std::int64_t kLullFuseWindow = 60 * 60;   // lull 每小时帽的滑动窗口
 constexpr std::int64_t kRetentionSeconds = 2 * 60 * 60; // 结束后保留期
 
 // 冷启动自动介入（热度尖峰自决；真机再调的初值，零旋钮）
@@ -125,7 +126,7 @@ const char *const kRecallSchema =
 
 // 判定器 system：角色名来自组合根注入的 BotIdentity，不硬编码进代码
 //（用户定规 2026-09-18：嵌入 prompt 不得与 soul.md 产生隐性耦合）
-static std::string judgeSystemFor(const std::string &botName)
+std::string judgeSystemFor(const std::string &botName)
 {
     return "你是判定器。QQ群聊机器人 " + botName + " 监控了一段群聊记录，"
            "最后一条消息提到了「" + botName + "」这个名字但没有 @ 他。"
@@ -352,7 +353,7 @@ void EngagementService::pump(std::int64_t now)
             // lull 轮次：攒够新消息 + 突发归于安静 + 节流 + 每小时上限
             //（真机反馈 2026-09-18：跟得太勤、每个话头都接，是"人机味"第一来源）
             while (!session.recentTurnTs.empty() &&
-                   now - session.recentTurnTs.front() >= kJudgeFuseWindow)
+                   now - session.recentTurnTs.front() >= kLullFuseWindow)
                 session.recentTurnTs.pop_front();
             if (session.newMessagesSinceTurn >= kNewMessagesForTurn &&
                 now - session.lastActivityTs >= kLullSeconds &&
@@ -851,69 +852,69 @@ void EngagementService::runTurn(std::uint64_t groupId)
     bool moodDue = false;
     std::string latestSpeech;
     {
-    std::lock_guard<std::mutex> lock(mutex);
-    auto it = sessions.find(groupId);
-    if (it == sessions.end() || it->second.state != EngagementState::Active ||
-        it->second.startTs != startTs)
-        return; // 模型调用期间会话已被结束或替换
-    EngagementSession &session = it->second;
-    session.addressPending = false;
-    session.entryPending = false;
-    session.coldPending = false;
-    session.lastTurnTs = now;
-    session.newMessagesSinceTurn = 0;
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = sessions.find(groupId);
+        if (it == sessions.end() || it->second.state != EngagementState::Active ||
+            it->second.startTs != startTs)
+            return; // 模型调用期间会话已被结束或替换
+        EngagementSession &session = it->second;
+        session.addressPending = false;
+        session.entryPending = false;
+        session.coldPending = false;
+        session.lastTurnTs = now;
+        session.newMessagesSinceTurn = 0;
 
-    switch (turn.kind)
-    {
-    case EngagementTurn::Kind::Speak:
-    {
-        if (utils::trim(turn.text).empty())
+        switch (turn.kind)
         {
-            // group_say 带了空文本：按沉默处理
+        case EngagementTurn::Kind::Speak:
+        {
+            if (utils::trim(turn.text).empty())
+            {
+                // group_say 带了空文本：按沉默处理
+                session.consecutivePasses += 1;
+                if (session.consecutivePasses >= kPassLimit)
+                    endSessionLocked(session, now, "连续沉默", false);
+                break;
+            }
+            deliverText(groupId, turn.text);
+            recordEngagementSpeech(groupId, turn.text, now);
+            session.turnCount += 1;
+            session.consecutivePasses = 0;
+            if (++session.turnsSinceMood >= kMoodUpdateEveryTurns)
+            {
+                session.turnsSinceMood = 0;
+                moodDue = true;
+                latestSpeech = turn.text;
+            }
+            LOG_INFO("会话轮发言：群 " + std::to_string(groupId) + "（第 " +
+                     std::to_string(session.turnCount) + " 轮）");
+            break;
+        }
+        case EngagementTurn::Kind::Leave:
+            LOG_INFO("会话离场：群 " + std::to_string(groupId) + "（" + turn.reason + "）");
+            if (!utils::trim(turn.text).empty())
+            {
+                deliverText(groupId, turn.text);
+                recordEngagementSpeech(groupId, turn.text, now);
+            }
+            endSessionLocked(session, now, turn.reason.empty() ? "模型离场" : turn.reason, false);
+            break;
+        case EngagementTurn::Kind::Pass:
+        default:
+            if (kind == TurnKind::ColdEntry)
+            {
+                // 冷启动自决沉默：等于决定不加入，直接收场（不是 pass 计数）
+                endSessionLocked(session, now, "冷启动自决：暂不介入", false);
+                break;
+            }
             session.consecutivePasses += 1;
             if (session.consecutivePasses >= kPassLimit)
                 endSessionLocked(session, now, "连续沉默", false);
+            else
+                LOG_INFO("会话轮沉默：群 " + std::to_string(groupId) + "（连续 " +
+                         std::to_string(session.consecutivePasses) + " 拍）");
             break;
         }
-        deliverText(groupId, turn.text);
-        recordEngagementSpeech(groupId, turn.text, now);
-        session.turnCount += 1;
-        session.consecutivePasses = 0;
-        if (++session.turnsSinceMood >= kMoodUpdateEveryTurns)
-        {
-            session.turnsSinceMood = 0;
-            moodDue = true;
-            latestSpeech = turn.text;
-        }
-        LOG_INFO("会话轮发言：群 " + std::to_string(groupId) + "（第 " +
-                 std::to_string(session.turnCount) + " 轮）");
-        break;
-    }
-    case EngagementTurn::Kind::Leave:
-        LOG_INFO("会话离场：群 " + std::to_string(groupId) + "（" + turn.reason + "）");
-        if (!utils::trim(turn.text).empty())
-        {
-            deliverText(groupId, turn.text);
-            recordEngagementSpeech(groupId, turn.text, now);
-        }
-        endSessionLocked(session, now, turn.reason.empty() ? "模型离场" : turn.reason, false);
-        break;
-    case EngagementTurn::Kind::Pass:
-    default:
-        if (kind == TurnKind::ColdEntry)
-        {
-            // 冷启动自决沉默：等于决定不加入，直接收场（不是 pass 计数）
-            endSessionLocked(session, now, "冷启动自决：暂不介入", false);
-            break;
-        }
-        session.consecutivePasses += 1;
-        if (session.consecutivePasses >= kPassLimit)
-            endSessionLocked(session, now, "连续沉默", false);
-        else
-            LOG_INFO("会话轮沉默：群 " + std::to_string(groupId) + "（连续 " +
-                     std::to_string(session.consecutivePasses) + " 拍）");
-        break;
-    }
     }
 
     // 情绪基调更新（worker 调用在锁外；每 N 个发言轮一次，失败保留旧基调）——
