@@ -1348,6 +1348,13 @@
     const SECRET_KEYS = new Set(["api_key", "access_token", "secret"]);
     // 与 Dock 注册的协议适配器一一对应，大小写敏感；其他值调用时会报“并未支持”
     const API_STANDARDS = ["OpenAI", "Anthropic"];
+    // 模型名类配置字段：一律从模型注册表下拉选择（注册表在「模型供应商」页维护），
+    // 不再自定义输入；registryModelNames 为注册表拉取的模型名缓存
+    const MODEL_SELECT_PATHS = new Set([
+      "chat.default_model", "memory.model",
+      "models.drawing.model", "models.vision.model", "models.worker.model"
+    ]);
+    let registryModelNames = [];
     const TOKEN_STORAGE = "klein_webui_token";
     const MODELS_KEY = "__models__";
     const PERCEPTION_KEY = "__perception__";
@@ -1433,7 +1440,7 @@
       "bot.manager_id": "管理员 QQ，可执行 #刷新配置文件 等管理命令；0 表示不设置。",
       "bot.name": "机器人昵称，用于人格提示词（改动需重启）。",
       "bot.group_chat_enabled": "是否响应群聊消息，关闭后仅私聊可用（保存即生效）。",
-      "chat.default_model": "默认对话模型名，必须已注册在模型注册表中（需重启）。",
+      "chat.default_model": "默认对话模型：从模型注册表下拉选择（模型在「模型供应商」页维护）；需重启生效。",
       "chat.temperature": "采样温度 0~2：越高回答越随机，常用 0.7~1.0。",
       "chat.top_p": "核采样 0~1：与温度二选一调节随机性。",
       "chat.frequency_penalty": "频率惩罚 -2~2：正值降低字词重复倾向。",
@@ -1459,7 +1466,7 @@
       "voice.reference_audio": "参考音频文件路径（音色克隆用）。",
       "voice.reference_text": "参考音频对应的文本内容。",
       "memory.enabled": "长期记忆功能总开关。",
-      "memory.model": "提取记忆所用的模型名，留空时跟随默认模型。",
+      "memory.model": "提取记忆所用的模型：从模型注册表下拉选择；留空跟随默认模型。",
       "memory.batch_turns": "每积累多少轮对话提取一次记忆。",
       "memory.idle_minutes": "用户空闲多少分钟后触发本批记忆提取。",
       "memory.recall_limit": "每次注入对话上下文的记忆条数上限。",
@@ -1990,6 +1997,17 @@
         input = createComboSelect(API_STANDARDS, value);
         input.dataset.kind = "null";
         input.dataset.original = String(value);
+      } else if (MODEL_SELECT_PATHS.has(path)) {
+        // 字段特例（2026-09-19）：模型名一律从模型注册表下拉选择，不再自定义输入。
+        // 当前值不在注册表（含留空跟随默认模型）时保留为独立选项，避免保存时被静默改写；
+        // 注册表为空时只剩当前值可选，先去「模型供应商」页添加
+        const currentValue = value === null || value === undefined ? "" : String(value);
+        const options = registryModelNames.includes(currentValue)
+          ? registryModelNames.slice()
+          : registryModelNames.concat([currentValue]);
+        input = createComboSelect(options, currentValue);
+        input.dataset.kind = "null";
+        input.dataset.original = value === null ? "null" : currentValue;
       } else if (Array.isArray(value)) {
         input = document.createElement("textarea");
         input.value = JSON.stringify(value, null, 2);
@@ -2427,6 +2445,8 @@
         if (!response.ok) { showBanner("读取配置失败：HTTP " + response.status, true); return; }
         const document_ = await response.json();
         extractTransportOptions(document_);
+        // 模型名类字段是注册表下拉：渲染配置面板前先刷新注册表模型名缓存
+        await refreshRegistryNames();
         const nav = $("sideNav");
         nav.textContent = "";
         const navLabel = document.createElement("div");
@@ -3032,6 +3052,27 @@
       return { Models, originIndexes };
     }
 
+    // 拉取模型注册表的模型名扁平列表（模型设置类下拉框的数据源）；
+    // loadConfig 与注册表保存后各刷新一次
+    async function refreshRegistryNames() {
+      try {
+        const response = await request("/api/models", { method: "GET" });
+        if (!response.ok) return;
+        const body = await response.json();
+        const names = [];
+        const providers = (body.models && body.models.Models) || [];
+        for (const provider of providers)
+          for (const key of ["ModelName", "name"])
+            if (Array.isArray(provider[key]))
+              for (const name of provider[key])
+                if (typeof name === "string" && name !== "" && names.indexOf(name) < 0)
+                  names.push(name);
+        registryModelNames = names;
+      } catch (error) {
+        // 拉取失败保留旧缓存：下拉框仍含当前值可选
+      }
+    }
+
     async function loadModels() {
       try {
         const response = await request("/api/models", { method: "GET" });
@@ -3072,6 +3113,8 @@
         if ((body.warnings || []).length) text += "\n警告：\n" + diagnosticsText(body.warnings);
         showBanner(text, false);
         await loadModels();
+        // 注册表已更新：重渲染配置面板，让模型下拉框拿到新名单
+        await loadConfig();
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
