@@ -418,6 +418,71 @@
       color: var(--danger);
     }
 
+    /* 非模态通知（toast）：保存成功等操作结果的浮动提醒，
+       右上角自动消失、可手动关闭、最多同时 4 条；错误诊断仍走页面内横幅 */
+    #toasts {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      z-index: 300;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: min(440px, calc(100vw - 36px));
+      pointer-events: none;
+    }
+
+    .toast {
+      position: relative;
+      pointer-events: auto;
+      padding: 12px 34px 12px 16px;
+      border: 1px solid var(--line-2);
+      border-left: 3px solid var(--mint);
+      border-radius: 0 10px 10px 0;
+      background: var(--surface-2);
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.75;
+      white-space: pre-wrap;
+      color: var(--text);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, .5);
+      animation: toast-in .22s ease;
+    }
+
+    .toast.err {
+      border-left-color: var(--danger);
+    }
+
+    .toast.out {
+      animation: toast-out .2s ease forwards;
+    }
+
+    .toast .toast-close {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      border: none;
+      background: none;
+      padding: 2px 5px;
+      font-size: 14px;
+      line-height: 1;
+      color: var(--faint);
+      cursor: pointer;
+    }
+
+    .toast .toast-close:hover {
+      color: var(--text);
+    }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateX(14px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    @keyframes toast-out {
+      to { opacity: 0; transform: translateX(14px); }
+    }
+
     .note {
       margin-bottom: 16px;
       padding: 10px 14px;
@@ -1342,6 +1407,7 @@
       </button>
     </div>
   </div>
+  <div id="toasts" aria-live="polite"></div>
   <script>
     "use strict";
     const SENTINEL = "__KLEIN_MASKED__";
@@ -1872,6 +1938,36 @@
       banner.className = isError ? "err" : "ok";
     }
 
+    // 非模态通知：右上角浮动提醒，自动消失、可手动关闭、最多同时 4 条。
+    // 用于保存成功等操作结果；错误诊断仍走页面内横幅（长文本便于留存对照）
+    function showToast(text, isError, lifetimeMs) {
+      const host = $("toasts");
+      if (host == null)
+        return;
+      while (host.children.length >= 4)
+        host.firstElementChild.remove();
+      const toast = document.createElement("div");
+      toast.className = "toast" + (isError ? " err" : "");
+      toast.textContent = text;
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "toast-close";
+      close.textContent = "×";
+      close.setAttribute("aria-label", "关闭提醒");
+      toast.appendChild(close);
+      host.appendChild(toast);
+      let closed = false;
+      const dismiss = () => {
+        if (closed)
+            return;
+        closed = true;
+        toast.classList.add("out");
+        setTimeout(() => toast.remove(), 220);
+      };
+      close.addEventListener("click", dismiss);
+      setTimeout(dismiss, lifetimeMs || (isError ? 9000 : 5200));
+    }
+
     function diagnosticsText(items) {
       return (items || []).map((d) => d.severity + " " + d.path + " - " + d.message).join("\n");
     }
@@ -2127,8 +2223,8 @@
       }
     }
 
-    function showSaveResult(body) {
-      // 保存成功的生效提醒：按后端 diff 的影响等级用大白话说明"哪些已生效、
+    function saveResultText(body) {
+      // 保存成功的生效提醒文案：按后端 diff 的影响等级用大白话说明"哪些已生效、
       // 哪些要重启"；快照刷新失败时明确告知只能重启恢复（此刻连动态项都是旧值）
       const counts = body.counts || {};
       const total = (counts.dynamic || 0) + (counts.rebuild || 0) + (counts.restart || 0);
@@ -2161,7 +2257,7 @@
       }
       const extra = (body.diagnostics || []).concat(body.warnings || []);
       if (extra.length) text += "\n诊断：" + diagnosticsText(extra);
-      showBanner(text, false);
+      return text;
     }
 
     // “功能开关”模块：展示上独立成区，保存时经 mergeInto 写回 bot 分组，
@@ -2582,10 +2678,10 @@
           return;
         }
         if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
-        // 先刷新面板再显示结果：loadConfig 末尾的 selectPane 会清空横幅，
-        // 顺序反了成功提示会被自己冲掉（真机反馈"保存成功没有提醒"的根因）
+        // 先刷新面板再弹通知：loadConfig 末尾的 selectPane 会清空横幅，
+        // 顺序反了通知会被自己冲掉；保存结果走右上角非模态通知
         await loadConfig();
-        showSaveResult(body);
+        showToast(saveResultText(body), false, 6200);
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
@@ -3157,12 +3253,12 @@
           ? "模型注册表已保存并即时生效。"
           : "模型注册表已保存，但进程内热重载失败，需重启机器人后生效。";
         if ((body.warnings || []).length) text += "\n警告：\n" + diagnosticsText(body.warnings);
-        // 先刷新视图（loadModels/loadConfig 末尾都会清空横幅）再显示结果，
-        // 否则"已保存并即时生效"的提示会被自己冲掉
+        // 先刷新视图（loadModels/loadConfig 末尾都会清空横幅）再弹通知，
+        // 否则"已保存并即时生效"的提示会被自己冲掉；结果走右上角非模态通知
         await loadModels();
         // 注册表已更新：重渲染配置面板，让模型下拉框拿到新名单
         await loadConfig();
-        showBanner(text, false);
+        showToast(text, false, 6200);
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
