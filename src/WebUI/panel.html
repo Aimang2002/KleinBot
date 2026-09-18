@@ -1390,8 +1390,6 @@
       api: "API 调用", events: "事件接收", secret: "签名密钥", base_url: "Base URL",
       type: "类型", options: "选项", literal: "字面值", from_env: "环境变量名"
     };
-    const IMPACT_LABELS = { dynamic: "动态生效", rebuild: "需重建", restart: "需重启" };
-
     // 传输类型中文名：通信分区结构无法识别时的通用兜底渲染仍走 active_transport 下拉，
     // 选项在加载配置时从 communication.transports 的键提取
     const TRANSPORT_TYPE_LABELS = {
@@ -2130,20 +2128,37 @@
     }
 
     function showSaveResult(body) {
+      // 保存成功的生效提醒：按后端 diff 的影响等级用大白话说明"哪些已生效、
+      // 哪些要重启"；快照刷新失败时明确告知只能重启恢复（此刻连动态项都是旧值）
       const counts = body.counts || {};
       const total = (counts.dynamic || 0) + (counts.rebuild || 0) + (counts.restart || 0);
-      let text = "已保存并刷新内存快照。" +
-        "变更 " + total + " 项（动态 " + (counts.dynamic || 0) +
-        "、需重建 " + (counts.rebuild || 0) + "、需重启 " + (counts.restart || 0) + "）。";
       const groups = {};
       for (const change of body.diff || [])
         (groups[change.impact] = groups[change.impact] || []).push(change.path);
-      for (const impact of ["restart", "rebuild"]) {
-        const paths = groups[impact];
-        if (paths && paths.length)
-          text += "\n【" + IMPACT_LABELS[impact] + "】" + paths.join("、");
+
+      let text;
+      if (body.reloadSuccess === false) {
+        text = "配置已写盘，但内存快照刷新失败——本次变更需重启机器人后才能生效。";
+      } else if (total === 0) {
+        text = "保存成功：配置内容没有变化，一切维持现状。";
+      } else {
+        const effective = counts.dynamic || 0;
+        const delayed = (counts.rebuild || 0) + (counts.restart || 0);
+        text = "保存成功：";
+        if (effective > 0)
+          text += effective + " 项已生效";
+        if (effective > 0 && delayed > 0)
+          text += "，";
+        if (delayed > 0)
+          text += delayed + " 项需重启机器人后生效";
+        text += "。";
+        const delayedPaths = (groups.rebuild || []).concat(groups.restart || []);
+        if (delayedPaths.length)
+          text += "\n【需重启】" + delayedPaths.join("、");
+        const dynamicPaths = groups.dynamic || [];
+        if (dynamicPaths.length)
+          text += "\n【已生效】" + dynamicPaths.join("、");
       }
-      if (counts.restart > 0) text += "\n需重启的项要重启机器人后才会生效。";
       const extra = (body.diagnostics || []).concat(body.warnings || []);
       if (extra.length) text += "\n诊断：" + diagnosticsText(extra);
       showBanner(text, false);
@@ -2567,8 +2582,10 @@
           return;
         }
         if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
-        showSaveResult(body);
+        // 先刷新面板再显示结果：loadConfig 末尾的 selectPane 会清空横幅，
+        // 顺序反了成功提示会被自己冲掉（真机反馈"保存成功没有提醒"的根因）
         await loadConfig();
+        showSaveResult(body);
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
@@ -3140,10 +3157,12 @@
           ? "模型注册表已保存并即时生效。"
           : "模型注册表已保存，但进程内热重载失败，需重启机器人后生效。";
         if ((body.warnings || []).length) text += "\n警告：\n" + diagnosticsText(body.warnings);
-        showBanner(text, false);
+        // 先刷新视图（loadModels/loadConfig 末尾都会清空横幅）再显示结果，
+        // 否则"已保存并即时生效"的提示会被自己冲掉
         await loadModels();
         // 注册表已更新：重渲染配置面板，让模型下拉框拿到新名单
         await loadConfig();
+        showBanner(text, false);
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
