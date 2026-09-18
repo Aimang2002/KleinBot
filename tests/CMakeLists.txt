@@ -20,7 +20,6 @@ add_executable(kleinbot_tests
     OneBotApiCallerTests.cpp
     OutboundInfrastructureTests.cpp
     PerceptionChannelTests.cpp
-    PersonaBuildTests.cpp
     ReminderTests.cpp
     ReplyContextRoutingTests.cpp
     StorageIntegrationTests.cpp

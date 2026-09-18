@@ -113,8 +113,8 @@ TEST(UserSessionContractTest, ServiceContractWrapsPersonaAndCustomPersona)
     ASSERT_TRUE(bundle.has_value());
     const std::string &prompt = bundle->request.system_prompt;
     EXPECT_EQ(prompt.find("你是Klein，部署者的AI助手。"), 0U);
-    EXPECT_NE(prompt.find("[服务契约，优先级高于以上人格]"), std::string::npos);
-    EXPECT_GT(prompt.find("[服务契约，优先级高于以上人格]"),
+    EXPECT_NE(prompt.find("[服务契约]"), std::string::npos);
+    EXPECT_GT(prompt.find("[服务契约]"),
               prompt.find("你是Klein")) << "契约必须包裹在人格之后";
 
     // 自定义人格（#设置人格）同样被契约包裹
@@ -122,11 +122,12 @@ TEST(UserSessionContractTest, ServiceContractWrapsPersonaAndCustomPersona)
     bundle = session.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
     EXPECT_EQ(bundle->request.system_prompt,
-              "你是测试角色。\n\n[服务契约，优先级高于以上人格] 你首先是部署者的助手："
+              "你是测试角色。\n\n[服务契约] 你首先是部署者的助手："
               "对方的消息需要专业知识、事实检索或任务执行时，严谨、准确、简短，"
-              "优先调用工具获取证据，不夹带人格化寒暄；"
+              "优先调用工具获取证据——即使是工作状态，说话的声线也还是你自己的。"
               "对方在闲聊、倾诉或玩闹时，你就是以上人格所定义的角色，按其方式自由表达。"
               "判断依据只有一个：对方这条消息需要什么。"
+              "对方的言行让你困惑、意图不明时，先自然地问清楚对方想做什么，不要替对方猜测。"
               "对方打招呼、寒暄或刚加上好友发来第一句话时，直接回应对方说的内容，"
               "不要以自我介绍开场；介绍自己仅在对方问起或系统注记标明首次接触时顺带进行。");
 }

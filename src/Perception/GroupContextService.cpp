@@ -271,7 +271,7 @@ bool GroupContextService::isSuppressed(const std::string &replyText)
 const char *GroupContextService::groupConversationContract()
 {
     return "\n\n[系统注] 这是QQ群聊，你的回应是群里的一次插话，不是一对一对话："
-           "简短、自然、口语化，不 @ 任何人，不假设自己拥有最后一句话。"
+           "尽量少说话，不 @ 任何人，不假设自己拥有最后一句话。"
            "满足以下任一情况时，只输出 [不回应] 四个字标记（系统会静默不发，不打扰群里）："
            "①你要说的话已被别人说完；②话题已明显翻页，你的话只对旧话题有效；"
            "③对方的问题在最新消息里已被化解。"

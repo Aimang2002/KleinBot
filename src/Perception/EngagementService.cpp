@@ -114,12 +114,17 @@ const char *const kLeaveSchema =
 const char *const kRecallSchema =
     R"({"type":"function","function":{"name":"recall_context","description":"在更早的群聊记录里按关键词检索相关消息。当前材料不足以掌握话题时才用。","parameters":{"type":"object","properties":{"keywords":{"type":"array","items":{"type":"string"},"description":"检索关键词，2-4 个"}},"required":["keywords"]}}})";
 
-const char *const kJudgeSystem =
-    "你是判定器。QQ群聊机器人 Klein 监控了一段群聊记录，最后一条消息提到了"
-    "「Klein」这个名字但没有 @ 他。判断 Klein 是否应该介入这段对话。"
-    "只输出一行：介入输出 YES；不介入输出 NO 加冒号和一句话理由。"
-    "倾向：明显在对 Klein 说话、提问或呼唤 → YES；"
-    "只是在聊别的话题时碰巧含这个词、玩梗、或刷屏 → NO。";
+// 判定器 system：角色名来自组合根注入的 BotIdentity，不硬编码进代码
+//（用户定规 2026-09-18：嵌入 prompt 不得与 soul.md 产生隐性耦合）
+static std::string judgeSystemFor(const std::string &botName)
+{
+    return "你是判定器。QQ群聊机器人 " + botName + " 监控了一段群聊记录，"
+           "最后一条消息提到了「" + botName + "」这个名字但没有 @ 他。"
+           "判断 " + botName + " 是否应该介入这段对话。"
+           "只输出一行：介入输出 YES；不介入输出 NO 加冒号和一句话理由。"
+           "倾向：明显在对 " + botName + " 说话、提问或呼唤 → YES；"
+           "只是在聊别的话题时碰巧含这个词、玩梗、或刷屏 → NO。";
+}
 
 const char *const kCompressSystem =
     "你是群聊记录压缩器。给你一段已有摘要（可能为空）和一段新的群聊原文，"
@@ -478,7 +483,7 @@ void EngagementService::runJudge(std::uint64_t groupId)
             material += "　← 这句提到了你";
         material += "\n";
     }
-    const std::string verdict = worker(kJudgeSystem, material);
+    const std::string verdict = worker(judgeSystemFor(bot.name), material);
     if (verdict.empty())
     {
         LOG_WARNING("话题介入判定失败（杂务模型无返回）：群 " + std::to_string(groupId));

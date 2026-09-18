@@ -116,27 +116,6 @@ void Message::handleMessage(const InboundMessage &current_data)
 				conversationText += "\n" + contextNote;
 		}
 
-		// 人格编译（T5）：新对话周期后首次聊天，把 soul.md 按（内嵌）规范
-		// 编译为标签式 prompt（独立调用，不落库不入记忆）。
-		// 三级判定：共享缓存命中 → 直接复用（零 LLM）；未命中 → 单飞编译；
-		// 别的线程在编 → 本轮 soul 兜底、标志保留，编译完成后下条消息走缓存
-		if (this->userSession.personaBuildPending(current_data.user_id))
-		{
-			if (auto shared = this->userSession.freshSharedPersona())
-			{
-				this->userSession.applyGeneratedPersona(current_data.user_id, *shared);
-			}
-			else if (this->userSession.tryBeginPersonaBuild())
-			{
-				std::string compileSystem;
-				std::string compileTask;
-				this->userSession.personaBuildTask(compileSystem, compileTask);
-				const std::string compiled =
-					this->chatService.buildOnce(compileSystem, compileTask);
-				this->userSession.finishPersonaBuild(current_data.user_id, compiled);
-			}
-		}
-
 		// 上下文模式仅管理员：普通用户无状态单轮，不写会话也不进长期记忆
 		const bool useContext = current_data.user_id == options.bot.managerId;
 

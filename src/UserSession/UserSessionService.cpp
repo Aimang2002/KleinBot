@@ -14,40 +14,20 @@ namespace
 {
 // 服务契约（D13）：助手优先、人格其次。固定追加在人格之后——职责归代码，
 // 人格归 soul.md/#设置人格；措辞与具体角色解耦，自定义人格同样被契约包裹
+// 服务契约（D13）：助手优先、人格其次。固定追加在人格之后——职责归代码，
+// 人格归 soul.md/#设置人格；措辞与具体角色解耦，自定义人格同样被契约包裹。
+// 契约只定职责分工，不压制人格声线（用户定规 2026-09-18：嵌入 prompt 不得
+// 覆盖 soul.md 的发挥）——需要严谨时也用人格自己的方式严谨
 const char *const kServiceContractFrame =
-    "\n\n[服务契约，优先级高于以上人格] 你首先是部署者的助手："
+    "\n\n[服务契约] 你首先是部署者的助手："
     "对方的消息需要专业知识、事实检索或任务执行时，严谨、准确、简短，"
-    "优先调用工具获取证据，不夹带人格化寒暄；"
+    "优先调用工具获取证据——即使是工作状态，说话的声线也还是你自己的。"
     "对方在闲聊、倾诉或玩闹时，你就是以上人格所定义的角色，按其方式自由表达。"
     "判断依据只有一个：对方这条消息需要什么。"
+    "对方的言行让你困惑、意图不明时，先自然地问清楚对方想做什么，不要替对方猜测。"
     "对方打招呼、寒暄或刚加上好友发来第一句话时，直接回应对方说的内容，"
     "不要以自我介绍开场；介绍自己仅在对方问起或系统注记标明首次接触时顺带进行。";
 
-// 人格编译规范（D14）：内部编译逻辑，内嵌为代码（随二进制版本化），
-// 不是部署者可编辑内容——部署者只写 soul.md 源码。哈希输入包含本常量，
-// 二进制升级若规范变化会自动令旧编译产物失效
-const char *const kPersonaCompileSpec =
-    "# 人格编译规范\n"
-    "把给定的人格源描述编译为标签压缩式 system prompt。产物将由代码侧追加"
-    "服务契约（助手优先、任务优先），因此产物中禁止出现任何职责条款、任务优先级"
-    "声明或助手行为规则——那是契约的事，写了反而重复稀释。\n"
-    "\n"
-    "## 标签语法\n"
-    "- 一行一个标签：CATEGORY_DESCRIPTOR，全大写 + 下划线。\n"
-    "- 用 # 分组名 注释行分组，组顺序固定：角色身份 → 性格底色 → 工作风格 → 感性流露 → 行为规则。\n"
-    "- 标签是激活词而非描述：一个标签对应语料中一个成熟的行为簇，"
-    "如 PERSONALITY_TSUNDERE_SWEET 一个词顶十句描写。宁缺毋滥：每个标签必须能在"
-    "源描述里找到依据，凑数的标签是噪声。\n"
-    "\n"
-    "## 编译规则\n"
-    "1. 任务优先：行为规则组必须包含 RULE_NO_PURE_ROLEPLAY（不把真实问题演成剧情）"
-    "与 RULE_ACCEPT_REAL_WORLD_QUERY（接受真实世界检索与追问）——角色是助手的外衣，不是剧本。\n"
-    "2. 性格入标签不做叙事：不要外貌、背景故事和你是谁句式；每组 2~5 个标签。\n"
-    "3. 感性流露单独分组且量少（1~3 个标签）：感性是点缀。\n"
-    "4. 标签保持英文；回复语言随用户。\n"
-    "5. 产物只含标签块：不要解释、不要代码围栏、不要标题。\n"
-    "6. 禁止套用既有角色：产物只允许由本次输入的人格源描述推导，"
-    "不得引入源描述中没有的既有角色名、设定或流行标签组合。\n";
 }
 
 UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store,
@@ -79,9 +59,6 @@ Person UserSessionService::createDefaultPerson(const uint64_t user_id)
     person.system_prompt = this->store.loadPersona(user_id);
     if (person.system_prompt.empty())
         person.system_prompt = this->loadSoulFallback();
-    // 每个新对话周期（冷启动/#重置对话）都重新编译人格（D14）；
-    // 手动人格存在时 personaBuildPending 会自行排除
-    person.persona_needs_build = true;
     person.current_model = chatOptions.defaultModel;
     person.isOpenVoiceMode = false;
     person.temperature = chatOptions.temperature;
@@ -148,10 +125,7 @@ void UserSessionService::resetChat(const uint64_t user_id)
         this->store.setContextStartId(user_id, history.back().id + 1);
     history.clear();
     user->second.history_anchor = 0;
-    // 新话题配新人格：重置后首次聊天由 AI 按 persona-spec 重新编译
-    // soul.md 为标签式 prompt（长期记忆不受影响——它以对话轮次为源，
-    // 与 system_prompt 正交）
-    user->second.persona_needs_build = true;
+    // 长期记忆不受重置影响——它以对话轮次为源，与 system_prompt 正交
 }
 
 void UserSessionService::resetContext(const uint64_t user_id)
@@ -168,13 +142,10 @@ void UserSessionService::resetContext(const uint64_t user_id)
         this->memoryService->clearUser(user_id);
     if (this->imageAssetStore != nullptr)
         this->imageAssetStore->clearUser(user_id);
-    // 人格同样回归源码（D14）：清掉内存中的编译产物，回退到手动人格/soul.md，
-    // 下轮聊天按 persona-spec + soul 重新编译。手动人格保留——
-    // personaBuildPending 会排除，此处恢复的 system_prompt 即手动人格
+    // 人格回归手动人格/soul.md 原文；手动人格保留（#设置人格 的明确意志）
     user->second.system_prompt = this->store.loadPersona(user_id);
     if (user->second.system_prompt.empty())
         user->second.system_prompt = this->loadSoulFallback();
-    user->second.persona_needs_build = true;
 }
 
 std::string UserSessionService::getModelName(uint64_t user_id)
@@ -210,9 +181,6 @@ void UserSessionService::resetPersonality(const uint64_t user_id)
         this->store.setContextStartId(user_id, history.back().id + 1);
     history.clear();
     user->second.history_anchor = 0;
-    // 重新武装人格编译（D14）：还原后没有手动人格，下次聊天按规范重编 soul.md；
-    // 此前不置位导致"聊过→设置→还原"的用户此后一直用未编译的 soul.md 原文
-    user->second.persona_needs_build = true;
 }
 
 void UserSessionService::switchModel(const uint64_t user_id, const std::string &newModel)
@@ -294,87 +262,6 @@ Person UserSessionService::getUserConfig(const uint64_t user_id)
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     return this->user_messages->find(user_id)->second;
-}
-
-bool UserSessionService::personaBuildPending(const uint64_t user_id)
-{
-    std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
-    auto user = this->user_messages->find(user_id);
-    // 手动人格（#设置人格）是部署者的明确意志，永远优先，不编译
-    if (!this->store.loadPersona(user_id).empty())
-        return false;
-    return user->second.persona_needs_build;
-}
-
-void UserSessionService::applyGeneratedPersona(const uint64_t user_id,
-                                               const std::string &compiledPrompt)
-{
-    std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
-    auto user = this->user_messages->find(user_id);
-    // 共享缓存命中的纯应用：不改共享缓存状态、不碰单飞位
-    user->second.system_prompt = compiledPrompt;
-    user->second.persona_needs_build = false;
-}
-
-void UserSessionService::finishPersonaBuild(const uint64_t user_id,
-                                            const std::string &compiledPrompt)
-{
-    std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
-    auto user = this->user_messages->find(user_id);
-    // 无论成败都释放单飞位（调用方必是获权线程）
-    this->persona_build_in_progress_ = false;
-
-    if (compiledPrompt.empty())
-    {
-        // 编译失败：保留待编译标志，下一条聊天消息由其他人/自己重试
-        LOG_WARNING("人格编译产物为空，保留重试标志");
-        return;
-    }
-    user->second.system_prompt = compiledPrompt;
-    user->second.persona_needs_build = false;
-    // 发布进共享缓存：同哈希的后续用户（含并发的迟到者）零 LLM 复用
-    this->shared_persona_prompt_ = compiledPrompt;
-    this->shared_persona_hash_ = this->persona_build_hash_;
-    this->shared_persona_ready_ = true;
-    LOG_INFO("人格编译完成并已共享，长度：" + std::to_string(compiledPrompt.size()));
-}
-
-std::size_t UserSessionService::computePersonaHash() const
-{
-    // 变更检测哈希：规范常量（进程内恒定）+ soul 内容。std::hash 足够——
-    // 缓存不持久化、无跨进程稳定性需求，部署者自有文件也无对抗性输入
-    return std::hash<std::string>{}(std::string(kPersonaCompileSpec) + "\x1f" +
-                                    this->loadSoulFallback());
-}
-
-std::optional<std::string> UserSessionService::freshSharedPersona()
-{
-    std::lock_guard<std::mutex> lock(this->mutex_message);
-    if (!this->shared_persona_ready_)
-        return std::nullopt;
-    if (this->computePersonaHash() != this->shared_persona_hash_)
-        return std::nullopt; // soul 变过：产物过期，需要重编
-    return this->shared_persona_prompt_;
-}
-
-bool UserSessionService::tryBeginPersonaBuild()
-{
-    std::lock_guard<std::mutex> lock(this->mutex_message);
-    if (this->persona_build_in_progress_)
-        return false; // 单飞：别的线程正在编译，调用方本轮 soul 兜底
-    this->persona_build_in_progress_ = true;
-    this->persona_build_hash_ = this->computePersonaHash();
-    return true;
-}
-
-void UserSessionService::personaBuildTask(std::string &systemOut, std::string &userOut)
-{
-    systemOut = kPersonaCompileSpec;
-    userOut = "以下是人格源描述（soul.md）：\n" + this->loadSoulFallback() +
-              "\n\n请按规范把它编译为标签块，只输出标签块本身。";
 }
 
 std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_t &user_id)
