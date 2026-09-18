@@ -418,8 +418,8 @@
       color: var(--danger);
     }
 
-    /* 非模态通知（toast）：保存成功等操作结果的浮动提醒，
-       右上角自动消失、可手动关闭、最多同时 4 条；错误诊断仍走页面内横幅 */
+    /* 非模态通知（toast）：保存结果提醒，右上角滑入（位移+缩放+淡入），
+       标题+摘要随通知展示，底部进度条指示自动消失时机；字段清单/诊断走页内横幅 */
     #toasts {
       position: fixed;
       top: 18px;
@@ -428,25 +428,22 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
-      width: min(440px, calc(100vw - 36px));
+      width: min(460px, calc(100vw - 36px));
       pointer-events: none;
     }
 
     .toast {
       position: relative;
       pointer-events: auto;
-      padding: 12px 34px 12px 16px;
+      overflow: hidden;
+      padding: 13px 36px 15px 16px;
       border: 1px solid var(--line-2);
       border-left: 3px solid var(--mint);
-      border-radius: 0 10px 10px 0;
+      border-radius: 0 12px 12px 0;
       background: var(--surface-2);
-      font-family: var(--mono);
-      font-size: 13px;
-      line-height: 1.75;
-      white-space: pre-wrap;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, .55);
       color: var(--text);
-      box-shadow: 0 10px 28px rgba(0, 0, 0, .5);
-      animation: toast-in .22s ease;
+      animation: toast-in .32s cubic-bezier(.21, 1.02, .73, 1);
     }
 
     .toast.err {
@@ -454,7 +451,46 @@
     }
 
     .toast.out {
-      animation: toast-out .2s ease forwards;
+      animation: toast-out .24s ease forwards;
+    }
+
+    .toast-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .toast-icon {
+      flex: none;
+      width: 19px;
+      height: 19px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--mint);
+      color: #0c1512;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .toast.err .toast-icon {
+      background: var(--danger);
+    }
+
+    .toast-title {
+      font-size: 14.5px;
+      font-weight: 600;
+      letter-spacing: .02em;
+    }
+
+    .toast-body {
+      margin-top: 5px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--muted);
+      white-space: pre-wrap;
     }
 
     .toast .toast-close {
@@ -474,13 +510,33 @@
       color: var(--text);
     }
 
+    .toast-bar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2px;
+      background: var(--mint);
+      transform-origin: left center;
+      animation: toast-progress linear forwards;
+    }
+
+    .toast.err .toast-bar {
+      background: var(--danger);
+    }
+
     @keyframes toast-in {
-      from { opacity: 0; transform: translateX(14px); }
+      from { opacity: 0; transform: translateX(28px) scale(.96); }
       to { opacity: 1; transform: none; }
     }
 
     @keyframes toast-out {
-      to { opacity: 0; transform: translateX(14px); }
+      to { opacity: 0; transform: translateX(28px) scale(.96); }
+    }
+
+    @keyframes toast-progress {
+      from { transform: scaleX(1); }
+      to { transform: scaleX(0); }
     }
 
     .note {
@@ -1938,23 +1994,44 @@
       banner.className = isError ? "err" : "ok";
     }
 
-    // 非模态通知：右上角浮动提醒，自动消失、可手动关闭、最多同时 4 条。
-    // 用于保存成功等操作结果；错误诊断仍走页面内横幅（长文本便于留存对照）
-    function showToast(text, isError, lifetimeMs) {
+    // 非模态通知：右上角滑入（位移+缩放+淡入），标题+摘要一眼可读，
+    // 底部进度条指示自动消失时机，可手动关闭，最多同时 4 条。
+    // 用于保存成功等操作结果；字段清单/诊断等细节走页内横幅，不挤进通知
+    function showToast(title, body, isError, lifetimeMs) {
       const host = $("toasts");
       if (host == null)
         return;
       while (host.children.length >= 4)
         host.firstElementChild.remove();
+      const lifetime = lifetimeMs || (isError ? 9000 : 5200);
       const toast = document.createElement("div");
       toast.className = "toast" + (isError ? " err" : "");
-      toast.textContent = text;
+      const head = document.createElement("div");
+      head.className = "toast-head";
+      const icon = document.createElement("span");
+      icon.className = "toast-icon";
+      icon.textContent = isError ? "!" : "✓";
+      const titleSpan = document.createElement("span");
+      titleSpan.className = "toast-title";
+      titleSpan.textContent = title;
+      head.append(icon, titleSpan);
+      toast.appendChild(head);
+      if (body) {
+        const bodyDiv = document.createElement("div");
+        bodyDiv.className = "toast-body";
+        bodyDiv.textContent = body;
+        toast.appendChild(bodyDiv);
+      }
       const close = document.createElement("button");
       close.type = "button";
       close.className = "toast-close";
       close.textContent = "×";
       close.setAttribute("aria-label", "关闭提醒");
       toast.appendChild(close);
+      const bar = document.createElement("div");
+      bar.className = "toast-bar";
+      bar.style.animationDuration = lifetime + "ms";
+      toast.appendChild(bar);
       host.appendChild(toast);
       let closed = false;
       const dismiss = () => {
@@ -1962,10 +2039,10 @@
             return;
         closed = true;
         toast.classList.add("out");
-        setTimeout(() => toast.remove(), 220);
+        setTimeout(() => toast.remove(), 240);
       };
       close.addEventListener("click", dismiss);
-      setTimeout(dismiss, lifetimeMs || (isError ? 9000 : 5200));
+      setTimeout(dismiss, lifetime);
     }
 
     function diagnosticsText(items) {
@@ -2223,41 +2300,44 @@
       }
     }
 
-    function saveResultText(body) {
-      // 保存成功的生效提醒文案：按后端 diff 的影响等级用大白话说明"哪些已生效、
-      // 哪些要重启"；快照刷新失败时明确告知只能重启恢复（此刻连动态项都是旧值）
+    function saveResultParts(body) {
+      // 保存结果拆两层：通知只带"标题 + 一句话生效摘要"，需重启字段清单与
+      // 诊断留在页内横幅——长文本不挤进通知，通知保持一眼可读
       const counts = body.counts || {};
       const total = (counts.dynamic || 0) + (counts.rebuild || 0) + (counts.restart || 0);
       const groups = {};
       for (const change of body.diff || [])
         (groups[change.impact] = groups[change.impact] || []).push(change.path);
 
-      let text;
-      if (body.reloadSuccess === false) {
-        text = "配置已写盘，但内存快照刷新失败——本次变更需重启机器人后才能生效。";
-      } else if (total === 0) {
-        text = "保存成功：配置内容没有变化，一切维持现状。";
-      } else {
-        const effective = counts.dynamic || 0;
-        const delayed = (counts.rebuild || 0) + (counts.restart || 0);
-        text = "保存成功：";
-        if (effective > 0)
-          text += effective + " 项已生效";
-        if (effective > 0 && delayed > 0)
-          text += "，";
-        if (delayed > 0)
-          text += delayed + " 项需重启机器人后生效";
-        text += "。";
-        const delayedPaths = (groups.rebuild || []).concat(groups.restart || []);
-        if (delayedPaths.length)
-          text += "\n【需重启】" + delayedPaths.join("、");
-        const dynamicPaths = groups.dynamic || [];
-        if (dynamicPaths.length)
-          text += "\n【已生效】" + dynamicPaths.join("、");
-      }
+      if (body.reloadSuccess === false)
+        return {
+          title: "已写盘，快照刷新失败",
+          body: "本次变更需重启机器人后才能生效",
+          isError: true,
+          details: ""
+        };
+      if (total === 0)
+        return { title: "保存成功", body: "配置内容没有变化", isError: false, details: "" };
+
+      const effective = counts.dynamic || 0;
+      const delayed = (counts.rebuild || 0) + (counts.restart || 0);
+      let headline = "";
+      if (effective > 0)
+        headline += effective + " 项已生效";
+      if (effective > 0 && delayed > 0)
+        headline += "，";
+      if (delayed > 0)
+        headline += delayed + " 项需重启后生效";
+      let details = "";
+      const delayedPaths = (groups.rebuild || []).concat(groups.restart || []);
+      if (delayedPaths.length)
+        details += "【需重启】" + delayedPaths.join("、") + "\n";
+      const dynamicPaths = groups.dynamic || [];
+      if (dynamicPaths.length)
+        details += "【已生效】" + dynamicPaths.join("、") + "\n";
       const extra = (body.diagnostics || []).concat(body.warnings || []);
-      if (extra.length) text += "\n诊断：" + diagnosticsText(extra);
-      return text;
+      if (extra.length) details += "诊断：" + diagnosticsText(extra);
+      return { title: "保存成功", body: headline, isError: false, details: details.trim() };
     }
 
     // “功能开关”模块：展示上独立成区，保存时经 mergeInto 写回 bot 分组，
@@ -2681,7 +2761,11 @@
         // 先刷新面板再弹通知：loadConfig 末尾的 selectPane 会清空横幅，
         // 顺序反了通知会被自己冲掉；保存结果走右上角非模态通知
         await loadConfig();
-        showToast(saveResultText(body), false, 6200);
+        const parts = saveResultParts(body);
+        showToast(parts.title, parts.body, parts.isError, 6000);
+        // 字段清单与诊断不进通知：留在页内横幅便于留存对照
+        if (parts.details)
+            showBanner(parts.details, parts.isError);
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
@@ -3249,16 +3333,18 @@
           return;
         }
         if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
-        let text = body.hotReloaded
-          ? "模型注册表已保存并即时生效。"
-          : "模型注册表已保存，但进程内热重载失败，需重启机器人后生效。";
-        if ((body.warnings || []).length) text += "\n警告：\n" + diagnosticsText(body.warnings);
         // 先刷新视图（loadModels/loadConfig 末尾都会清空横幅）再弹通知，
         // 否则"已保存并即时生效"的提示会被自己冲掉；结果走右上角非模态通知
         await loadModels();
         // 注册表已更新：重渲染配置面板，让模型下拉框拿到新名单
         await loadConfig();
-        showToast(text, false, 6200);
+        const hotReloaded = body.hotReloaded === true;
+        showToast(hotReloaded ? "保存成功" : "已写盘，热重载失败",
+                  hotReloaded ? "模型注册表已即时生效，无需重启"
+                              : "需重启机器人后生效，进程内暂用旧表继续服务",
+                  !hotReloaded, 6200);
+        if ((body.warnings || []).length)
+          showBanner("警告：\n" + diagnosticsText(body.warnings), false);
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
