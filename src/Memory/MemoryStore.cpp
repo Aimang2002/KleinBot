@@ -2,6 +2,7 @@
 #include "MemoryQueryPlanner.h"
 #include "TextRecall.h"
 #include "../Log/Log.h"
+#include "../utils/FsUtil.h"
 #include <algorithm>
 #include <ctime>
 #include <set>
@@ -39,6 +40,7 @@ std::string joinAliases(const std::vector<std::string> &aliases)
 
 MemoryStore::MemoryStore(const std::string &dbPath)
 {
+    utils::ensureParentDirectories(dbPath);
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK)
     {
         LOG_ERROR("长期记忆数据库打开失败：" + std::string(sqlite3_errmsg(db)));

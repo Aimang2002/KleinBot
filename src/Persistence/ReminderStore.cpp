@@ -1,8 +1,10 @@
 #include "ReminderStore.h"
 #include "../Log/Log.h"
+#include "../utils/FsUtil.h"
 
 ReminderStore::ReminderStore(const std::string &dbPath)
 {
+    utils::ensureParentDirectories(dbPath);
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK)
     {
         LOG_ERROR("SQLite 打开失败，提醒将不可持久化：" + std::string(sqlite3_errmsg(db)));

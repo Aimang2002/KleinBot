@@ -1,5 +1,6 @@
 #include "ImageAssetStore.h"
 #include "../Log/Log.h"
+#include "../utils/FsUtil.h"
 #include <curl/curl.h>
 #include <sqlite3.h>
 #include <cctype>
@@ -103,6 +104,7 @@ ImageAssetStore::ImageAssetStore(const std::string &dbPath, const std::string &d
     : assetDirectory(directory)
 {
     std::filesystem::create_directories(assetDirectory);
+    utils::ensureParentDirectories(dbPath);
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK)
     {
         LOG_ERROR("图片资源 SQLite 打开失败：" + std::string(sqlite3_errmsg(db)));

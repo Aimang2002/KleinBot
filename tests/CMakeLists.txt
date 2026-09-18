@@ -9,6 +9,7 @@ add_executable(kleinbot_tests
     CurlRequestControlTests.cpp
     EngagementTests.cpp
     EventRoutingTests.cpp
+    FsUtilTests.cpp
     GroupContextTests.cpp
     GroupListTests.cpp
     MemoryRecallTests.cpp

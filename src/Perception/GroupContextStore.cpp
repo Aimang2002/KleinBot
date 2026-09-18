@@ -1,5 +1,6 @@
 #include "GroupContextStore.h"
 #include "../Log/Log.h"
+#include "../utils/FsUtil.h"
 
 #include <sqlite3.h>
 
@@ -28,6 +29,7 @@ void deleteBeforeSeq(sqlite3 *db, std::uint64_t groupId, std::int64_t seq)
 
 GroupContextStore::GroupContextStore(const std::string &dbPath)
 {
+    utils::ensureParentDirectories(dbPath);
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK)
     {
         LOG_ERROR("群内容库打开失败，群上下文仅存内存（重启即失）：" +

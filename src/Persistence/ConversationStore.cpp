@@ -1,6 +1,7 @@
 #include "ConversationStore.h"
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
+#include "../utils/FsUtil.h"
 #include <algorithm>
 #include <unordered_map>
 
@@ -22,6 +23,7 @@ std::string escapeLikePattern(const std::string &value)
 
 ConversationStore::ConversationStore(const std::string &dbPath)
 {
+    utils::ensureParentDirectories(dbPath);
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK)
     {
         LOG_ERROR("SQLite 打开失败，对话将仅存内存：" + std::string(sqlite3_errmsg(db)));

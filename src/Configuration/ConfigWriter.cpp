@@ -200,16 +200,18 @@ bool writeJsonAtomically(const std::string &path, const json &document,
     fs::rename(tempPath, path, renameError);
     if (renameError)
     {
-        // Windows 上目标已存在时 rename 可能失败，回退为覆盖复制
-        std::error_code copyError;
-        fs::copy_file(tempPath, path, fs::copy_options::overwrite_existing, copyError);
-        fs::remove(tempPath);
-        if (copyError)
-        {
-            diagnostics.push_back({ConfigSeverity::Fatal, ConfigErrorCategory::Source,
-                                  path, "文件替换失败：" + renameError.message()});
-            return false;
-        }
+        // Windows 上目标被占用时 rename 报 Permission denied；MinGW libstdc++ 的
+        // copy_file(overwrite_existing) 对已存在目标同样失败，回退只能先删旧文件
+        // 再改名——短暂失去原子性，仅 rename 异常时走到。失败时保留临时文件供人工恢复
+        std::error_code removeError;
+        fs::remove(path, removeError);
+        fs::rename(tempPath, path, renameError);
+    }
+    if (renameError)
+    {
+        diagnostics.push_back({ConfigSeverity::Fatal, ConfigErrorCategory::Source,
+                              path, "文件替换失败：" + renameError.message()});
+        return false;
     }
     return true;
 }
@@ -219,25 +221,29 @@ ConfigWriter::Result ConfigWriter::write(const std::string &path, const json &ca
     std::lock_guard<std::mutex> lock(writeMutex);
     Result result;
 
-    std::ifstream input(path);
-    if (!input.is_open())
-    {
-        result.diagnostics.push_back({ConfigSeverity::Fatal, ConfigErrorCategory::Source,
-                                      path, "当前配置文件无法打开，写回中止"});
-        return result;
-    }
-    std::ostringstream buffer;
-    buffer << input.rdbuf();
     json current;
-    try
     {
-        current = json::parse(buffer.str());
-    }
-    catch (const std::exception &error)
-    {
-        result.diagnostics.push_back({ConfigSeverity::Fatal, ConfigErrorCategory::Source,
-                                      path, "当前配置文件不是有效 JSON：" + std::string(error.what())});
-        return result;
+        // 读句柄必须在替换动作前关闭：Windows 上打开中的文件会挡住 rename 替换
+        // （目标句柄不含 FILE_SHARE_DELETE，报 Permission denied）
+        std::ifstream input(path);
+        if (!input.is_open())
+        {
+            result.diagnostics.push_back({ConfigSeverity::Fatal, ConfigErrorCategory::Source,
+                                          path, "当前配置文件无法打开，写回中止"});
+            return result;
+        }
+        std::ostringstream buffer;
+        buffer << input.rdbuf();
+        try
+        {
+            current = json::parse(buffer.str());
+        }
+        catch (const std::exception &error)
+        {
+            result.diagnostics.push_back({ConfigSeverity::Fatal, ConfigErrorCategory::Source,
+                                          path, "当前配置文件不是有效 JSON：" + std::string(error.what())});
+            return result;
+        }
     }
 
     const json merged = restoreMaskedSecrets(candidate, current);

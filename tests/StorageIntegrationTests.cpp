@@ -74,6 +74,23 @@ TEST(ConversationStoreIntegrationTest, PersistsSearchesAndRemovesUserHistory)
     EXPECT_EQ(store.loadAll(20).size(), 1U);
 }
 
+// 回归（Windows 首跑）：库文件父目录不存在时构造即自建目录，
+// 不能退化成 "unable to open database file" 的仅内存模式
+TEST(ConversationStoreIntegrationTest, OpensDatabaseWhenParentDirectoryMissing)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    const auto databasePath = temporaryDirectory.path() + "/fresh/deploy/conversation.db";
+
+    ConversationStore store(databasePath);
+    ASSERT_TRUE(store.isOpen());
+    const int64_t messageId = store.append(30, "user", "first run", 2000);
+    EXPECT_GT(messageId, 0);
+    const auto history = store.loadAll(30);
+    ASSERT_EQ(history.size(), 1U);
+    EXPECT_EQ(history.front().content, "first run");
+}
+
 namespace
 {
 std::string writeModelRegistryFile(const std::string &directory)

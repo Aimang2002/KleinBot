@@ -1,5 +1,6 @@
 #include "PerceptionStore.h"
 #include "../Log/Log.h"
+#include "../utils/FsUtil.h"
 
 #include <sqlite3.h>
 
@@ -28,6 +29,7 @@ bool hasLegacySpeakerColumn(sqlite3 *db, const char *table)
 
 PerceptionStore::PerceptionStore(const std::string &dbPath)
 {
+    utils::ensureParentDirectories(dbPath);
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK)
     {
         LOG_ERROR("观察通道 SQLite 打开失败，亲密度将仅存内存：" +

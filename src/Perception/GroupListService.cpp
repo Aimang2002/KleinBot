@@ -1,5 +1,6 @@
 #include "GroupListService.h"
 #include "../Log/Log.h"
+#include "../utils/FsUtil.h"
 
 #include <algorithm>
 #include <sqlite3.h>
@@ -26,6 +27,7 @@ std::string columnText(sqlite3_stmt *statement, int column)
 GroupListService::GroupListService(const std::string &dbPath, OneBotApiChannel &api)
     : api(api)
 {
+    utils::ensureParentDirectories(dbPath);
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK)
     {
         LOG_ERROR("观察状态库打开失败，观察通道与面板群列表不可用：" +
