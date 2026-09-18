@@ -106,7 +106,7 @@ void Log::error(std::string message)
     std::string result = messageLengthCheck(message);
     result.insert(0, "[" + getCurrentTime("y+h") + "] " + "ERROR: ");
     addMessage(result);
-    std::cerr << "\033[1;31m" << "[" << getCurrentTime("y+h") << "] " << "ERROR: " << result << "\033[0m\n";
+    std::cerr << "\033[1;31m" << result << "\033[0m\n";
 }
 
 void Log::fatal(std::string message)
