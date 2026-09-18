@@ -349,13 +349,54 @@ TEST(EngagementSessionTest, LullAccumulatedMessagesTriggerTurn)
 {
     Harness harness;
     harness.service->onAtActivated(8823, "话题");
-    harness.feed(8823, "一", harness.now);
-    harness.feed(8823, "二", harness.now + 1);
-    harness.feed(8823, "三", harness.now + 2);
-    harness.now += 60; // 跨过 20s 轮次节流 + 4s lull（最后消息在 now+2）
+    for (int i = 0; i < 5; ++i)
+        harness.feed(8823, "消息" + std::to_string(i), harness.now + i);
+    harness.now += 90; // 跨过 75s 轮次节流 + 4s lull（最后消息在 now+4）
     harness.service->pump(harness.now);
     ASSERT_FALSE(harness.submittedTurns.empty());
     EXPECT_EQ(harness.submittedTurns.back(), 8823U);
+}
+
+TEST(EngagementSessionTest, LullTurnsHourlyCapStopsChattyFollowUps)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    // 小时内连续 8 个 lull 轮都放行
+    for (int round = 0; round < 8; ++round)
+    {
+        for (int i = 0; i < 5; ++i)
+            harness.feed(8823, "消息" + std::to_string(round) + "-" + std::to_string(i), harness.now);
+        harness.now += 90;
+        harness.service->pump(harness.now);
+    }
+    EXPECT_EQ(harness.submittedTurns.size(), 8U);
+    // 第 9 次：消息量够、节流已过，但撞每小时帽不再触发（回得太勤是最大观感杀手）
+    for (int i = 0; i < 5; ++i)
+        harness.feed(8823, "再来", harness.now);
+    harness.now += 90;
+    harness.service->pump(harness.now);
+    EXPECT_EQ(harness.submittedTurns.size(), 8U) << "每小时帽拦截第 9 个 lull 轮";
+}
+
+TEST(EngagementContextTest, MoodLineUpdatesEveryThreeSpeaksAndFeedsMaterial)
+{
+    Harness harness;
+    harness.service->setWorker([](const std::string &, const std::string &)
+                               { return "有点困但来劲\n"; });
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "群友开场", harness.now); // 快照非空，runTurn 才会装配材料
+    for (int round = 1; round <= 4; ++round)
+    {
+        harness.turnResponses.push_back(sayResponse("第" + std::to_string(round) + "句话"));
+        harness.service->runTurn(8823);
+    }
+    auto session = harness.service->sessionOf(8823);
+    ASSERT_TRUE(session.has_value());
+    EXPECT_EQ(session->moodLine, "有点困但来劲") << "第 3 轮后更新，去首尾空白";
+    // 第 4 轮材料置顶注入情绪基调（跨轮惯性）
+    ASSERT_FALSE(harness.agentHistories.empty());
+    EXPECT_NE(harness.agentHistories.back().front().content.find("有点困但来劲"),
+              std::string::npos);
 }
 
 TEST(EngagementSessionTest, AddressPendingTriggersImmediateTurn)

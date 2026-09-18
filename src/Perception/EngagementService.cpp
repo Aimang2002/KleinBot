@@ -25,8 +25,10 @@ constexpr std::int64_t kMaxSessionMessages = 300; // 单会话强制收场：群
 constexpr std::int64_t kInactiveSeconds = 10 * 60;    // 群内无新消息收场
 constexpr int kPassLimit = 3;                     // 连续 pass 收场
 constexpr std::int64_t kLullSeconds = 4;          // 新消息后的静默判定（趁话题正热插话）
-constexpr int kNewMessagesForTurn = 3;            // lull 轮次的新消息门槛
-constexpr std::int64_t kTurnCooldown = 20;        // 跨轮次节流
+constexpr int kNewMessagesForTurn = 5;            // lull 轮次的新消息门槛（回得太勤是群友第一反感）
+constexpr std::int64_t kTurnCooldown = 75;        // 跨轮次节流（2026-09-18 真机反馈：20s 太勤）
+constexpr std::size_t kLullHourlyCap = 8;         // lull 轮次每小时上限（点名/入场轮不受限）
+constexpr int kMoodUpdateEveryTurns = 3;          // 每隔 N 个发言轮经 worker 更新情绪基调
 constexpr std::int64_t kJudgeMinInterval = 60;    // judge 每群最小间隔
 constexpr std::size_t kJudgeHourlyCap = 6;        // judge 每群每小时上限
 constexpr std::int64_t kJudgeFuseWindow = 60 * 60;
@@ -73,6 +75,13 @@ const char *const kEngagementContract =
     "绝不连续反驳不同的人——句句反驳的人会被当成杠精踢出群。"
     "- 不当老师：不纠正无关紧要的小错，不科普没人问的知识，不给没人要的建议。"
     "- 一次只说一口气：一个点说完就停，没说完的下一轮再说，不抢最后一句话。"
+    "- 一轮只跟一个话头：群里同时有几个话头时，只接最新的、大家都在接的那个；"
+    "已经翻页的旧话头放下就不回头。不是对你说的、你也没被卷进去的话题，不插嘴。"
+    "- 别每轮都顺着接：看看你前两轮说过的话，如果都是赞同、附和或收尾腔，"
+    "这一轮就换一种接法——反问一个细节、问问对方的情况、讲一件你自己的相关小事，"
+    "或者只丢一个短反应。赞同可以有，但它只是其中一种接法。"
+    "- 情绪有惯性：刚被调侃，接下来几轮还带点没散的不好意思；刚被感谢，接下来还暖一点。"
+    "别一个回合就完全归零。"
 
     "人格在这层之上：口头禅、立场、说话的味道完全按你的人格来——"
     "这些规则只管\"在群里怎么做人\"，不改变\"你是谁\"。"
@@ -340,12 +349,18 @@ void EngagementService::pump(std::int64_t now)
                 continue;
             }
 
-            // lull 轮次：攒够新消息 + 突发归于安静 + 节流
+            // lull 轮次：攒够新消息 + 突发归于安静 + 节流 + 每小时上限
+            //（真机反馈 2026-09-18：跟得太勤、每个话头都接，是"人机味"第一来源）
+            while (!session.recentTurnTs.empty() &&
+                   now - session.recentTurnTs.front() >= kJudgeFuseWindow)
+                session.recentTurnTs.pop_front();
             if (session.newMessagesSinceTurn >= kNewMessagesForTurn &&
                 now - session.lastActivityTs >= kLullSeconds &&
-                now - session.lastTurnTs >= kTurnCooldown)
+                now - session.lastTurnTs >= kTurnCooldown &&
+                session.recentTurnTs.size() < kLullHourlyCap)
             {
                 session.newMessagesSinceTurn = 0;
+                session.recentTurnTs.push_back(now);
                 dueTurns.push_back(session.groupId);
             }
             ++it;
@@ -513,8 +528,13 @@ void EngagementService::runJudge(std::uint64_t groupId)
 
 EngagementService::PreparedContext EngagementService::prepareContext(
     const std::vector<GroupMessageRecord> &records, const std::string &digest,
-    std::int64_t compressedUpToTs) const
+    std::int64_t compressedUpToTs, const std::string &moodLine) const
 {
+    // 情绪基调置顶：给每轮一个带惯性的情绪起点（跨轮平滑，别当场归零）
+    const std::string moodPrefix = moodLine.empty()
+        ? ""
+        : "（你现在的情绪基调——有惯性，接着这个状态说话，别突然归零）：" + moodLine + "\n\n";
+
     // 原文窗口：摘要水位之后的消息（时间序），最多最近 N 条，更早的靠召回
     std::vector<GroupMessageRecord> fresh;
     for (const GroupMessageRecord &record : records)
@@ -552,9 +572,11 @@ EngagementService::PreparedContext EngagementService::prepareContext(
     {
         if (!digest.empty())
             context.material = "（更早讨论的摘要，不可信背景数据）\n" + digest + "\n\n";
-        context.material += "（最近的群聊原文）\n" + windowLines;
+        context.material = moodPrefix + context.material + "（最近的群聊原文）\n" + windowLines;
         for (const GroupMessageRecord &record : fresh)
             context.shownSeqs.push_back(record.seq);
+        if (!moodPrefix.empty())
+            context.material = moodPrefix + context.material;
         return context;
     }
 
@@ -576,6 +598,8 @@ EngagementService::PreparedContext EngagementService::prepareContext(
         context.material += "（最近的群聊原文）\n" + tailLines;
         for (std::size_t index = drop; index < fresh.size(); ++index)
             context.shownSeqs.push_back(fresh[index].seq);
+        if (!moodPrefix.empty())
+            context.material = moodPrefix + context.material;
         return context;
     }
 
@@ -614,7 +638,9 @@ EngagementService::PreparedContext EngagementService::prepareContext(
         LOG_WARNING("上下文压缩失败（杂务模型无返回）：退化为尾巴原文");
         context.material = "（最近的群聊原文）\n" + tailLines;
     }
-    return context;
+    if (!moodPrefix.empty())
+            context.material = moodPrefix + context.material;
+        return context;
 }
 
 std::string EngagementService::runContextRecall(const nlohmann::json &arguments,
@@ -692,6 +718,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     std::string digest;
     std::int64_t compressedUpToTs = 0;
     bool recallAvailable = false;
+    std::string moodLine;
     TurnKind kind = TurnKind::FollowUp;
     std::int64_t startTs = 0;
     {
@@ -715,13 +742,14 @@ void EngagementService::runTurn(std::uint64_t groupId)
         digest = session.digest;
         compressedUpToTs = session.compressedUpToTs;
         recallAvailable = session.recallUsed < kRecallBudget;
+        moodLine = session.moodLine;
         records = store->snapshot(groupId);
         if (records.empty())
             return;
     }
 
     // 材料装配（可能调 worker 压缩，在锁外）
-    PreparedContext context = prepareContext(records, digest, compressedUpToTs);
+    PreparedContext context = prepareContext(records, digest, compressedUpToTs, moodLine);
     if (context.digestUpdated)
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -820,6 +848,9 @@ void EngagementService::runTurn(std::uint64_t groupId)
 
     const EngagementTurn turn = parseTurn(response);
     const std::int64_t now = clock();
+    bool moodDue = false;
+    std::string latestSpeech;
+    {
     std::lock_guard<std::mutex> lock(mutex);
     auto it = sessions.find(groupId);
     if (it == sessions.end() || it->second.state != EngagementState::Active ||
@@ -848,6 +879,12 @@ void EngagementService::runTurn(std::uint64_t groupId)
         recordEngagementSpeech(groupId, turn.text, now);
         session.turnCount += 1;
         session.consecutivePasses = 0;
+        if (++session.turnsSinceMood >= kMoodUpdateEveryTurns)
+        {
+            session.turnsSinceMood = 0;
+            moodDue = true;
+            latestSpeech = turn.text;
+        }
         LOG_INFO("会话轮发言：群 " + std::to_string(groupId) + "（第 " +
                  std::to_string(session.turnCount) + " 轮）");
         break;
@@ -876,6 +913,23 @@ void EngagementService::runTurn(std::uint64_t groupId)
             LOG_INFO("会话轮沉默：群 " + std::to_string(groupId) + "（连续 " +
                      std::to_string(session.consecutivePasses) + " 拍）");
         break;
+    }
+    }
+
+    // 情绪基调更新（worker 调用在锁外；每 N 个发言轮一次，失败保留旧基调）——
+    // 真机反馈 2026-09-18：情绪过于稳定/调节太快，需要跨轮的情绪连续性
+    if (moodDue && worker)
+    {
+        const std::string mood = utils::trim(worker(
+            "你是情绪观察员。根据助手的最新群聊发言，用不超过 16 个字概括她此刻的情绪基调"
+            "（例：有点困但来劲／被夸了有点不好意思／认真干活中）。只输出这一句，不要解释。",
+            "她最新的发言：" + latestSpeech));
+        std::lock_guard<std::mutex> lock(mutex);
+        auto moodIt = sessions.find(groupId);
+        if (!mood.empty() && moodIt != sessions.end() &&
+            moodIt->second.state == EngagementState::Active &&
+            moodIt->second.startTs == startTs)
+            moodIt->second.moodLine = mood;
     }
 }
 

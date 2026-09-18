@@ -59,6 +59,9 @@ struct EngagementSession
     int newMessagesSinceTurn = 0;    // lull 轮次触发的新消息门槛
     int messagesSeen = 0;            // 会话存活期间经过的群消息量（强制收场上限）
     int recallUsed = 0;              // 上下文召回预算（每会话 1 次）
+    std::deque<std::int64_t> recentTurnTs; // lull 轮次时刻（每小时帽；点名/入场轮不计）
+    std::string moodLine;                  // 当前情绪基调一句话（每 N 个发言轮经 worker 更新）
+    int turnsSinceMood = 0;                // 距上次情绪基调更新的发言轮数
     std::string digest;              // 已压缩部分的滚动摘要
     std::int64_t compressedUpToTs = 0; // 摘要覆盖到的时刻（之后为原文窗口）
     bool addressPending = false;     // 被点名/被回复，待回应（优先触发）
@@ -168,7 +171,8 @@ private:
     // worker 合并进滚动摘要，只留原文尾巴。worker 调用在锁外由调用方保证
     PreparedContext prepareContext(const std::vector<GroupMessageRecord> &records,
                                    const std::string &digest,
-                                   std::int64_t compressedUpToTs) const;
+                                   std::int64_t compressedUpToTs,
+                                   const std::string &moodLine) const;
     std::string runContextRecall(const nlohmann::json &arguments, std::uint64_t groupId,
                                  const std::vector<std::int64_t> &shownSeqs) const;
     // 冷启动每群状态（纯内存，重启即失）
