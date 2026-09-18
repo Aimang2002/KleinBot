@@ -1375,7 +1375,7 @@
       temperature: "温度 temperature", top_p: "Top P", frequency_penalty: "频率惩罚",
       presence_penalty: "存在惩罚", max_message_tokens: "单条消息最大 token",
       worker_threads: "工作线程数", message_survival_seconds: "消息存活（秒）",
-      drawing: "画图模型", vision: "视觉模型", worker: "杂务模型",
+      drawing: "画图模型", vision: "视觉模型", worker: "轻量模型",
       model: "模型", endpoint: "端点", api_key: "API Key", api_standard: "API 标准",
       host: "主机", port: "端口", bind: "绑定地址", path: "路径", access_token: "访问令牌",
       reference_audio: "参考音频", reference_text: "参考文本",
@@ -1406,7 +1406,7 @@
       bot: "机器人的身份信息：QQ 号、管理员与昵称。",
       features: "机器人对外行为的开关，保存时写回 bot 分组。",
       chat: "消息处理参数：单条消息 token 上限、工作线程数与消息存活时间。",
-      models: "对话模型的默认模型与采样参数，画图/视觉/杂务的专用端点（杂务未配置时回退默认模型）；模型本体在“模型供应商”页管理。",
+      models: "对话模型的默认模型、轻量模型与采样参数，画图/视觉的专用端点（轻量模型未配置时回退默认模型）；模型本体在“模型供应商”页管理。",
       voice: "GPT-SoVITS 语音合成配置；字段不全时语音功能会自动关闭。",
       memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
       web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
@@ -1457,10 +1457,7 @@
       "models.vision.endpoint": "视觉模型的 API 端点地址。",
       "models.vision.api_key": "视觉模型的 API Key；留空表示保持原值（掩码显示）。",
       "models.vision.api_standard": "视觉模型的请求协议标准。",
-      "models.worker.model": "杂务模型名（话题介入判定、上下文压缩等后台任务）；留空回退默认模型。",
-      "models.worker.endpoint": "杂务模型的 API 端点地址。",
-      "models.worker.api_key": "杂务模型的 API Key；留空表示保持原值（掩码显示）。",
-      "models.worker.api_standard": "杂务模型的请求协议标准。",
+      "models.worker.model": "轻量模型名（话题介入判定、上下文压缩等后台任务）；留空回退默认模型。",
       "voice.enabled": "语音功能总开关（保存即生效）。",
       "voice.host": "GPT-SoVITS 服务地址。",
       "voice.port": "GPT-SoVITS 服务端口。",
@@ -1468,7 +1465,7 @@
       "voice.reference_text": "参考音频对应的文本内容。",
       "memory.enabled": "长期记忆功能总开关。",
       "memory.model": "提取记忆所用的模型：从模型注册表下拉选择；留空跟随默认模型。",
-      "models.worker.model": "杂务模型：话题介入判定等后台任务所用模型，从注册表下拉选择；端点与密钥由注册表条目提供，未找到时回退默认对话模型。",
+      "models.worker.model": "轻量模型：话题介入判定、上下文压缩等后台任务所用模型，从注册表下拉选择；端点与密钥由注册表条目提供，未找到时回退默认对话模型。",
       "memory.batch_turns": "每积累多少轮对话提取一次记忆。",
       "memory.idle_minutes": "用户空闲多少分钟后触发本批记忆提取。",
       "memory.recall_limit": "每次注入对话上下文的记忆条数上限。",
@@ -2092,7 +2089,7 @@
         }
         if (pane.dataset.custom === "models") {
           // “模型设置”模块的双分组收集：对话模型区写回 chat，画图/视觉区写回 models；
-          // 杂务模型行显示在对话模型区，但归位到 models.worker（注册表形态：只写模型名）
+          // 轻量模型行显示在对话模型区，但归位到 models.worker（注册表形态：只写模型名）
           const chatFields = pane.querySelector('[data-group="chat"]');
           let workerModelValue = "";
           if (chatFields) {
@@ -2194,20 +2191,25 @@
         chatSection.open = true;
         const summary = document.createElement("summary");
         summary.textContent = "对话模型";
-        summary.dataset.hint = "默认对话模型、杂务模型与采样参数；模型本体在“模型供应商”页管理。";
+        summary.dataset.hint = "默认对话模型、轻量模型与采样参数；模型本体在“模型供应商”页管理。";
         chatSection.appendChild(summary);
         const chatFields = document.createElement("div");
         chatFields.className = "fields";
         chatFields.dataset.group = "chat";
         chatSection.appendChild(chatFields);
-        for (const key of CHAT_MODEL_FIELDS)
+        // 轻量模型行（2026-09-19）：紧跟默认模型下方，不再单独成卡，只选注册表模型名，
+        // 端点与密钥由注册表条目提供；收集时在 collectConfig 归位到 models.worker
+        const renderWorkerModelRow = () => {
+          const workerValue = isPlainObject(models) && isPlainObject(models.worker) &&
+                              typeof models.worker.model === "string" ? models.worker.model : "";
+          renderValue(chatFields, "worker", workerValue, "models.worker.model", false);
+        };
+        for (const key of CHAT_MODEL_FIELDS) {
           if (Object.prototype.hasOwnProperty.call(chat, key))
             renderValue(chatFields, key, chat[key], "chat." + key, false);
-        // 杂务模型行（2026-09-19）：不再单独成卡，只选注册表模型名，
-        // 端点与密钥由注册表条目提供；收集时在 collectConfig 归位到 models.worker
-        const workerValue = isPlainObject(models) && isPlainObject(models.worker) &&
-                            typeof models.worker.model === "string" ? models.worker.model : "";
-        renderValue(chatFields, "worker", workerValue, "models.worker.model", false);
+          if (key === "default_model")
+            renderWorkerModelRow();
+        }
         fields.appendChild(chatSection);
       }
       const modelFields = document.createElement("div");
