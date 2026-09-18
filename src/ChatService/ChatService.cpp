@@ -9,18 +9,14 @@
 #include "../utils/Utils.hpp"
 #include "../WebFetch/WebFetchOptions.h"
 
-ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use_context,
+ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
                              std::optional<ChatImageContent> currentImage,
                              const std::string &situationNote)
 {
     ChatReply resultReply;
-    int64_t userMessageId = 0;
-    // 1. 上下文模式：增量追加用户这句（内存 + SQLite 同步落盘）
-    if (use_context)
-    {
-        userMessageId = this->userSession.appendMessage(user_id, "user", text);
-        resultReply.user_message_id = userMessageId;
-    }
+    // 1. 增量追加用户这句（内存 + SQLite 同步落盘）：上下文对所有用户开放
+    int64_t userMessageId = this->userSession.appendMessage(user_id, "user", text);
+    resultReply.user_message_id = userMessageId;
 
     // 2. 构造请求包（USS 负责裁切、查模型、拼超参数）
     auto bundleOpt = this->userSession.buildChatRequest(user_id);
@@ -34,14 +30,6 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
     // 单轮情境注记紧跟服务契约：行为约束归 system，先于后续工具规则注入
     if (!situationNote.empty())
         bundle.request.system_prompt += situationNote;
-
-    // 非上下文模式：清空历史，只发当前这条
-    if (!use_context)
-    {
-        LOG_INFO("当前聊天不支持上下文模式...");
-        bundle.request.history.clear();
-        bundle.request.history.push_back({"user", text});
-    }
 
     const CurrentImageRoute imageRoute = routeCurrentImage(
         bundle.request, bundle.model, bundle.model_name, std::move(currentImage));
@@ -266,8 +254,7 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text, bool use
         return resultReply;
     }
 
-    // 5. 上下文模式：增量追加助手回复（内存 + SQLite 同步落盘）
-    if (use_context)
+    // 5. 增量追加助手回复（内存 + SQLite 同步落盘），并入长期记忆提取队列
     {
         std::string persistedAssistantContent = LLM_content;
         for (const auto &annotation : contextAnnotations)

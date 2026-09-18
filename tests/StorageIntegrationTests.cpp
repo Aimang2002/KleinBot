@@ -166,6 +166,31 @@ TEST(UserSessionFirstContactTest, ReportsTrueOnlyOncePerUser)
     EXPECT_FALSE(session.takeFirstContact(10));
 }
 
+// 回归（2026-09-19 缺陷修正）：上下文模式对所有用户开放，不再按管理员身份
+// 区分单轮/上下文——普通用户的会话同样落库、冷启动可读回；
+// hasChatHistory 供"新朋友第一句话"注记区分初次接触与重启后的老朋友
+TEST(UserSessionFirstContactTest, ChatHistoryPersistsForEveryUser)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+
+    UserSessionService session(registry, store, bot, options);
+    EXPECT_FALSE(session.hasChatHistory(30001));
+    session.appendMessage(30001, "user", "你好，收到请回答");
+    session.appendMessage(30001, "assistant", "你好呀");
+    EXPECT_TRUE(session.hasChatHistory(30001));
+    EXPECT_FALSE(session.hasChatHistory(30002));
+
+    // 冷启动：重建服务实例，历史从 SQLite 读回，上下文跨重启保留
+    UserSessionService reloaded(registry, store, bot, options);
+    EXPECT_TRUE(reloaded.hasChatHistory(30001));
+    EXPECT_FALSE(reloaded.hasChatHistory(30002));
+}
+
 TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
 {
     TemporaryDirectory temporaryDirectory;

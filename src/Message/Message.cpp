@@ -116,15 +116,16 @@ void Message::handleMessage(const InboundMessage &current_data)
 				conversationText += "\n" + contextNote;
 		}
 
-		// 上下文模式仅管理员：普通用户无状态单轮，不写会话也不进长期记忆
-		const bool useContext = current_data.user_id == options.bot.managerId;
+		// 上下文对所有用户开放（2026-09-19 缺陷修正）：每句都写入会话并进长期记忆，
+		// 不再按管理员身份区分单轮/上下文
 
-		// 新朋友第一句话（私聊、非管理员、进程内首次）：情境注记进 system prompt
-		// （行为约束归 system，约束力强于用户文本前插）。普通用户无会话历史，
-		// takeFirstContact 是模型判断"初次接触"的唯一信号源
+		// 新朋友第一句话（私聊、进程内首次且无历史会话）：情境注记进 system prompt
+		// （行为约束归 system，约束力强于用户文本前插）。
+		// takeFirstContact 提供进程内首次信号，hasChatHistory 排除重启后的老朋友
 		std::string situationNote;
-		if (!useContext && current_data.message_type != "group" &&
-			this->userSession.takeFirstContact(current_data.user_id))
+		if (current_data.message_type != "group" &&
+			this->userSession.takeFirstContact(current_data.user_id) &&
+			!this->userSession.hasChatHistory(current_data.user_id))
 		{
 			situationNote =
 				"\n\n[系统注] 对方刚加上你好友，这是TA发来的第一句话：先自然回应对方说的内容，"
@@ -139,7 +140,7 @@ void Message::handleMessage(const InboundMessage &current_data)
 		if (typingIndicator != nullptr && current_data.message_type != "group")
 			typingIndicator->begin(current_data.user_id);
 		ChatReply chatReply = this->chatService.reply(
-			current_data.user_id, conversationText, useContext, std::move(currentImage),
+			current_data.user_id, conversationText, std::move(currentImage),
 			situationNote);
 		if (!inboundAssetId.empty())
 			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,

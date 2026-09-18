@@ -112,6 +112,14 @@ bool UserSessionService::takeFirstContact(const uint64_t user_id)
     return this->first_contact_seen_.insert(user_id).second;
 }
 
+bool UserSessionService::hasChatHistory(const uint64_t user_id)
+{
+    std::lock_guard<std::mutex> lock(this->mutex_message);
+    this->ensureUserExistsUnlock(user_id);
+    auto user = this->user_messages->find(user_id);
+    return !user->second.user_chatHistory.empty();
+}
+
 void UserSessionService::resetChat(const uint64_t user_id)
 {
     std::lock_guard<std::mutex> lock(this->mutex_message);

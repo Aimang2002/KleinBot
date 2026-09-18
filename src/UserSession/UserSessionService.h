@@ -37,10 +37,13 @@ public:
     void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
     // 进程内首次接触检测：每个用户只返回一次 true（mutex_message 保护）。
-    // 普通用户无会话历史，模型无法自行判断"新朋友第一句话"，Message 据此在
-    // 该轮注入自我介绍情境注记；重启后重新计数——最坏情况是重启后首次
-    // 私聊问候再介绍一次，可接受
+    // 上下文对所有用户开放后，模型可从会话历史自行判断初次接触；
+    // 与 hasChatHistory 搭配用于"真·新朋友第一句话"注记——重启后重新计数，
+    // 老朋友借 hasChatHistory 排除，最坏情况是重置过上下文的老用户再被介绍一次，可接受
     bool takeFirstContact(uint64_t user_id);
+    // 该用户是否已有会话历史（冷启动镜像含 SQLite 读回的部分）；
+    // 供"新朋友第一句话"注记区分初次接触与重启后的老朋友
+    bool hasChatHistory(uint64_t user_id);
     // 轻重置（#重置对话）：清空内存镜像并把上下文起点落库，
     // SQLite 原始历史、长期记忆和图片资源保留，旧话题仍可召回
     void resetChat(const uint64_t user_id);
