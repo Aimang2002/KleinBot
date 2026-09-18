@@ -632,7 +632,7 @@ int main(int argc, char **argv)
 		panelThread = std::thread(
 			ConfigPanelServer::run,
 			settings.webUi, configPath, std::ref(configStore), std::ref(models),
-			groupListService.get(), std::cref(running));
+			groupListService.get(), std::cref(running), &activeApiChannel);
 	}
 
 	while (running.load())

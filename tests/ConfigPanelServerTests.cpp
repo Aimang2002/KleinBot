@@ -11,6 +11,7 @@ using json = nlohmann::json;
 #include "Network/OneBotApiChannel.h"
 #include "Perception/GroupListService.h"
 #include "WebUI/ConfigPanelServer.h"
+#include "KleinVersion.h"
 #include "../Library/httplib/httplib.h"
 
 #include <chrono>
@@ -777,6 +778,51 @@ TEST_F(PanelServerFixture, GetGroupsWithoutServiceReturnsEmptyList)
     const json body = json::parse(result->body);
     EXPECT_TRUE(body["groups"].is_array());
     EXPECT_TRUE(body["groups"].empty());
+}
+
+// 基础信息端点：注入通道时返回协议端登录信息（QQ 号/昵称）+ 进程内版本与运行时长
+TEST_F(PanelServerFixture, GetBotInfoReturnsVersionAndLoginInfo)
+{
+    PanelGroupsFakeApiChannel api;
+    api.result.retcode = 0;
+    api.result.data = nlohmann::json({
+        {"user_id", 123456},
+        {"nickname", "Klein"},
+    });
+    server->stop();
+    serverThread->join();
+    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store,
+                                            *registry, groupsService, &api);
+    port = server->bind_to_any_port("127.0.0.1");
+    serverThread = std::make_unique<std::thread>([this]() { server->listen_after_bind(); });
+
+    httplib::Client client("127.0.0.1", port);
+    const auto result = client.Get("/api/botinfo", authHeaders());
+    ASSERT_TRUE(result != nullptr);
+    EXPECT_EQ(result->status, 200);
+    const json body = json::parse(result->body);
+    EXPECT_EQ(body["connected"], true);
+    EXPECT_EQ(body["user_id"], 123456);
+    EXPECT_EQ(body["nickname"], "Klein");
+    EXPECT_EQ(body["version"], KLEINBOT_VERSION_STRING);
+    EXPECT_EQ(body["git_hash"], KLEINBOT_GIT_HASH);
+    EXPECT_TRUE(body["uptime_seconds"].is_number());
+    // 实现端未返回签名字段 → 省略该键（"签名如果有的话"）
+    EXPECT_FALSE(body.contains("signature"));
+}
+
+// 未注入通道（或协议端离线）：降级为 connected=false，版本信息仍然可用
+TEST_F(PanelServerFixture, GetBotInfoWithoutChannelDegradesGracefully)
+{
+    httplib::Client client("127.0.0.1", port);
+    const auto result = client.Get("/api/botinfo", authHeaders());
+    ASSERT_TRUE(result != nullptr);
+    EXPECT_EQ(result->status, 200);
+    const json body = json::parse(result->body);
+    EXPECT_EQ(body["connected"], false);
+    EXPECT_FALSE(body.contains("user_id"));
+    EXPECT_FALSE(body.contains("nickname"));
+    EXPECT_EQ(body["version"], KLEINBOT_VERSION_STRING);
 }
 
 // 观察通道状态端点：总开关与单群监控直接落库并即时生效（不再走配置）

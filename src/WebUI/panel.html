@@ -539,6 +539,67 @@
       to { transform: scaleX(0); }
     }
 
+    /* 基础信息页：机器人资料卡 + 运行概况行 */
+    .botinfo-card {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 18px 4px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .botinfo-avatar {
+      flex: none;
+      width: 84px;
+      height: 84px;
+      border-radius: 50%;
+      border: 1px solid var(--line-2);
+      object-fit: cover;
+      background: var(--surface-2);
+    }
+
+    .botinfo-name {
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .botinfo-qq {
+      margin-top: 4px;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .botinfo-sign {
+      margin-top: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .botinfo-rows {
+      padding: 4px 4px 12px;
+    }
+
+    .botinfo-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 11px 2px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    .botinfo-row-label {
+      color: var(--faint);
+    }
+
+    .botinfo-row-value {
+      font-family: var(--mono);
+      font-size: 13px;
+      text-align: right;
+      word-break: break-all;
+    }
+
     .note {
       margin-bottom: 16px;
       padding: 10px 14px;
@@ -1437,6 +1498,11 @@
         <div class="note" id="registryInfo">正在加载模型注册表……</div>
         <div id="providers"></div>
       </div>
+      <div id="botInfoView" style="display:none">
+        <h2>基础信息</h2>
+        <p class="pane-hint">机器人账号资料与 Klein 运行概况。头像与昵称来自协议端，协议端未连接时信息受限。</p>
+        <div id="botInfoBody"></div>
+      </div>
       <div id="perceptionView" style="display:none">
         <h2>群聊设置</h2>
         <p class="pane-hint">白名单群的只读观察与话题跟进。总开关与群选择都是<b>运行时状态</b>，改动写入数据库并<b>立即生效</b>，无需保存配置、无需重启。私聊与非监控群完全不被观察。</p>
@@ -1481,6 +1547,7 @@
     const TOKEN_STORAGE = "klein_webui_token";
     const MODELS_KEY = "__models__";
     const PERCEPTION_KEY = "__perception__";
+    const BOTINFO_KEY = "__botinfo__";
     let activePane = "";
     let modelsLoaded = false;
     let loadedSchemaVersion; // 原样保留的 schema_version：面板不提供编辑，保存时写回原值
@@ -2087,6 +2154,26 @@
       return item;
     }
 
+    function botInfoNavItem() {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "nav-item";
+      item.dataset.key = BOTINFO_KEY;
+      // 与编号模块同构但不带编号：机器人头轮廓 + 双眼
+      item.innerHTML =
+        '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+        '<g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">' +
+        '<rect x="3.2" y="5.4" width="9.6" height="7.2" rx="2"/>' +
+        '<path d="M8 5.2 V3.4"/>' +
+        '<circle cx="8" cy="2.6" r="0.9"/>' +
+        '</g>' +
+        '<circle cx="6.2" cy="9" r="0.9" fill="currentColor" stroke="none"/>' +
+        '<circle cx="9.8" cy="9" r="0.9" fill="currentColor" stroke="none"/>' +
+        '</svg><span>基础信息</span>';
+      item.addEventListener("click", () => selectPane(BOTINFO_KEY));
+      return item;
+    }
+
     function perceptionNavItem() {
       // 与其它编号模块同构：M 编号 + 文字，无图标（编号由 CSS counter 按 DOM 序分配）
       const item = document.createElement("button");
@@ -2110,10 +2197,14 @@
         pane.classList.toggle("active", pane.dataset.key === key);
       $("modelsView").style.display = key === MODELS_KEY ? "" : "none";
       $("perceptionView").style.display = key === PERCEPTION_KEY ? "" : "none";
-      $("save").hidden = key === PERCEPTION_KEY;   // 该页无配置可保存（改动即落库）
-      $("reload").textContent = key === PERCEPTION_KEY ? "刷新状态" : "重新加载";
+      $("botInfoView").style.display = key === BOTINFO_KEY ? "" : "none";
+      // 这两页无配置可保存（改动即落库 / 只读信息）
+      $("save").hidden = key === PERCEPTION_KEY || key === BOTINFO_KEY;
+      $("reload").textContent = key === PERCEPTION_KEY ? "刷新状态"
+        : key === BOTINFO_KEY ? "刷新" : "重新加载";
       if (key === MODELS_KEY && !modelsLoaded) loadModels();
       if (key === PERCEPTION_KEY) loadPerception();
+      if (key === BOTINFO_KEY) loadBotInfo();
       $("banner").className = "";
     }
 
@@ -2402,6 +2493,104 @@
 
     // “观察通道”独立页（用户定规 2026-09-15：群号相关操作一律入库、不进配置文件）：
     // 总开关与群监控状态都是运行时状态，改动直接 POST 落库并立即生效，无"保存"语义
+    // “基础信息”页（M 编号外）：机器人账号资料 + Klein 运行概况，
+    // 数据来自 GET /api/botinfo（协议端登录查询 + 进程内版本/运行时长）
+    const BOTINFO_AVATAR_FALLBACK = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'>" +
+      "<rect width='96' height='96' fill='#1e2823'/>" +
+      "<text x='48' y='62' font-size='42' text-anchor='middle' fill='#586b60' " +
+      "font-family='monospace'>K</text></svg>");
+
+    function formatUptime(totalSeconds) {
+      const days = Math.floor(totalSeconds / 86400);
+      const hours = Math.floor((totalSeconds % 86400) / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      if (days > 0) return days + " 天 " + hours + " 小时 " + minutes + " 分钟";
+      if (hours > 0) return hours + " 小时 " + minutes + " 分钟";
+      return minutes + " 分钟";
+    }
+
+    function botInfoRow(labelText, valueText) {
+      const row = document.createElement("div");
+      row.className = "botinfo-row";
+      const label = document.createElement("span");
+      label.className = "botinfo-row-label";
+      label.textContent = labelText;
+      const value = document.createElement("span");
+      value.className = "botinfo-row-value";
+      value.textContent = valueText;
+      row.append(label, value);
+      return row;
+    }
+
+    async function loadBotInfo() {
+      const body = $("botInfoBody");
+      body.textContent = "";
+      body.appendChild(Object.assign(document.createElement("div"),
+        { className: "note", textContent: "正在读取基础信息……" }));
+      let data;
+      try {
+        const response = await request("/api/botinfo", { method: "GET" });
+        if (!response.ok) {
+          body.textContent = "";
+          body.appendChild(Object.assign(document.createElement("div"),
+            { className: "note", textContent: "读取失败：HTTP " + response.status }));
+          return;
+        }
+        data = await response.json();
+      } catch (error) {
+        body.textContent = "";
+        body.appendChild(Object.assign(document.createElement("div"),
+          { className: "note", textContent: "无法连接面板服务：" + error.message }));
+        return;
+      }
+
+      const connected = data.connected === true;
+      const qq = connected && data.user_id ? String(data.user_id) : "";
+      const nickname = connected && data.nickname ? data.nickname : "未连接协议端";
+
+      body.textContent = "";
+      const card = document.createElement("div");
+      card.className = "botinfo-card";
+      const avatar = document.createElement("img");
+      avatar.className = "botinfo-avatar";
+      avatar.alt = "机器人头像";
+      avatar.src = qq !== ""
+        ? "https://q1.qlogo.cn/g?b=qq&nk=" + qq + "&s=640"
+        : BOTINFO_AVATAR_FALLBACK;
+      avatar.onerror = () => { avatar.onerror = null; avatar.src = BOTINFO_AVATAR_FALLBACK; };
+      card.appendChild(avatar);
+
+      const identity = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "botinfo-name";
+      name.textContent = nickname;
+      identity.appendChild(name);
+      const qqLine = document.createElement("div");
+      qqLine.className = "botinfo-qq";
+      qqLine.textContent = qq !== "" ? "QQ " + qq : "协议端未连接，无法获取账号资料";
+      identity.appendChild(qqLine);
+      if (data.signature) {
+        const sign = document.createElement("div");
+        sign.className = "botinfo-sign";
+        sign.textContent = "「" + data.signature + "」";
+        identity.appendChild(sign);
+      }
+      card.appendChild(identity);
+      body.appendChild(card);
+
+      const rows = document.createElement("div");
+      rows.className = "botinfo-rows";
+      rows.appendChild(botInfoRow("Klein 版本",
+        String(data.version || "?") + "（" + String(data.git_hash || "?") + "）"));
+      rows.appendChild(botInfoRow("构建类型", String(data.build_type || "?")));
+      rows.appendChild(botInfoRow("运行时长",
+        formatUptime(Number(data.uptime_seconds || 0))));
+      rows.appendChild(botInfoRow("通信模式", String(data.transport || "?")));
+      rows.appendChild(botInfoRow("协议端", connected ? "已连接" : "未连接"));
+      body.appendChild(rows);
+    }
+
     async function loadPerception() {
       const body = $("perceptionBody");
       body.textContent = "";
@@ -2648,6 +2837,8 @@
         await refreshRegistryNames();
         const nav = $("sideNav");
         nav.textContent = "";
+        // 基础信息固定在最顶层（配置模块上方），无 M 编号
+        nav.appendChild(botInfoNavItem());
         const navLabel = document.createElement("div");
         navLabel.className = "nav-label";
         navLabel.textContent = "配置模块";
@@ -2724,6 +2915,7 @@
           versionChip.textContent = "配置文件版本 v" + loadedSchemaVersion;
         nav.appendChild(versionChip);
         const known = activePane === MODELS_KEY || activePane === PERCEPTION_KEY ||
+          activePane === BOTINFO_KEY ||
           document.querySelectorAll('.pane[data-key="' + activePane + '"]').length > 0;
         selectPane(known && activePane ? activePane : (firstKey || MODELS_KEY));
         $("banner").className = "";
@@ -3338,6 +3530,7 @@
     $("reload").addEventListener("click", () => {
       if (activePane === MODELS_KEY) return loadModels();
       if (activePane === PERCEPTION_KEY) return loadPerception();
+      if (activePane === BOTINFO_KEY) return loadBotInfo();
       loadConfig();
     });
     $("addProvider").addEventListener("click", () => {

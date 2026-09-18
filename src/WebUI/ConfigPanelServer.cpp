@@ -4,8 +4,11 @@
 #include "../Log/Log.h"
 #include "../ModelRegistry/ModelRegistry.h"
 #include "../Network/BearerAuth.h"
+#include "../Network/OneBotApiChannel.h"
+#include "../Network/TransportConfig.h"
 #include "../Perception/GroupListService.h"
 #include "../../Library/httplib/httplib.h"
+#include "KleinVersion.h"
 
 #include <algorithm>
 #include <chrono>
@@ -245,11 +248,80 @@ std::string resolveProviderApiKey(const json &body, ConfigSnapshotStore &store)
 }
 }
 
+namespace
+{
+// 进程存活基准：静态初始化（进程加载）时刻，供基础信息页的运行时长展示；
+// 与真实 main() 起点的误差在毫秒级，可忽略
+const std::chrono::steady_clock::time_point kProcessStart = std::chrono::steady_clock::now();
+
+// 协议端登录信息查询：get_login_info（QQ 号与昵称）+ get_stranger_info 自查
+// （签名，实现端扩展字段，拿不到就省略）。任何失败都降级为 connected=false，
+// 不抛异常、不阻塞超过约 2×timeout
+json queryBotInfo(OneBotApiChannel *apiChannel)
+{
+    json info = {{"connected", false}};
+    if (apiChannel == nullptr)
+        return info;
+
+    const OneBotApiResult login = apiChannel->call("get_login_info", json::object(),
+                                                   std::chrono::milliseconds(3000));
+    if (login.retcode != 0 || !login.data.is_object())
+        return info;
+
+    info["connected"] = true;
+    info["user_id"] = login.data.value("user_id", 0ULL);
+    info["nickname"] = login.data.value("nickname", "");
+
+    const long long selfId = login.data.value("user_id", 0LL);
+    if (selfId != 0)
+    {
+        const OneBotApiResult stranger = apiChannel->call(
+            "get_stranger_info", json({{"user_id", selfId}}),
+            std::chrono::milliseconds(3000));
+        if (stranger.retcode == 0 && stranger.data.is_object() &&
+            stranger.data.contains("signature") &&
+            stranger.data["signature"].is_string())
+        {
+            const std::string signature = stranger.data["signature"].get<std::string>();
+            if (!signature.empty())
+                info["signature"] = signature;
+        }
+    }
+    return info;
+}
+
+json buildBotInfoResponse(ConfigSnapshotStore &store, OneBotApiChannel *apiChannel)
+{
+    const auto uptime = std::chrono::steady_clock::now() - kProcessStart;
+    const RuntimeSettings &settings = store.current()->runtime;
+
+    json response = {
+        {"version", KLEINBOT_VERSION_STRING},
+        {"git_hash", KLEINBOT_GIT_HASH},
+        {"build_type", KLEINBOT_BUILD_TYPE},
+        {"uptime_seconds",
+         std::chrono::duration_cast<std::chrono::seconds>(uptime).count()},
+        {"transport", transportModeName(settings.transport.mode)},
+        {"connected", false}
+    };
+    const json botInfo = queryBotInfo(apiChannel);
+    response["connected"] = botInfo.value("connected", false);
+    if (botInfo.contains("user_id"))
+        response["user_id"] = botInfo["user_id"];
+    if (botInfo.contains("nickname"))
+        response["nickname"] = botInfo["nickname"];
+    if (botInfo.contains("signature"))
+        response["signature"] = botInfo["signature"];
+    return response;
+}
+}
+
 std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSettings &settings,
                                                                 const std::string &configPath,
                                                                 ConfigSnapshotStore &store,
                                                                 ModelRegistry &models,
-                                                                GroupListService *groups)
+                                                                GroupListService *groups,
+                                                                OneBotApiChannel *apiChannel)
 {
     auto server = std::make_unique<httplib::Server>();
     const std::shared_ptr<ConfigWriter> writer = std::make_shared<ConfigWriter>();
@@ -601,6 +673,15 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
 
     // 观察通道面板数据：总开关 + 群列表（含 monitored 标注）。
     // 全部读自数据库（唯一真值），未注入服务时返回空列表+关闭态
+    // 基础信息页：Klein 版本/构建/运行时长/通信模式 + 协议端登录信息
+    // （QQ 号、昵称、签名——签名为实现端扩展字段，拿不到就省略）。
+    // 查询协议端最多阻塞约 6 秒（两次 3 秒超时），httplib 工作线程内可接受
+    server->Get("/api/botinfo", [&store, apiChannel](const httplib::Request &,
+                                                     httplib::Response &response) {
+        response.set_content(buildBotInfoResponse(store, apiChannel).dump(),
+                             "application/json");
+    });
+
     server->Get("/api/groups", [groups](const httplib::Request &, httplib::Response &response) {
         json items = json::array();
         bool enabled = false;
@@ -712,7 +793,8 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
 
 void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
                             ConfigSnapshotStore &store, ModelRegistry &models,
-                            GroupListService *groups, const std::atomic<bool> &running)
+                            GroupListService *groups, const std::atomic<bool> &running,
+                            OneBotApiChannel *apiChannel)
 {
     // 页面是面板唯一入口：缺失时报错并放弃启动，不起一个只会回 500 的空服务；
     // 运行中文件被删的场景仍由 GET / 的 500 分支兜底
@@ -730,7 +812,7 @@ void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
     while (running.load())
     {
         std::unique_ptr<httplib::Server> server =
-            buildServer(settings, configPath, store, models, groups);
+            buildServer(settings, configPath, store, models, groups, apiChannel);
         std::atomic<bool> serverActive{true};
         // 看门狗：running 置假后调 stop() 让阻塞中的 listen() 返回
         std::thread watchdog([&running, &serverActive, &server]() {
