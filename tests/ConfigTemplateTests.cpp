@@ -87,6 +87,18 @@ TEST(ConfigTemplateTest, CreateIfMissingGeneratesLoadableConfig)
     // 状态，由数据库独占管理，配置体系不再有 perception 节
     EXPECT_FALSE(document.contains("perception"));
 
+    // 骨架包含全部配置节（2026-09-19 用户定规：不给用户不完整的内容），
+    // 面板首跑即可见所有模块；值为安全占位——密钥空串而非 from_env，
+    // manager_id 为 0（未设置），不预置假管理员
+    for (const char *section : {"bot", "chat", "models", "voice", "memory", "web_search",
+                                "web_fetch", "storage", "network", "communication", "webui"})
+        EXPECT_TRUE(document.contains(section)) << section;
+    EXPECT_EQ(document["chat"]["temperature"], 1.0);
+    EXPECT_EQ(document["chat"]["max_message_tokens"], 4096);
+    EXPECT_EQ(document["models"]["drawing"]["api_key"], "");
+    EXPECT_EQ(document["web_search"]["max_results"], 5);
+    EXPECT_EQ(document["bot"]["manager_id"], 0);
+
 #if !defined(_WIN32)
     using std::filesystem::perms;
     const auto actual = std::filesystem::status(file.path).permissions();

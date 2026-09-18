@@ -589,6 +589,13 @@
       display: block;
       margin-top: 2px;
       font-weight: 400;
+      /* 长路径在 250px 标签列内截头留尾（末段才是区分字段的键名），
+         溢出会盖到右侧输入框上；完整路径悬停可见（span 上的 title） */
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      direction: rtl;
+      text-align: left;
     }
 
     input,
@@ -1351,7 +1358,6 @@
     const SECTION_LABELS = {
       bot: "机器人身份", features: "功能开关", chat: "消息处理", models: "模型设置", voice: "语音",
       memory: "长期记忆", web_search: "联网搜索", web_fetch: "网页抓取",
-      perception: "观察通道",
       storage: "存储路径", network: "网络代理",
       communication: "OneBot 通信", webui: "Web 配置面板"
     };
@@ -1397,7 +1403,6 @@
       memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
       web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
       web_fetch: "网页抓取工具，无需第三方 Key，结果按 URL 缓存。",
-      perception: "白名单群的只读观察与话题会话：内容短时缓冲（每群 300 条 / 24 小时）、被 @ 时带上群聊背景；被提名字时经杂务模型判定是否介入；群聊热度超过该群基线（按人数与日常对话量自动学习）时，也会按人格自主判断是否加入（每天最多 3 次）。每群保持一个话题会话：主动插话三选一（说话/沉默/离场），单会话最多陪聊 300 条群消息，结束后上下文保留 24 小时。私聊与非白名单群完全不被观察。改动需重启生效。",
       storage: "SQLite 数据库与图片资产的位置（改动需重启）。",
       network: "出站请求的公共代理（模型调用、搜索等），留空不使用。",
       communication: "选择与 OneBot 协议端（NapCat / LagRange 等）的连接方式：正向 WS、反向 WS 或 HTTP 组合。切换后仅显示所选方式的字段，其余档案保留在配置文件中；改动需重启生效。",
@@ -1716,7 +1721,9 @@
       modeRow.className = "row";
       const modeLabel = document.createElement("label");
       modeLabel.innerHTML = '连接方式<span class="path"></span>';
-      modeLabel.querySelector(".path").textContent = "communication.active_transport";
+      const modePath = modeLabel.querySelector(".path");
+      modePath.textContent = "communication.active_transport";
+      modePath.title = "communication.active_transport";
       modeLabel.dataset.hint =
         "选择与协议端的连接形态，下方仅显示该形态的字段；切换会启用对应档案（不存在时按默认值新建）。改动需重启生效。";
       const control = document.createElement("div");
@@ -1936,7 +1943,9 @@
       row.className = "row";
       const labelElement = document.createElement("label");
       labelElement.innerHTML = labelText.replace(/</g, "&lt;") + '<span class="path"></span>';
-      labelElement.querySelector(".path").textContent = path;
+      const pathSpan = labelElement.querySelector(".path");
+      pathSpan.textContent = path;
+      pathSpan.title = path;   // 截断显示时悬停看完整路径
       if (hint) labelElement.dataset.hint = hint;
       row.appendChild(labelElement);
       return row;
@@ -2433,6 +2442,9 @@
           ? document_.schema_version : undefined;
         for (const [key, value] of orderedEntries(document_, null)) {
           if (key === "schema_version") continue;
+          // perception 节已废弃（观察通道开关与监控群集由数据库独占管理，见独立页）：
+          // 旧配置残留值不渲染（避免出现第二个“观察通道”死入口），保存时自然消失
+          if (key === "perception") continue;
           if (!firstKey) firstKey = key;
           nav.appendChild(navItem(key, label(key, true)));
           const pane = document.createElement("section");
