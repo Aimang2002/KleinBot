@@ -69,8 +69,8 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
         "memory": {
             "enabled": true,
             "model": "your-chat-model",
-            "batch_turns": 3,
-            "idle_minutes": 1,
+            "batch_turns": 10,
+            "idle_minutes": 30,
             "recall_limit": 8
         },
         "web_search": {
