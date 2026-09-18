@@ -57,7 +57,7 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
         "models": {
             "drawing": {"model": "", "endpoint": "", "api_key": "", "api_standard": "OpenAI"},
             "vision": {"model": "", "endpoint": "", "api_key": "", "api_standard": "OpenAI"},
-            "worker": {"model": "", "endpoint": "", "api_key": "", "api_standard": "OpenAI"}
+            "worker": {"model": ""}
         },
         "voice": {
             "enabled": false,

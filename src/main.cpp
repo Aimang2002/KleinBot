@@ -521,9 +521,24 @@ int main(int argc, char **argv)
 			{ return chatService.requestInCharacter(managerId, systemNote, history, toolSchemas); });
 	}
 	engagementService.setWorker(
-		[&chatService, worker = settings.models.worker](const std::string &systemPrompt,
+		[&chatService, &models, baseWorker = settings.models.worker](const std::string &systemPrompt,
 														const std::string &userPrompt)
-		{ return chatService.buildOnceWith(worker, systemPrompt, userPrompt); });
+		{
+			// 杂务模型注册表解析（2026-09-19）：models.worker 只填 model 时，每次调用
+			// 按名字经注册表解析端点与密钥（注册表热重载即时生效）；显式配置了 endpoint
+			// 的旧形态仍直连。名字未注册时保持空端点，由 buildOnceWith 回退默认对话模型
+			ModelEndpointOptions worker = baseWorker;
+			if (worker.endpoint.empty() && !worker.model.empty())
+			{
+				if (const std::optional<ChatModel> found = models.find(worker.model))
+				{
+					worker.endpoint = found->endpoint;
+					worker.apiKey = found->api_key;
+					worker.apiStandard = found->api_standard;
+				}
+			}
+			return chatService.buildOnceWith(worker, systemPrompt, userPrompt);
+		});
 	// 冷启动阈值的人数地板/先验：从群列表镜像查成员数
 	engagementService.setMemberProvider([&groupListService](std::uint64_t groupId) -> long
 		{

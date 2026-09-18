@@ -223,7 +223,8 @@ std::string normalizedPath(Decoder &decoder, const std::string &path, const std:
 }
 
 ModelEndpointSchema decodeModelEndpoint(Decoder &decoder, const json &parent,
-                                        const std::string &key, const std::string &path)
+                                        const std::string &key, const std::string &path,
+                                        bool allowRegistryForm = false)
 {
     ModelEndpointSchema result;
     const json *object = decoder.object(parent, key, path);
@@ -238,7 +239,11 @@ ModelEndpointSchema decodeModelEndpoint(Decoder &decoder, const json &parent,
                                     !result.apiStandard.empty();
     if (!anyFieldConfigured)
         return result;
-    if (!result.configured())
+    // 注册表解析形态（2026-09-19，仅 models.worker）：只填 model，端点与密钥由
+    // 注册表条目提供，运行时按名字解析；显式全配的旧形态仍直连
+    const bool registryForm = allowRegistryForm && !result.model.empty() &&
+                              result.endpoint.empty() && result.apiStandard.empty();
+    if (!registryForm && !result.configured())
     {
         decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Dependency,
                            path, "模型配置不完整，对应功能不可用");
@@ -479,7 +484,8 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         decoder.unknownFields(*models, {"registry_path", "drawing", "vision", "worker", "stable_diffusion"}, "models");
         config.models.drawing = decodeModelEndpoint(decoder, *models, "drawing", "models.drawing");
         config.models.vision = decodeModelEndpoint(decoder, *models, "vision", "models.vision");
-        config.models.worker = decodeModelEndpoint(decoder, *models, "worker", "models.worker");
+        config.models.worker =
+            decodeModelEndpoint(decoder, *models, "worker", "models.worker", true);
     }
 
     const json *voice = decoder.object(document, "voice", "voice");

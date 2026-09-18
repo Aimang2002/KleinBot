@@ -171,6 +171,41 @@ TEST(ConfigLoaderTest, MissingOptionalModelSecretDisablesFeatureWithoutBlockingS
                               "models.drawing.api_key"));
 }
 
+// 杂务模型注册表形态（2026-09-19）：只填 model、端点与密钥由注册表条目提供，
+// 不再报"模型配置不完整"；显式全配的旧形态仍直连
+TEST(ConfigLoaderTest, WorkerModelOnlyRegistryFormLoadsWithoutDiagnostics)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["models"]["worker"] = {{"model", "worker-model"}};
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    EXPECT_TRUE(result.canStart());
+    EXPECT_FALSE(hasDiagnostic(result, ConfigSeverity::FeatureDisabled, "models.worker"));
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_EQ(result.config->models.worker.model, "worker-model");
+    EXPECT_TRUE(result.config->models.worker.endpoint.empty());
+}
+
+TEST(ConfigLoaderTest, WorkerExplicitEndpointFormRemainsDirect)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["models"]["worker"] = {
+        {"model", "worker-model"},
+        {"endpoint", "https://example.invalid"},
+        {"api_standard", "OpenAI"}
+    };
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    EXPECT_TRUE(result.canStart());
+    EXPECT_FALSE(hasDiagnostic(result, ConfigSeverity::FeatureDisabled, "models.worker"));
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_EQ(result.config->models.worker.endpoint, "https://example.invalid");
+}
+
 TEST(ConfigLoaderTest, DecodesHttpEventSignatureSecret)
 {
     nlohmann::json document = nlohmann::json::parse(validConfig);
