@@ -327,8 +327,6 @@ int main(int argc, char **argv)
 	if (ConfigTemplate::createIfMissing(configPath, bootstrapToken))
 	{
 		LOG_INFO("首次运行：已生成默认配置文件 " + configPath);
-		LOG_INFO("Web 配置面板：http://127.0.0.1:" + std::to_string(kDefaultWebUiPort) + "/");
-		LOG_INFO("面板访问令牌：" + bootstrapToken);
 		LOG_WARNING("默认配置为占位骨架，请通过面板或直接编辑文件补全机器人 QQ、默认模型与通信配置后重启。");
 	}
 
@@ -354,6 +352,14 @@ int main(int argc, char **argv)
 	init(settings.schemaVersion);
 	const TransportConfig &transportConfig = settings.transport;
 	LOG_INFO("当前通信模式：" + transportModeName(transportConfig.mode));
+	// 面板地址与令牌每次启动都打印：只在首跑生成骨架时打一次，之后找回令牌要翻配置文件；
+	// 面板未启用或令牌为空时面板本身不会启动，不打印
+	if (settings.webUi.enabled && !settings.webUi.accessToken.empty())
+	{
+		LOG_INFO("Web 配置面板：http://" + settings.webUi.bind + ":" +
+		         std::to_string(settings.webUi.port) + "/");
+		LOG_INFO("面板访问令牌：" + settings.webUi.accessToken);
+	}
 	ModelRegistry models(kModelRegistryPath);
 	const std::string &dbPath = settings.storage.conversationDatabase;
 	ConversationStore conversationStore(dbPath);
