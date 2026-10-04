@@ -11,6 +11,7 @@
 #include "../ModelApiCaller/ModelEndpointOptions.h"
 #include "../ModelApiCaller/Voice/VoiceOptions.h"
 #include "../Network/TransportConfig.h"
+#include "../Push/PushSettings.h"
 #include "../WebFetch/WebFetchOptions.h"
 #include "../WebSearch/WebSearchOptions.h"
 
@@ -53,6 +54,7 @@ struct RuntimeSettings
     StorageRuntimeSettings storage;
     TransportConfig transport;
     WebUiSettings webUi;
+    PushSettings push;
 };
 
 RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema);

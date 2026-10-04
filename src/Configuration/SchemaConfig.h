@@ -140,6 +140,20 @@ struct WebUiSchema
     std::string accessToken;
 };
 
+// 推送门默认端口：Web 面板 55346 的下一号，两个本地 HTTP 服务相邻可记
+inline constexpr int kDefaultPushPort = 55347;
+
+struct PushSchema
+{
+    bool enabled = false;
+    std::string bind = "127.0.0.1";
+    int port = kDefaultPushPort;
+    std::string accessToken;
+    std::vector<std::int64_t> allowedGroups;
+    std::vector<std::int64_t> allowedUsers;
+    int maxPerHour = 60;
+};
+
 struct SchemaConfig
 {
     int schemaVersion = 1;
@@ -154,6 +168,7 @@ struct SchemaConfig
     std::string proxy;
     CommunicationSchema communication;
     WebUiSchema webUi;
+    PushSchema push;
 };
 
 #endif

@@ -202,6 +202,21 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.webUi.port, candidate.webUi.port, "webui.port", webUiImpact);
     addIfChanged(diff, current.webUi.accessToken, candidate.webUi.accessToken,
                  "webui.access_token", webUiImpact);
+
+    // 推送门：门参数与白名单变更均需重建监听，统一 Restart 级
+    constexpr ConfigChangeImpact pushImpact = ConfigChangeImpact::Restart;
+    addIfChanged(diff, current.push.enabled, candidate.push.enabled,
+                 "push.enabled", pushImpact);
+    addIfChanged(diff, current.push.bind, candidate.push.bind, "push.bind", pushImpact);
+    addIfChanged(diff, current.push.port, candidate.push.port, "push.port", pushImpact);
+    addIfChanged(diff, current.push.accessToken, candidate.push.accessToken,
+                 "push.access_token", pushImpact);
+    addIfChanged(diff, current.push.allowedGroups, candidate.push.allowedGroups,
+                 "push.allowed_groups", pushImpact);
+    addIfChanged(diff, current.push.allowedUsers, candidate.push.allowedUsers,
+                 "push.allowed_users", pushImpact);
+    addIfChanged(diff, current.push.maxPerHour, candidate.push.maxPerHour,
+                 "push.max_per_hour", pushImpact);
     return diff;
 }
 

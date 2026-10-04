@@ -222,6 +222,40 @@ std::string normalizedPath(Decoder &decoder, const std::string &path, const std:
     return value;
 }
 
+// 正整数数组（推送门白名单等）：元素级宽容——非法元素告警跳过，不整体作废
+std::vector<std::int64_t> decodeIdArray(Decoder &decoder, const json &parent,
+                                        const std::string &key, const std::string &path)
+{
+    std::vector<std::int64_t> result;
+    auto iterator = parent.find(key);
+    if (iterator == parent.end())
+        return result;
+    if (!iterator->is_array())
+    {
+        decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
+                           path, "必须是正整数数组");
+        return result;
+    }
+    for (const auto &entry : *iterator)
+    {
+        if (!entry.is_number_integer())
+        {
+            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
+                               path, "元素必须是正整数，已跳过");
+            continue;
+        }
+        const long long value = entry.get<long long>();
+        if (value <= 0)
+        {
+            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Range,
+                               path, "元素必须大于零，已跳过");
+            continue;
+        }
+        result.push_back(value);
+    }
+    return result;
+}
+
 ModelEndpointSchema decodeModelEndpoint(Decoder &decoder, const json &parent,
                                         const std::string &key, const std::string &path,
                                         bool allowRegistryForm = false)
@@ -433,7 +467,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     decoder.unknownFields(document,
                           {"schema_version", "bot", "chat", "models", "voice",
                            "memory", "web_search", "web_fetch", "perception", "storage",
-                           "network", "communication", "webui"},
+                           "network", "communication", "webui", "push"},
                           "$" );
 
     SchemaConfig config;
@@ -665,6 +699,47 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
             decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Security,
                                "webui.bind",
                                "绑定地址不是回环地址，面板将暴露给外部网络，请确认已由反向代理提供 TLS");
+        }
+    }
+
+    // 推送门（外部投递入口）：语义与 webui 镜像——令牌缺失或白名单为空时
+    // 降级关闭而不是阻断启动；fail-closed（空白名单 = 不放行任何目标）
+    const json *push = decoder.object(document, "push", "push");
+    if (push != nullptr)
+    {
+        decoder.unknownFields(*push,
+                              {"enabled", "bind", "port", "access_token",
+                               "allowed_groups", "allowed_users", "max_per_hour"},
+                              "push");
+        config.push.enabled = decoder.boolean(*push, "enabled", "push.enabled", false);
+        config.push.bind = decoder.string(*push, "bind", "push.bind", "127.0.0.1");
+        config.push.port = static_cast<int>(decoder.integer(
+            *push, "port", "push.port", kDefaultPushPort, 1, 65535));
+        if (config.push.enabled)
+            config.push.accessToken = decoder.secret(
+                *push, "access_token", "push.access_token", ConfigSeverity::FeatureDisabled);
+        config.push.allowedGroups = decodeIdArray(decoder, *push, "allowed_groups", "push.allowed_groups");
+        config.push.allowedUsers = decodeIdArray(decoder, *push, "allowed_users", "push.allowed_users");
+        config.push.maxPerHour = static_cast<int>(decoder.integer(
+            *push, "max_per_hour", "push.max_per_hour", 60, 1, 10000));
+        if (config.push.enabled && config.push.accessToken.empty())
+        {
+            config.push.enabled = false;
+            decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Security,
+                               "push.access_token", "推送令牌缺失，推送门已关闭");
+        }
+        if (config.push.enabled && config.push.allowedGroups.empty() && config.push.allowedUsers.empty())
+        {
+            config.push.enabled = false;
+            decoder.diagnostic(ConfigSeverity::FeatureDisabled, ConfigErrorCategory::Security,
+                               "push.allowed_groups", "目标白名单为空，推送门已关闭");
+        }
+        if (config.push.enabled && config.push.bind != "127.0.0.1" &&
+            config.push.bind != "localhost" && config.push.bind != "::1")
+        {
+            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Security,
+                               "push.bind",
+                               "绑定地址不是回环地址，推送门将暴露给外部网络，请确认已由反向代理提供 TLS 且令牌足够强");
         }
     }
 

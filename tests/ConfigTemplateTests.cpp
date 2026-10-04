@@ -91,13 +91,18 @@ TEST(ConfigTemplateTest, CreateIfMissingGeneratesLoadableConfig)
     // 面板首跑即可见所有模块；值为安全占位——密钥空串而非 from_env，
     // manager_id 为 0（未设置），不预置假管理员
     for (const char *section : {"bot", "chat", "models", "voice", "memory", "web_search",
-                                "web_fetch", "storage", "network", "communication", "webui"})
+                                "web_fetch", "storage", "network", "communication", "webui",
+                                "push"})
         EXPECT_TRUE(document.contains(section)) << section;
     EXPECT_EQ(document["chat"]["temperature"], 1.0);
     EXPECT_EQ(document["chat"]["max_message_tokens"], 4096);
     EXPECT_EQ(document["models"]["drawing"]["api_key"], "");
     EXPECT_EQ(document["web_search"]["max_results"], 5);
     EXPECT_EQ(document["bot"]["manager_id"], 0);
+    // 推送门骨架默认关闭（无外部脚本依赖时不应意外启用 HTTP 端点）
+    EXPECT_EQ(document["push"]["enabled"], false);
+    EXPECT_EQ(document["push"]["port"], kDefaultPushPort);
+    EXPECT_EQ(document["push"]["max_per_hour"], 60);
 
 #if !defined(_WIN32)
     using std::filesystem::perms;

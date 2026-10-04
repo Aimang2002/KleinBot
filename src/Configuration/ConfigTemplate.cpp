@@ -130,10 +130,19 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
                 "max_event_body_bytes": 1048576
             }
         },
-        "webui": {"enabled": true, "bind": "127.0.0.1"}
+        "webui": {"enabled": true, "bind": "127.0.0.1"},
+        "push": {
+            "enabled": false,
+            "bind": "127.0.0.1",
+            "access_token": "",
+            "allowed_groups": [],
+            "allowed_users": [],
+            "max_per_hour": 60
+        }
     })");
     document["webui"]["port"] = kDefaultWebUiPort;
     document["webui"]["access_token"] = {{"literal", webUiToken}};
+    document["push"]["port"] = kDefaultPushPort;
     return document;
 }
 

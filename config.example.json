@@ -127,5 +127,16 @@
         "access_token": {
             "from_env": "KLEIN_WEBUI_TOKEN"
         }
+    },
+    "push": {
+        "enabled": false,
+        "bind": "127.0.0.1",
+        "port": 55347,
+        "access_token": {
+            "from_env": "KLEIN_PUSH_TOKEN"
+        },
+        "allowed_groups": [],
+        "allowed_users": [],
+        "max_per_hour": 60
     }
 }

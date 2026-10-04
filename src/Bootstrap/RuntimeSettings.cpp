@@ -132,5 +132,8 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
     result.transport = mapTransport(schema.communication);
     result.webUi = {schema.webUi.enabled, schema.webUi.bind,
                     schema.webUi.port, schema.webUi.accessToken};
+    result.push = {schema.push.enabled, schema.push.bind, schema.push.port,
+                   schema.push.accessToken, schema.push.allowedGroups,
+                   schema.push.allowedUsers, schema.push.maxPerHour};
     return result;
 }
