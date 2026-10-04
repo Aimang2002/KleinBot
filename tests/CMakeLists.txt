@@ -22,6 +22,7 @@ add_executable(kleinbot_tests
     OutboundInfrastructureTests.cpp
     PerceptionChannelTests.cpp
     PushDeliveryTests.cpp
+    PushServerTests.cpp
     ReminderTests.cpp
     ReplyContextRoutingTests.cpp
     StorageIntegrationTests.cpp

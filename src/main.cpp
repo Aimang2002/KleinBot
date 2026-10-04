@@ -24,6 +24,8 @@
 #include "Application/TypingIndicator.h"
 #include "Event/FriendRequestNotifier.h"
 #include "WebUI/ConfigPanelServer.h"
+#include "Push/PushDelivery.h"
+#include "Push/PushServer.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
 #include "Perception/PerceptionChannel.h"
@@ -243,7 +245,7 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWorkers,
 					 MemoryService &memoryService,
 					 std::thread &timingThread, std::thread &transportThread,
-					 std::thread &panelThread)
+					 std::thread &panelThread, std::thread &pushThread)
 {
 	running.store(false);
 	LOG_INFO("正在停止消息执行器并等待活动任务退出...");
@@ -267,6 +269,11 @@ void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWork
 	{
 		LOG_INFO("正在等待配置面板线程退出...");
 		panelThread.join();
+	}
+	if (pushThread.joinable())
+	{
+		LOG_INFO("正在等待推送门线程退出...");
+		pushThread.join();
 	}
 	LOG_INFO("资源回收完成，Klein 已安全退出");
 }
@@ -453,6 +460,11 @@ int main(int argc, char **argv)
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;
 	QueuedMessageSender messageSender(outboundQueue);
+	// 推送门接缝：润色器以管理员会话装配人格（与话题会话同源），失败由接缝兜底直发
+	PushDelivery pushDelivery(settings.push, messageSender,
+							  [&chatService, personaSourceId = settings.bot.managerId](
+								  const std::string &prompt)
+		{ return chatService.replyInCharacter(personaSourceId, prompt); });
 	OneBotEventDecoder oneBotEventDecoder;
 	OneBotMessageEncoder oneBotMessageEncoder;
 	// API 通道（T1 echo 关联）：WS 模式共用 WebSocketApiChannel，HTTP 模式用同步 HttpApiChannel
@@ -635,6 +647,14 @@ int main(int argc, char **argv)
 			groupListService.get(), std::cref(running), &activeApiChannel);
 	}
 
+	std::thread pushThread;
+	if (settings.push.enabled)
+	{
+		pushThread = std::thread(
+			PushServer::run,
+			settings.push, std::ref(pushDelivery), std::cref(running));
+	}
+
 	while (running.load())
 	{
 		if (receivedSignal != 0)
@@ -668,7 +688,7 @@ int main(int argc, char **argv)
 	}
 
 	resourceCleanup(running, messageWorkers, memoryService, timingThread,
-					transportThread, panelThread);
+					transportThread, panelThread, pushThread);
 	Log::getInstance().shutdown();
 
 	return 0;
