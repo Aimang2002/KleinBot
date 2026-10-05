@@ -11,5 +11,6 @@ mermaid.md
 AGENTS.md
 docs/
 会话交接_*.md
+tmp/
 
 CMakeUserPresets.json
