@@ -30,6 +30,7 @@ add_executable(kleinbot_tests
     TextSplitTests.cpp
     TransportConfigTests.cpp
     TypingIndicatorTests.cpp
+    VersionInfoTests.cpp
     WebFetchTests.cpp
     WebSearchTests.cpp
 )
