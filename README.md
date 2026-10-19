@@ -184,7 +184,7 @@ export KLEIN_TAVILY_API_KEY="tvly-..."
 
 ### 通信配置
 
-使用命名 Profile，通过 `active_transport` 互斥选择一种传输（正向 WebSocket / 反向 WebSocket / HTTP）。一次运行只启用一种完整通信模式；两种 WebSocket 模式都使用单条 Universal 连接同时接收事件和发送动作，`http` 模式组合 OneBot HTTP API 与 HTTP 事件上报：
+使用命名 Profile，通过 `active_transport` 互斥选择一种传输（服务器模式 / 客户端模式 / HTTP）。模式名按**协议端**的角色命名：服务器模式对应配置值 `forward_websocket`（协议端作服务器、Klein 主动连出），客户端模式对应 `reverse_websocket`（协议端作客户端、主动连入 Klein）。一次运行只启用一种完整通信模式；两种 WebSocket 模式都使用单条 Universal 连接同时接收事件和发送动作，`http` 模式组合 OneBot HTTP API 与 HTTP 事件上报：
 
 ```json
 "communication": {

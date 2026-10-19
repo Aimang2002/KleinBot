@@ -30,7 +30,7 @@ using json = nlohmann::json;
 
 namespace
 {
-// 反向 WS 的 access_token 用 from_env 形态，配合夹具里设置的环境变量，
+// 客户端模式（reverse_websocket）的 access_token 用 from_env 形态，配合夹具里设置的环境变量，
 // 覆盖“掩码往返后 from_env 结构不被压扁”的关键路径；注册表路径已钉死为
 // kModelRegistryPath（相对工作目录），夹具 chdir 进临时目录隔离
 const char *panelConfig = R"({

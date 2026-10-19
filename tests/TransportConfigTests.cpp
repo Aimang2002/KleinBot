@@ -2,6 +2,7 @@
 
 #include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
+#include "Network/TransportConfig.h"
 
 #include <filesystem>
 #include <fstream>
@@ -230,6 +231,14 @@ TEST(ConfigLoaderTest, DecodesHttpEventSignatureSecret)
     const RuntimeSettings runtime = buildRuntimeSettings(*result.config);
     EXPECT_EQ(runtime.transport.http.eventSignatureSecret, "event-secret");
     EXPECT_TRUE(runtime.transport.http.eventAuthToken.empty());
+}
+
+TEST(TransportConfigTest, DisplayNamesFollowProtocolSideRole)
+{
+    // 展示名按协议端角色：forward_websocket = 协议端服务器，reverse_websocket = 协议端客户端
+    EXPECT_EQ(transportModeDisplayName(TransportMode::ForwardWebSocket), "服务器模式");
+    EXPECT_EQ(transportModeDisplayName(TransportMode::ReverseWebSocket), "客户端模式");
+    EXPECT_EQ(transportModeDisplayName(TransportMode::Http), "HTTP");
 }
 
 TEST(ConfigLoaderTest, WarnsWhenForwardAndReverseWebSocketShareAnAddress)

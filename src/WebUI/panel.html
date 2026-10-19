@@ -1645,8 +1645,8 @@
     // 传输类型中文名：通信分区结构无法识别时的通用兜底渲染仍走 active_transport 下拉，
     // 选项在加载配置时从 communication.transports 的键提取
     const TRANSPORT_TYPE_LABELS = {
-      forward_websocket: "正向 WebSocket",
-      reverse_websocket: "反向 WebSocket",
+      forward_websocket: "服务器模式",
+      reverse_websocket: "客户端模式",
       http: "HTTP：API 调用 + 事件上报"
     };
     let transportOptions = [];
@@ -1663,11 +1663,11 @@
       web_fetch: "网页抓取工具，无需第三方 Key，结果按 URL 缓存。",
       storage: "SQLite 数据库与图片资产的位置（改动需重启）。",
       network: "出站请求的公共代理（模型调用、搜索等），留空不使用。",
-      communication: "选择与 OneBot 协议端（NapCat / LagRange 等）的连接方式：正向 WS、反向 WS 或 HTTP 组合。切换后仅显示所选方式的字段，其余档案保留在配置文件中；改动需重启生效。",
+      communication: "选择与 OneBot 协议端（NapCat / LagRange 等）的连接方式：服务器模式（协议端作服务器）、客户端模式（协议端作客户端）或 HTTP 组合。切换后仅显示所选方式的字段，其余档案保留在配置文件中；改动需重启生效。",
       webui: "本配置面板自身的监听配置（改动需重启生效）。"
     };
     const KEY_HINTS = {
-      type: "传输类型：forward_websocket = Klein 主动连接 OneBot 端；reverse_websocket = OneBot 端反向连进来；http = API 调用 + 事件上报组合。",
+      type: "传输类型：forward_websocket = 服务器模式（协议端作服务器，Klein 主动连出）；reverse_websocket = 客户端模式（协议端作客户端，主动连入 Klein）；http = API 调用 + 事件上报组合。",
       host: "对端服务地址（IP 或域名）。",
       bind: "本机监听地址；127.0.0.1 仅本机可连，0.0.0.0 会暴露给局域网/公网。",
       port: "端口号，1~65535。",
@@ -1740,7 +1740,7 @@
       "storage.image_assets": "图片资产（元数据 + 文件）的存储目录（改动需重启）。",
       "network.proxy": "出站 HTTP(S) 代理地址（模型调用、搜索、抓取共用），留空直连。",
       "communication.protocol.type": "通信协议类型，当前仅支持 onebot。",
-      "communication.active_transport": "下拉选择连接方式（传输类型）：正向 WebSocket / 反向 WebSocket / HTTP；切换后仅显示对应字段并启用对应档案（需重启）。",
+      "communication.active_transport": "下拉选择连接方式：服务器模式（协议端作服务器，Klein 连出）/ 客户端模式（协议端作客户端，连入 Klein）/ HTTP；切换后仅显示对应字段并启用对应档案（需重启）。",
       "communication.defaults.connect_timeout_ms": "通信连接超时（毫秒）。",
       "communication.defaults.request_timeout_ms": "通信请求超时（毫秒）。",
       "communication.defaults.max_event_body_bytes": "事件上报请求体的大小上限（字节）。",
@@ -1837,29 +1837,29 @@
     // 字段集合与 ConfigLoader 对各类型 Profile 的校验一一对应
     const TRANSPORT_FIELD_SETS = {
       forward_websocket: {
-        modeLabel: "正向 WebSocket",
-        modeDetail: "Klein 主动连接协议端",
+        modeLabel: "服务器模式",
+        modeDetail: "协议端作服务器，Klein 主动连出",
         fields: [
           {
             key: "host", label: "服务器地址", kind: "string",
-            hint: "OneBot 协议端（NapCat / LagRange 等）的地址，Klein 主动连接它。"
+            hint: "OneBot 协议端（NapCat / LagRange 等）作为服务器监听的地址，Klein 主动连接它。"
           },
           {
             key: "port", label: "端口", kind: "int",
-            hint: "协议端正向 WebSocket 的监听端口，1~65535。"
+            hint: "协议端 WebSocket 服务器的监听端口，1~65535。"
           },
           { key: "path", label: "路径", kind: "string" },
           { key: "access_token", label: "访问令牌", kind: "secret" }
         ]
       },
       reverse_websocket: {
-        modeLabel: "反向 WebSocket",
-        modeDetail: "协议端主动连入 Klein",
+        modeLabel: "客户端模式",
+        modeDetail: "协议端作客户端，主动连入 Klein",
         fields: [
           { key: "bind", label: "监听地址", kind: "string" },
           {
             key: "port", label: "端口", kind: "int",
-            hint: "Klein 的监听端口，协议端反向连接这里。"
+            hint: "Klein 的监听端口，协议端作为客户端连接这里。"
           },
           { key: "path", label: "路径", kind: "string" },
           { key: "access_token", label: "访问令牌", kind: "secret" }

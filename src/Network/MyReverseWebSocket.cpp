@@ -114,7 +114,7 @@ void MyReverseWebSocket::connectReverseWebSocket(
                 beast::error_code ignoredError;
                 socket.shutdown(tcp::socket::shutdown_both, ignoredError);
                 socket.close(ignoredError);
-                LOG_WARNING("反向WebSocket认证失败，已拒绝连接");
+                LOG_WARNING("WebSocket（客户端模式）认证失败，已拒绝连接");
                 continue;
             }
 
@@ -133,7 +133,7 @@ void MyReverseWebSocket::connectReverseWebSocket(
             websocket::stream<tcp::socket> ws{std::move(socket)};
             ws.accept(request);
 
-            LOG_INFO("反向WebSocket连接成功!");
+            LOG_INFO("WebSocket（客户端模式）连接成功!");
 
             runOneBotWebSocketSession(
                 ws, ioc, inboundQueue, outboundQueue, apiChannel, eventDecoder, messageEncoder, running);
@@ -146,14 +146,14 @@ void MyReverseWebSocket::connectReverseWebSocket(
                 const std::string detail = utils::localToUtf8(se.what());
                 if (se.code() == boost::asio::error::address_in_use)
                 {
-                    LOG_ERROR("反向WebSocket监听失败：监听地址 " + endpoint +
+                    LOG_ERROR("WebSocket（客户端模式）监听失败：监听地址 " + endpoint +
                               " 已被占用（" + detail +
-                              "）。若协议端的正向 WebSocket 也指向该地址，请改成不同端口；"
-                              "正向目标与反向监听不能共用同一地址");
+                              "）。若协议端的服务器模式也使用该地址，请改成不同端口；"
+                              "协议端服务器与 Klein 监听不能共用同一地址");
                 }
                 else
                 {
-                    LOG_ERROR("反向WebSocket异常（监听 " + endpoint + "）：" + detail);
+                    LOG_ERROR("WebSocket（客户端模式）异常（监听 " + endpoint + "）：" + detail);
                 }
             }
         }
@@ -161,16 +161,16 @@ void MyReverseWebSocket::connectReverseWebSocket(
         {
             if (running.load())
             {
-                LOG_ERROR("反向WebSocket异常（监听 " + endpoint + "）：" + e.what());
+                LOG_ERROR("WebSocket（客户端模式）异常（监听 " + endpoint + "）：" + e.what());
             }
         }
 
         if (running.load())
         {
-            LOG_FATAL("反向ws已失联（监听 " + endpoint + "），10秒后将重新连接...");
+            LOG_FATAL("WebSocket（客户端模式）已失联（监听 " + endpoint + "），10秒后将重新连接...");
             waitForReconnect(running, std::chrono::seconds(10));
         }
     }
 
-    LOG_INFO("反向WebSocket线程已退出");
+    LOG_INFO("WebSocket（客户端模式）线程已退出");
 }

@@ -358,7 +358,8 @@ int main(int argc, char **argv)
 	const RuntimeSettings &settings = startupSnapshot->runtime;
 	init(settings.schemaVersion);
 	const TransportConfig &transportConfig = settings.transport;
-	LOG_INFO("当前通信模式：" + transportModeName(transportConfig.mode));
+	LOG_INFO("当前通信模式：" + transportModeDisplayName(transportConfig.mode) +
+	         "（配置值 " + transportModeName(transportConfig.mode) + "）");
 	// 面板地址与令牌每次启动都打印：只在首跑生成骨架时打一次，之后找回令牌要翻配置文件；
 	// 面板未启用或令牌为空时面板本身不会启动，不打印
 	if (settings.webUi.enabled && !settings.webUi.accessToken.empty())

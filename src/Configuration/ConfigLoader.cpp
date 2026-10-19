@@ -310,7 +310,7 @@ bool isWildcardHost(const std::string &host)
 }
 
 // 地址是否重叠：端口相同，且主机相同、同为回环，或一方绑定通配地址
-// 覆盖另一方的回环地址。只用于“正向目标 = 反向监听”的启发式检查。
+// 覆盖另一方的回环地址。只用于“服务器模式目标 = 客户端模式监听”的启发式检查。
 bool addressesOverlap(const ProfileEndpoint &left, const ProfileEndpoint &right)
 {
     if (left.port < 1 || left.port != right.port)
@@ -512,8 +512,8 @@ CommunicationSchema decodeCommunication(Decoder &decoder, const json &communicat
                            profilePath + ".type", "未知传输类型");
     }
 
-    // 正/反向 WS 共用同一地址是常见部署错误：正向模式下协议端监听该地址，
-    // 切到反向模式后 Klein 再 bind 同一地址必然失败。只告警不阻断——
+    // 服务器/客户端模式共用同一地址是常见部署错误：服务器模式下协议端监听
+    // 该地址，切到客户端模式后 Klein 再 bind 同一地址必然失败。只告警不阻断——
     // 非活动档案不参与监听，用户可能保留多套档案按需切换。
     const std::vector<ProfileEndpoint> endpoints = collectProfileEndpoints(*transports);
     for (const ProfileEndpoint &reverse : endpoints)
@@ -530,11 +530,11 @@ CommunicationSchema decodeCommunication(Decoder &decoder, const json &communicat
             decoder.diagnostic(
                 ConfigSeverity::Warning, ConfigErrorCategory::Dependency,
                 "communication.transports." + reverse.key + ".port",
-                "正向 WebSocket 目标 " + forward.host + ":" + std::to_string(forward.port) +
-                    "（" + forward.key + "）与反向 WebSocket 监听地址（" + reverse.key +
-                    "）相同；反向模式下该地址通常已被协议端的正向服务占用，"
+                "服务器模式目标 " + forward.host + ":" + std::to_string(forward.port) +
+                    "（" + forward.key + "）与客户端模式监听地址（" + reverse.key +
+                    "）相同；客户端模式下该地址通常已被协议端的服务器占用，"
                     "Klein 会以 bind: Address already in use 启动失败。"
-                    "请为正向目标和反向监听使用不同端口");
+                    "请为两者使用不同端口");
             break;
         }
     }
