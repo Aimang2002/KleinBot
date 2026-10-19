@@ -807,14 +807,14 @@ void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
     }
     page.close();
 
-    LOG_INFO("Web 配置面板已启动：http://" + settings.bind + ":" +
-             std::to_string(settings.port) + "/（访问令牌来自 webui.access_token）");
+    const std::string endpoint =
+        settings.bind + ":" + std::to_string(settings.port);
     while (running.load())
     {
         std::unique_ptr<httplib::Server> server =
             buildServer(settings, configPath, store, models, groups, apiChannel);
         std::atomic<bool> serverActive{true};
-        // 看门狗：running 置假后调 stop() 让阻塞中的 listen() 返回
+        // 看门狗：running 置假后调 stop() 让阻塞中的 listen 返回
         std::thread watchdog([&running, &serverActive, &server]() {
             while (serverActive.load() && running.load())
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -822,7 +822,24 @@ void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
                 server->stop();
         });
 
-        server->listen(settings.bind.c_str(), static_cast<int>(settings.port));
+        // “已启动”必须晚于 bind：旧顺序先打印成功再 listen，端口被占用时
+        // 日志会自相矛盾（面板显示已启动，实际根本没有监听成功）
+        if (!server->bind_to_port(settings.bind.c_str(), static_cast<int>(settings.port)))
+        {
+            serverActive.store(false);
+            server->stop();
+            watchdog.join();
+            if (!running.load())
+                break;
+            LOG_ERROR("Web 配置面板监听失败（" + endpoint +
+                      "）：地址已被占用或无权绑定，10 秒后重试");
+            sleepWhileRunning(running, std::chrono::seconds(10));
+            continue;
+        }
+
+        LOG_INFO("Web 配置面板已启动：http://" + endpoint +
+                 "/（访问令牌来自 webui.access_token）");
+        server->listen_after_bind();
 
         serverActive.store(false);
         server->stop();
@@ -830,8 +847,7 @@ void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
 
         if (!running.load())
             break;
-        LOG_ERROR("配置面板监听中断（" + settings.bind + ":" + std::to_string(settings.port) +
-                  "），10 秒后重试");
+        LOG_ERROR("配置面板监听中断（" + endpoint + "），10 秒后重试");
         sleepWhileRunning(running, std::chrono::seconds(10));
     }
     LOG_INFO("Web 配置面板已退出");

@@ -188,6 +188,8 @@ void OneBotHttpTransport::runEventServer(
     const OneBotEventDecoder &eventDecoder,
     const std::atomic<bool> &running)
 {
+    const std::string endpoint =
+        config.http.eventBindHost + ":" + std::to_string(config.http.eventBindPort);
     try
     {
         net::io_context ioContext{1};
@@ -328,14 +330,24 @@ void OneBotHttpTransport::runEventServer(
         if (running.load())
         {
             // 系统错误消息是本地 ANSI 编码（中文 Windows 为 GBK），转 UTF-8 后再进日志
-            LOG_ERROR("OneBot HTTP事件服务异常：" + utils::localToUtf8(error.what()));
+            if (error.code() == boost::asio::error::address_in_use)
+            {
+                LOG_ERROR("OneBot HTTP事件服务监听失败：监听地址 " + endpoint +
+                          " 已被占用（" + utils::localToUtf8(error.what()) + "）");
+            }
+            else
+            {
+                LOG_ERROR("OneBot HTTP事件服务异常（监听 " + endpoint + "）：" +
+                          utils::localToUtf8(error.what()));
+            }
         }
     }
     catch (const std::exception &error)
     {
         if (running.load())
         {
-            LOG_ERROR("OneBot HTTP事件服务异常：" + std::string(error.what()));
+            LOG_ERROR("OneBot HTTP事件服务异常（监听 " + endpoint + "）：" +
+                      std::string(error.what()));
         }
     }
 

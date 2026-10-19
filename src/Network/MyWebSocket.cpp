@@ -27,6 +27,7 @@ void MyWebSocket::connectWebSocket(
     const OneBotMessageEncoder &messageEncoder,
     const std::atomic<bool> &running)
 {
+    const std::string endpoint = config.host + ":" + config.port + config.path;
     while (running.load())
     {
         try
@@ -65,20 +66,21 @@ void MyWebSocket::connectWebSocket(
             if (running.load())
             {
                 // 系统错误消息是本地 ANSI 编码（中文 Windows 为 GBK），转 UTF-8 后再进日志
-                LOG_ERROR(utils::localToUtf8(se.what()));
+                LOG_ERROR("正向WebSocket异常（目标 " + endpoint + "）：" +
+                          utils::localToUtf8(se.what()));
             }
         }
         catch (std::exception const &e)
         {
             if (running.load())
             {
-                LOG_ERROR(e.what());
+                LOG_ERROR("正向WebSocket异常（目标 " + endpoint + "）：" + e.what());
             }
         }
 
         if (running.load())
         {
-            LOG_FATAL("正向ws已失联，5秒后将重新连接...");
+            LOG_FATAL("正向ws已失联（目标 " + endpoint + "），5秒后将重新连接...");
             waitForReconnect(running, std::chrono::seconds(5));
         }
     }

@@ -177,13 +177,13 @@ void PushServer::run(PushSettings settings, PushDelivery &delivery, const std::a
         LOG_ERROR("推送门未启动：push.access_token 为空");
         return;
     }
-    LOG_INFO("推送门已启动：http://" + settings.bind + ":" + std::to_string(settings.port) +
-             "/push（令牌来自 push.access_token）");
+    const std::string endpoint =
+        settings.bind + ":" + std::to_string(settings.port);
     while (running.load())
     {
         std::unique_ptr<httplib::Server> server = buildServer(settings, delivery);
         std::atomic<bool> serverActive{true};
-        // 看门狗：running 置假后调 stop() 让阻塞中的 listen() 返回
+        // 看门狗：running 置假后调 stop() 让阻塞中的 listen 返回
         std::thread watchdog([&running, &serverActive, &server]() {
             while (serverActive.load() && running.load())
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -191,7 +191,24 @@ void PushServer::run(PushSettings settings, PushDelivery &delivery, const std::a
                 server->stop();
         });
 
-        server->listen(settings.bind.c_str(), static_cast<int>(settings.port));
+        // 与 Web 面板同一纪律：bind 成功后才对外宣称已启动
+        if (!server->bind_to_port(settings.bind.c_str(), static_cast<int>(settings.port)))
+        {
+            serverActive.store(false);
+            server->stop();
+            watchdog.join();
+            if (!running.load())
+                break;
+            LOG_ERROR("推送门监听失败（" + endpoint +
+                      "）：地址已被占用或无权绑定，10 秒后重试");
+            for (int waited = 0; waited < 100 && running.load(); ++waited)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+
+        LOG_INFO("推送门已启动：http://" + endpoint +
+                 "/push（令牌来自 push.access_token）");
+        server->listen_after_bind();
 
         serverActive.store(false);
         server->stop();
@@ -199,8 +216,7 @@ void PushServer::run(PushSettings settings, PushDelivery &delivery, const std::a
 
         if (!running.load())
             break;
-        LOG_ERROR("推送门监听中断（" + settings.bind + ":" + std::to_string(settings.port) +
-                  "），10 秒后重试");
+        LOG_ERROR("推送门监听中断（" + endpoint + "），10 秒后重试");
         for (int waited = 0; waited < 100 && running.load(); ++waited)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }

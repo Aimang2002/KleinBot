@@ -27,6 +27,10 @@ void MyReverseWebSocket::connectReverseWebSocket(
     const OneBotMessageEncoder &messageEncoder,
     const std::atomic<bool> &running)
 {
+    // 日志里必须带地址：boost 的 "bind: Address already in use" 本身不含端口，
+    // 只打 what() 时无法判断是哪个监听口冲突。
+    const std::string endpoint =
+        config.bindHost + ":" + std::to_string(config.bindPort);
     while (running.load())
     {
         try
@@ -139,20 +143,31 @@ void MyReverseWebSocket::connectReverseWebSocket(
             if (running.load())
             {
                 // 系统错误消息是本地 ANSI 编码（中文 Windows 为 GBK），转 UTF-8 后再进日志
-                LOG_ERROR(utils::localToUtf8(se.what()));
+                const std::string detail = utils::localToUtf8(se.what());
+                if (se.code() == boost::asio::error::address_in_use)
+                {
+                    LOG_ERROR("反向WebSocket监听失败：监听地址 " + endpoint +
+                              " 已被占用（" + detail +
+                              "）。若协议端的正向 WebSocket 也指向该地址，请改成不同端口；"
+                              "正向目标与反向监听不能共用同一地址");
+                }
+                else
+                {
+                    LOG_ERROR("反向WebSocket异常（监听 " + endpoint + "）：" + detail);
+                }
             }
         }
         catch (std::exception const &e)
         {
             if (running.load())
             {
-                LOG_ERROR(e.what());
+                LOG_ERROR("反向WebSocket异常（监听 " + endpoint + "）：" + e.what());
             }
         }
 
         if (running.load())
         {
-            LOG_FATAL("反向ws已失联，10秒后将重新连接...");
+            LOG_FATAL("反向ws已失联（监听 " + endpoint + "），10秒后将重新连接...");
             waitForReconnect(running, std::chrono::seconds(10));
         }
     }

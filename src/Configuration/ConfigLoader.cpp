@@ -289,6 +289,115 @@ ModelEndpointSchema decodeModelEndpoint(Decoder &decoder, const json &parent,
     return result;
 }
 
+struct ProfileEndpoint
+{
+    std::string key;
+    std::string type;
+    std::string host;
+    int port = 0;
+};
+
+bool isLoopbackHost(const std::string &host)
+{
+    return host == "127.0.0.1" || host == "localhost" ||
+           host == "::1" || host == "[::1]";
+}
+
+bool isWildcardHost(const std::string &host)
+{
+    return host.empty() || host == "0.0.0.0" || host == "::" ||
+           host == "[::]" || host == "*";
+}
+
+// 地址是否重叠：端口相同，且主机相同、同为回环，或一方绑定通配地址
+// 覆盖另一方的回环地址。只用于“正向目标 = 反向监听”的启发式检查。
+bool addressesOverlap(const ProfileEndpoint &left, const ProfileEndpoint &right)
+{
+    if (left.port < 1 || left.port != right.port)
+        return false;
+    if (left.host == right.host)
+        return true;
+    if (isLoopbackHost(left.host) && isLoopbackHost(right.host))
+        return true;
+    if (isWildcardHost(left.host) &&
+        (isWildcardHost(right.host) || isLoopbackHost(right.host)))
+        return true;
+    return isWildcardHost(right.host) && isLoopbackHost(left.host);
+}
+
+// 只读取端点字段本身，不产生诊断：非活动档案在 decodeCommunication 里本就不做
+// 字段校验，这里额外产生的缺失/类型告警会打破“只校验活动档案”的既有语义。
+std::vector<ProfileEndpoint> collectProfileEndpoints(const json &transports)
+{
+    std::vector<ProfileEndpoint> endpoints;
+    if (!transports.is_object())
+        return endpoints;
+
+    for (const auto &entry : transports.items())
+    {
+        const json &profile = entry.value();
+        if (!profile.is_object())
+            continue;
+        const auto type = profile.find("type");
+        if (type == profile.end() || !type->is_string())
+            continue;
+
+        ProfileEndpoint endpoint;
+        endpoint.key = entry.key();
+        endpoint.type = type->get<std::string>();
+
+        const json *source = &profile;
+        std::string hostKey;
+        if (endpoint.type == "forward_websocket")
+        {
+            hostKey = "host";
+        }
+        else if (endpoint.type == "reverse_websocket")
+        {
+            hostKey = "bind";
+        }
+        else if (endpoint.type == "http")
+        {
+            const auto events = profile.find("events");
+            if (events == profile.end() || !events->is_object())
+                continue;
+            source = &*events;
+            hostKey = "bind";
+        }
+        else
+        {
+            continue;
+        }
+
+        const auto host = source->find(hostKey);
+        if (host != source->end() && host->is_string())
+            endpoint.host = host->get<std::string>();
+        else if (hostKey == "bind")
+            endpoint.host = "127.0.0.1";
+
+        const auto port = source->find("port");
+        if (port == source->end() || !port->is_number_integer())
+            continue;
+        // 无符号形态单独取值：超大无符号数与有符号范围不相交，不能先转 long long
+        if (port->is_number_unsigned())
+        {
+            const unsigned long long value = port->get<unsigned long long>();
+            if (value < 1 || value > 65535)
+                continue;
+            endpoint.port = static_cast<int>(value);
+        }
+        else
+        {
+            const long long value = port->get<long long>();
+            if (value < 1 || value > 65535)
+                continue;
+            endpoint.port = static_cast<int>(value);
+        }
+        endpoints.push_back(std::move(endpoint));
+    }
+    return endpoints;
+}
+
 CommunicationSchema decodeCommunication(Decoder &decoder, const json &communication)
 {
     CommunicationSchema result;
@@ -401,6 +510,33 @@ CommunicationSchema decodeCommunication(Decoder &decoder, const json &communicat
     {
         decoder.diagnostic(ConfigSeverity::Fatal, ConfigErrorCategory::Dependency,
                            profilePath + ".type", "未知传输类型");
+    }
+
+    // 正/反向 WS 共用同一地址是常见部署错误：正向模式下协议端监听该地址，
+    // 切到反向模式后 Klein 再 bind 同一地址必然失败。只告警不阻断——
+    // 非活动档案不参与监听，用户可能保留多套档案按需切换。
+    const std::vector<ProfileEndpoint> endpoints = collectProfileEndpoints(*transports);
+    for (const ProfileEndpoint &reverse : endpoints)
+    {
+        if (reverse.type != "reverse_websocket")
+            continue;
+        for (const ProfileEndpoint &forward : endpoints)
+        {
+            if (forward.type != "forward_websocket" ||
+                !addressesOverlap(forward, reverse))
+            {
+                continue;
+            }
+            decoder.diagnostic(
+                ConfigSeverity::Warning, ConfigErrorCategory::Dependency,
+                "communication.transports." + reverse.key + ".port",
+                "正向 WebSocket 目标 " + forward.host + ":" + std::to_string(forward.port) +
+                    "（" + forward.key + "）与反向 WebSocket 监听地址（" + reverse.key +
+                    "）相同；反向模式下该地址通常已被协议端的正向服务占用，"
+                    "Klein 会以 bind: Address already in use 启动失败。"
+                    "请为正向目标和反向监听使用不同端口");
+            break;
+        }
     }
 
     return result;

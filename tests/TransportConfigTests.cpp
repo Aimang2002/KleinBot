@@ -232,6 +232,41 @@ TEST(ConfigLoaderTest, DecodesHttpEventSignatureSecret)
     EXPECT_TRUE(runtime.transport.http.eventAuthToken.empty());
 }
 
+TEST(ConfigLoaderTest, WarnsWhenForwardAndReverseWebSocketShareAnAddress)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["communication"]["transports"]["forward"] = {
+        {"type", "forward_websocket"},
+        {"host", "localhost"},
+        {"port", 8600}
+    };
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    // 回环别名也算同地址；只告警不阻断（非活动档案不参与监听）
+    ASSERT_TRUE(result.canStart());
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::Warning,
+                              "communication.transports.local.port"));
+}
+
+TEST(ConfigLoaderTest, DoesNotWarnWhenForwardAndReverseWebSocketUseDifferentPorts)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["communication"]["transports"]["forward"] = {
+        {"type", "forward_websocket"},
+        {"host", "127.0.0.1"},
+        {"port", 3001}
+    };
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    ASSERT_TRUE(result.canStart());
+    EXPECT_FALSE(hasDiagnostic(result, ConfigSeverity::Warning,
+                               "communication.transports.local.port"));
+}
+
 TEST(ConfigLoaderTest, UsesLegacyEventAccessTokenAsSignatureSecret)
 {
     nlohmann::json document = nlohmann::json::parse(validConfig);
