@@ -31,6 +31,18 @@ TEST(ReplyContextRoutingTest, MentionedBotGetsQuoteAndAt)
     EXPECT_EQ(reply->message_id, 5566);
 }
 
+TEST(ReplyContextRoutingTest, FollowUpSegmentsSkipReplyContext)
+{
+    const BotIdentity bot{10086, 10002, "Klein"};
+    const InboundMessage data = groupMessageFrom(20001, {10086});
+
+    // 本轮第一条出站：引用原消息 + @ 发起人
+    EXPECT_TRUE(buildReplyContext(data, bot, true).has_value());
+
+    // 同一轮的后续分条 / 多消息：不重复指向同一条 @ 消息
+    EXPECT_FALSE(buildReplyContext(data, bot, false).has_value());
+}
+
 TEST(ReplyContextRoutingTest, UnmentionedMessageGetsNoReplyContext)
 {
     const BotIdentity bot{10086, 10002, "Klein"};

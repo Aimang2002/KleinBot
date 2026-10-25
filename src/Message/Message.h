@@ -105,11 +105,14 @@ private:
 	// 协议封装（变成 VoiceMessage）由调用方完成，本函数只做 TTS
 	std::string textToVoice(const std::string &text);
 
-	// 把 OutboundMessage 按 message_type 路由到 send_private / send_group
-	void dispatch(const InboundMessage &data, const OutboundMessage &msg);
+	// 把 OutboundMessage 按 message_type 路由到 send_private / send_group。
+	// withReplyContext=false 时不带引用+@（同一轮的第一条出站之后）
+	void dispatch(const InboundMessage &data, const OutboundMessage &msg,
+				  bool withReplyContext = true);
 
-	// 文本超长自动分段发送（utf-8 安全切分）
-	void dispatchText(const InboundMessage &data, const std::string &text);
+	// 文本超长自动分段发送（utf-8 安全切分）；群聊只有第一段带引用+@
+	void dispatchText(const InboundMessage &data, const std::string &text,
+					  bool withReplyContext = true);
 	// 在下面添加新的函数用于拓展其他内容...
 
 private:

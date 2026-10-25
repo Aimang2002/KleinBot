@@ -171,8 +171,14 @@ void Message::handleMessage(const InboundMessage &current_data)
 		if (!inboundAssetId.empty())
 			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
 				chatReply.user_message_id);
+		// 本轮第一条出站才带引用+@：被点名时第一句回应引用原消息，
+		// 后续分条/多消息作为普通群消息直接发，避免每条都重复指向同一条 @
+		bool replyContextPending = true;
 		for (const auto &outbound : chatReply.outbound_messages)
-			dispatch(current_data, outbound);
+		{
+			dispatch(current_data, outbound, replyContextPending);
+			replyContextPending = false;
+		}
 		std::string llm_text = chatReply.text;
 
 		if (llm_text.empty())
@@ -196,16 +202,17 @@ void Message::handleMessage(const InboundMessage &current_data)
 			std::string audioPath = this->textToVoice(llm_text);
 			if (audioPath.empty())
 			{
-				dispatch(current_data, TextMessage{"系统提示：语音模块异常。"});
+				dispatch(current_data, TextMessage{"系统提示：语音模块异常。"},
+						 replyContextPending);
 			}
 			else
 			{
-				dispatch(current_data, VoiceMessage{audioPath});
+				dispatch(current_data, VoiceMessage{audioPath}, replyContextPending);
 			}
 		}
 		else
 		{
-			dispatchText(current_data, llm_text);
+			dispatchText(current_data, llm_text, replyContextPending);
 		}
 	}
 	catch (const std::exception &e)
@@ -214,7 +221,8 @@ void Message::handleMessage(const InboundMessage &current_data)
 	}
 }
 
-void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
+void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg,
+					   bool withReplyContext)
 {
 	OutboundDelivery delivery;
 	if (data.message_type == "group")
@@ -223,8 +231,9 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 		// 她的出站也是群内容（T7b）：入库后她下次被 @ 能接上自己说过的话
 		if (this->groupContext != nullptr)
 			this->groupContext->recordOutbound(data.group_id, msg);
-		// 指向性回复：被 @ 才引用+@ 回发起人（固定行为，无配置开关）
-		delivery.reply = buildReplyContext(data, options.bot);
+		// 指向性回复：本轮第一条出站被 @ 才引用+@ 回发起人；
+		// 同一轮后续分条/多消息是裸消息，不再重复引用（固定行为，无配置开关）
+		delivery.reply = buildReplyContext(data, options.bot, withReplyContext);
 		if (delivery.reply)
 		{
 			const bool quoteable = delivery.reply->message_id != 0 ||
@@ -241,7 +250,8 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg)
 	sender.deliver(std::move(delivery));
 }
 
-void Message::dispatchText(const InboundMessage &data, const std::string &text)
+void Message::dispatchText(const InboundMessage &data, const std::string &text,
+						   bool withReplyContext)
 {
 	// 群消息上限 5000 字节，私聊 4096 字符。私聊整条单发（换行原样保留，
 	// 仅超协议上限才按 UTF-8 字符硬切）；群聊按"一句一条"分条（真人打字习惯：
@@ -253,7 +263,10 @@ void Message::dispatchText(const InboundMessage &data, const std::string &text)
 								   : splitTextWhole(text, max_chars);
 	for (std::size_t index = 0; index < segments.size(); ++index)
 	{
-		dispatch(data, TextMessage{segments[index]});
+		// 只有第一段是"回复"（引用+@）；后续段直接发到群里，
+		// 避免一次多段回答把同一条 @ 消息引用多次
+		dispatch(data, TextMessage{segments[index]},
+				 withReplyContext && index == 0);
 		// 分条间隔：模拟真人连发节奏，也规避实现端风控
 		if (index + 1 < segments.size())
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
