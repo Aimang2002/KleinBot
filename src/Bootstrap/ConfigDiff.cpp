@@ -133,6 +133,10 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.memory.recallLimit, candidate.memory.recallLimit,
                  "memory.recall_limit", rebuild);
 
+    // M1 决策记录开关：存储与记录器在组合根构造，改动需重启
+    addIfChanged(diff, current.affect.enabled, candidate.affect.enabled,
+                 "affect.enabled", ConfigChangeImpact::Restart);
+
     addIfChanged(diff, current.webSearch.enabled, candidate.webSearch.enabled,
                  "web_search.enabled", rebuild);
     addIfChanged(diff, current.webSearch.provider, candidate.webSearch.provider,

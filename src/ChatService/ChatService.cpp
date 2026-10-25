@@ -11,10 +11,12 @@
 
 ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
                              std::optional<ChatImageContent> currentImage,
-                             const std::string &situationNote)
+                             const std::string &situationNote,
+                             const std::string &requestContext)
 {
     ChatReply resultReply;
-    // 1. 增量追加用户这句（内存 + SQLite 同步落盘）：上下文对所有用户开放
+    // 1. 增量追加用户这句（内存 + SQLite 同步落盘）：上下文对所有用户开放。
+    // 只落用户原文；请求级临时上下文（群背景）不经过本函数持久化。
     int64_t userMessageId = this->userSession.appendMessage(user_id, "user", text);
     resultReply.user_message_id = userMessageId;
 
@@ -26,6 +28,11 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
         return resultReply;
     }
     auto &bundle = *bundleOpt;
+
+    // 请求级临时上下文只修改请求副本，不写会话历史、不参与召回/提取
+    if (!requestContext.empty() &&
+        !appendTransientUserContext(bundle.request, requestContext))
+        LOG_WARNING("请求上下文注入失败：请求中没有 user 消息");
 
     // 单轮情境注记紧跟服务契约：行为约束归 system，先于后续工具规则注入
     if (!situationNote.empty())

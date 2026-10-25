@@ -602,8 +602,8 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     Decoder decoder(result.diagnostics);
     decoder.unknownFields(document,
                           {"schema_version", "bot", "chat", "models", "voice",
-                           "memory", "web_search", "web_fetch", "perception", "storage",
-                           "network", "communication", "webui", "push"},
+                           "memory", "affect", "web_search", "web_fetch", "perception",
+                           "storage", "network", "communication", "webui", "push"},
                           "$" );
 
     SchemaConfig config;
@@ -836,6 +836,15 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
                                "webui.bind",
                                "绑定地址不是回环地址，面板将暴露给外部网络，请确认已由反向代理提供 TLS");
         }
+    }
+
+    // M1 决策记录（影子）：默认关闭；开启后只写决策/执行/反馈表，
+    // 不改变两条群回应路径的实际行为。其余 affect 配置键在 M2 接入。
+    const json *affect = decoder.object(document, "affect", "affect");
+    if (affect != nullptr)
+    {
+        decoder.unknownFields(*affect, {"enabled"}, "affect");
+        config.affect.enabled = decoder.boolean(*affect, "enabled", "affect.enabled", false);
     }
 
     // 推送门（外部投递入口）：语义与 webui 镜像——令牌缺失或白名单为空时

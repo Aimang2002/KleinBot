@@ -38,6 +38,11 @@ struct WebUiSettings
     std::string accessToken;
 };
 
+struct AffectSettings
+{
+    bool enabled = false;
+};
+
 struct RuntimeSettings
 {
     int schemaVersion = 1;
@@ -46,6 +51,7 @@ struct RuntimeSettings
     ModelRuntimeSettings models;
     VoiceOptions voice;
     MemoryOptions memory;
+    AffectSettings affect;
     WebSearchOptions webSearch;
     WebFetchOptions webFetch;
     MessageOptions message;

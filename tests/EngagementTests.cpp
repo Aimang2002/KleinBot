@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include "Affect/DecisionRecord.h"
+#include "Affect/DecisionRecorder.h"
+#include "Affect/DecisionStore.h"
 #include "Perception/EngagementService.h"
 #include "Perception/GroupContextService.h"
 #include "Perception/GroupListService.h"
@@ -944,4 +947,44 @@ TEST(EngagementColdTest, DailyCapSurvivesRestart)
     second.pump(now); // 静默期检查
     feedBurst(*store2, second, 12);
     EXPECT_TRUE(submitted.empty()) << "当日帽应跨重启生效";
+}
+
+// M1 影子记录：主动接话与沉默都产出一决策一执行，动作不变。
+TEST(EngagementDecisionRecordTest, RecordsSpeakAndPassWithSharedContract)
+{
+    Harness harness;
+    affect::DecisionStore store(harness.directory.path() + "/affect.db");
+    ASSERT_TRUE(store.isOpen());
+    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    harness.service->setDecisionRecorder(&recorder);
+
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(sayResponse("接一句"));
+    harness.service->runTurn(8823);
+
+    auto decisions = store.recentDecisions(10);
+    ASSERT_EQ(decisions.size(), 1U);
+    EXPECT_EQ(decisions.front().source, "engagement_turn");
+    EXPECT_EQ(decisions.front().plan.action, "group_say");
+    EXPECT_EQ(decisions.front().createdAt, harness.now);
+    EXPECT_EQ(store.executionCount(decisions.front().decisionId), 1U);
+
+    harness.now += 60;
+    harness.feed(8823, "又来一条", harness.now);
+    harness.turnResponses.push_back(passResponse());
+    harness.service->runTurn(8823);
+
+    decisions = store.recentDecisions(10);
+    ASSERT_EQ(decisions.size(), 2U);
+    bool foundSilence = false;
+    for (const auto &decision : decisions)
+    {
+        if (decision.plan.action == "no_reply")
+        {
+            foundSilence = true;
+            EXPECT_EQ(store.executionCount(decision.decisionId), 1U);
+        }
+    }
+    EXPECT_TRUE(foundSilence);
 }

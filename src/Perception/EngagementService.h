@@ -39,6 +39,11 @@
 #include <string>
 #include <vector>
 
+namespace affect
+{
+class DecisionRecorder;
+}
+
 enum class EngagementState
 {
     Active, // 存活：接受消息喂食、可触发轮次
@@ -115,6 +120,11 @@ public:
     void setMemberProvider(MemberProvider memberProvider)
     {
         this->memberProvider = std::move(memberProvider);
+    }
+    // M1 影子记录：可空；非空且启用时记录每轮决策/执行，不改变动作
+    void setDecisionRecorder(affect::DecisionRecorder *recorder)
+    {
+        this->decisionRecorder = recorder;
     }
 
     // worker 线程：监控群新消息（record 已入库）。会话存活期喂活动/点名；
@@ -209,6 +219,7 @@ private:
     Submit submitTurn;
     Submit submitJudge;
     MemberProvider memberProvider;
+    affect::DecisionRecorder *decisionRecorder = nullptr;
 };
 
 #endif // ENGAGEMENT_SERVICE_H

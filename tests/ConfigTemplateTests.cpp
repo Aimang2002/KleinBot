@@ -79,6 +79,8 @@ TEST(ConfigTemplateTest, CreateIfMissingGeneratesLoadableConfig)
     EXPECT_EQ(loaded.config->webUi.bind, "127.0.0.1");
     EXPECT_EQ(loaded.config->webUi.port, kDefaultWebUiPort);
     EXPECT_EQ(loaded.config->webUi.accessToken, token);
+    // M1 决策记录默认关闭：未接线时保持 v2.4.1 行为
+    EXPECT_FALSE(loaded.config->affect.enabled);
 
     const nlohmann::json document = nlohmann::json::parse(file.read());
     EXPECT_EQ(document["webui"]["access_token"],
@@ -90,10 +92,11 @@ TEST(ConfigTemplateTest, CreateIfMissingGeneratesLoadableConfig)
     // 骨架包含全部配置节（2026-09-19 用户定规：不给用户不完整的内容），
     // 面板首跑即可见所有模块；值为安全占位——密钥空串而非 from_env，
     // manager_id 为 0（未设置），不预置假管理员
-    for (const char *section : {"bot", "chat", "models", "voice", "memory", "web_search",
-                                "web_fetch", "storage", "network", "communication", "webui",
-                                "push"})
+    for (const char *section : {"bot", "chat", "models", "voice", "memory", "affect",
+                                "web_search", "web_fetch", "storage", "network", "communication",
+                                "webui", "push"})
         EXPECT_TRUE(document.contains(section)) << section;
+    EXPECT_EQ(document["affect"]["enabled"], false);
     EXPECT_EQ(document["chat"]["temperature"], 1.0);
     EXPECT_EQ(document["chat"]["max_message_tokens"], 4096);
     EXPECT_EQ(document["models"]["drawing"]["api_key"], "");

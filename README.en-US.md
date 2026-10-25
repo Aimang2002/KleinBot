@@ -38,9 +38,6 @@ The model is responsible for understanding intent, planning actions, and selecti
 
 
 
-> Latest Version: v2.4.0 (In Development)
-
-
 
 # Running
 

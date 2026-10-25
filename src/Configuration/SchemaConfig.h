@@ -71,6 +71,13 @@ struct MemorySchema
     std::size_t recallLimit = 8;
 };
 
+// M1 决策记录开关：默认 false（完全 v2.4.1 行为）；开启后只记录
+// 两条群回应路径的决策/执行/反馈，不改变实际回应。
+struct AffectSchema
+{
+    bool enabled = false;
+};
+
 struct WebSearchSchema
 {
     bool enabled = false;
@@ -162,6 +169,7 @@ struct SchemaConfig
     ModelSchema models;
     VoiceSchema voice;
     MemorySchema memory;
+    AffectSchema affect;
     WebSearchSchema webSearch;
     WebFetchSchema webFetch;
     StorageSchema storage;

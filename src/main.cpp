@@ -29,6 +29,8 @@
 #include "Push/PushDelivery.h"
 #include "Push/PushServer.h"
 #endif
+#include "Affect/DecisionRecorder.h"
+#include "Affect/DecisionStore.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
 #include "Perception/PerceptionChannel.h"
@@ -374,6 +376,23 @@ int main(int argc, char **argv)
 	ModelRegistry models(kModelRegistryPath);
 	const std::string &dbPath = settings.storage.conversationDatabase;
 	ConversationStore conversationStore(dbPath);
+	// M1 决策记录（影子）：默认关闭；开启后只写决策/执行/反馈表，
+	// 不改变任何回应行为。store 打开失败时回退到不记录。
+	std::unique_ptr<affect::DecisionStore> decisionStore;
+	std::unique_ptr<affect::DecisionRecorder> decisionRecorder;
+	if (settings.affect.enabled)
+	{
+		decisionStore = std::make_unique<affect::DecisionStore>(dbPath);
+		if (decisionStore->isOpen())
+		{
+			decisionRecorder = std::make_unique<affect::DecisionRecorder>(decisionStore.get());
+			LOG_INFO("心境决策记录已启用（M1 影子：只记录，不改变回应）");
+		}
+		else
+		{
+			LOG_WARNING("心境决策记录启用失败：决策库不可用，已回退到不记录");
+		}
+	}
 	ImageAssetStore imageAssetStore(dbPath, settings.storage.imageAssets);
 	ReminderStore reminderStore(dbPath);
 	// 构造即重建内存队列：24 小时内漏触发的提醒会补发，超窗的滚动或丢弃
@@ -530,6 +549,7 @@ int main(int argc, char **argv)
 	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=judge/压缩），未配管理员
 	// 则无主模型、跟进自动停摆（与主动发言同一底线）
 	EngagementService engagementService(settings.bot, groupContextStore.get(), &messageSender);
+	engagementService.setDecisionRecorder(decisionRecorder.get());
 	groupContextService.setEngagement(&engagementService);
 	if (settings.bot.managerId != 0)
 	{
@@ -568,7 +588,8 @@ int main(int argc, char **argv)
 		});
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
-		globalVoice, &typingIndicator, &perceptionChannel, &groupContextService);
+		globalVoice, &typingIndicator, &perceptionChannel, &groupContextService,
+		decisionRecorder.get());
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,

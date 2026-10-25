@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
+#include "Application/RecallContextInjection.h"
 #include "Asset/ImageAssetStore.h"
 #include "Command/ResetChatCommand.h"
 #include "Command/ResetContextCommand.h"
 #include "Persistence/ConversationStore.h"
 #include "Perception/PerceptionStore.h"
+#include "Port/ChatRequest.h"
 #include "Tool/SendImageTool.h"
 #include "UserSession/UserSessionService.h"
 
@@ -189,6 +191,65 @@ TEST(UserSessionFirstContactTest, ChatHistoryPersistsForEveryUser)
     UserSessionService reloaded(registry, store, bot, options);
     EXPECT_TRUE(reloaded.hasChatHistory(30001));
     EXPECT_FALSE(reloaded.hasChatHistory(30002));
+}
+
+// 请求级临时上下文只作用于请求副本：最后一条 user 消息尾部追加，
+// 不能污染更早的消息，也不能写回会话历史/数据库
+TEST(ContextInjectionTest, AppendsTransientContextOnlyToLastUserMessage)
+{
+    ChatRequest request;
+    request.history.push_back({"system", "system"});
+    EXPECT_FALSE(appendTransientUserContext(request, "group context"));
+
+    request.history.push_back({"user", "first"});
+    request.history.push_back({"assistant", "answer"});
+    request.history.push_back({"user", "second"});
+
+    ASSERT_TRUE(appendTransientUserContext(request, "group context"));
+    EXPECT_EQ(request.history.back().content, "second\ngroup context");
+    EXPECT_EQ(request.history[0].content, "system");
+    EXPECT_EQ(request.history[1].content, "first");
+    EXPECT_EQ(request.history[2].content, "answer");
+}
+
+TEST(ContextInjectionTest, EmptyTransientContextIsNoOp)
+{
+    ChatRequest request;
+    request.history.push_back({"user", "hello"});
+    EXPECT_FALSE(appendTransientUserContext(request, ""));
+    EXPECT_EQ(request.history.back().content, "hello");
+}
+
+// M0 边界回归：群背景只出现在当前模型请求里，不进入会话库、后续请求和召回
+TEST(UserSessionContextBoundaryTest, RequestOnlyContextStaysOutOfPersistedHistory)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+    UserSessionService session(registry, store, bot, options);
+
+    const std::string userText = "这张图什么意思？";
+    const std::string groupContext = "[群聊背景]\nA: 深渊开了\nB: 红莲扰动 400";
+    session.appendMessage(10, "user", userText);
+
+    auto bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    ASSERT_FALSE(bundle->request.history.empty());
+    ASSERT_TRUE(appendTransientUserContext(bundle->request, groupContext));
+    EXPECT_EQ(bundle->request.history.back().content, userText + "\n" + groupContext);
+
+    // 下一轮或冷启动重建请求：会话历史里只有用户原文，群背景不会回灌
+    auto rebuilt = session.buildChatRequest(10);
+    ASSERT_TRUE(rebuilt.has_value());
+    ASSERT_FALSE(rebuilt->request.history.empty());
+    EXPECT_EQ(rebuilt->request.history.back().content, userText);
+
+    // 会话库同样只有原文；群背景里的词不能成为检索命中
+    EXPECT_EQ(store.search(10, "深渊").size(), 0U);
+    EXPECT_EQ(store.search(10, "什么意思").size(), 1U);
 }
 
 TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)

@@ -19,6 +19,11 @@
 #include <memory>
 #include <unordered_set>
 
+namespace affect
+{
+class DecisionRecorder;
+}
+
 // 消息类
 class Message
 {
@@ -33,7 +38,8 @@ public:
                      ModelEndpointOptions visionModel, bool &globalVoice,
                      class TypingIndicator *typingIndicator = nullptr,
                      class PerceptionChannel *perception = nullptr,
-                     class GroupContextService *groupContext = nullptr);
+                     class GroupContextService *groupContext = nullptr,
+                     affect::DecisionRecorder *decisionRecorder = nullptr);
 
 	/**
 	 * @brief 消息过滤：群聊触发门槛与私聊放行
@@ -123,6 +129,7 @@ private:
     class TypingIndicator *typingIndicator = nullptr; // 可空：未注入则无输入状态提示
     class PerceptionChannel *perception = nullptr;    // 可空：未注入则无话题注记
     class GroupContextService *groupContext = nullptr; // 可空：未注入则无内容级群上下文
+    affect::DecisionRecorder *decisionRecorder = nullptr; // 可空：M1 影子决策记录
 };
 
 #endif // MESSAGE_H

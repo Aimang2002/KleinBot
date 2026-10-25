@@ -1,4 +1,6 @@
 #include "EngagementService.h"
+#include "../Affect/DecisionRecord.h"
+#include "../Affect/DecisionRecorder.h"
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
 #include "../Tool/ToolArgumentParser.h"
@@ -915,6 +917,36 @@ void EngagementService::runTurn(std::uint64_t groupId)
                          std::to_string(session.consecutivePasses) + " 拍）");
             break;
         }
+    }
+
+    // M1 影子记录：会话锁外写 SQLite，避免阻塞其它群的 pump/onGroupMessage。
+    // 只记录实际发生的动作，不改变动作；recorder 关闭时 no-op。
+    std::string decisionId;
+    if (decisionRecorder != nullptr && decisionRecorder->enabled())
+    {
+        const char *action = turn.kind == EngagementTurn::Kind::Speak
+                                 ? "group_say"
+                                 : turn.kind == EngagementTurn::Kind::Leave ? "leave_topic"
+                                                                            : "no_reply";
+        affect::DecisionRecord decision = affect::makeBaselineDecision(
+            kind == TurnKind::ColdEntry ? "engagement_cold_entry" : "engagement_turn",
+            groupId, 0, std::string(), action);
+        decisionId = decisionRecorder->recordDecision(std::move(decision));
+    }
+
+    // 执行记录：queued 只代表已交给出站队列，不代表协议端送达；
+    // 真实 message_id 的回执属于 B2/M3，此处先记 unknown 语义下的 queued/skipped。
+    if (!decisionId.empty() && decisionRecorder != nullptr)
+    {
+        const bool hasText = !utils::trim(turn.text).empty();
+        const bool attemptedText =
+            hasText && (turn.kind == EngagementTurn::Kind::Speak ||
+                        turn.kind == EngagementTurn::Kind::Leave);
+        affect::ExecutionRecord execution;
+        execution.decisionId = decisionId;
+        execution.status = attemptedText && sender != nullptr ? "queued" : "skipped";
+        execution.actualText = hasText ? turn.text : std::string();
+        decisionRecorder->recordExecution(std::move(execution));
     }
 
     // 情绪基调更新（worker 调用在锁外；每 N 个发言轮一次，失败保留旧基调）——

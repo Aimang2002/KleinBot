@@ -87,6 +87,40 @@ TEST(ConfigDiffTest, ClassifiesDynamicRebuildAndRestartChanges)
                                ConfigChangeImpact::Restart));
 }
 
+TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)
+{
+    TemporaryConfigFile file;
+    file.write(R"({
+        "schema_version": 1,
+        "bot": {"id": 10001, "manager_id": 10002, "name": "Klein"},
+        "chat": {"default_model": "test-model"},
+        "models": {"registry_path": "ModelsName.json"},
+        "affect": {"enabled": true},
+        "communication": {
+            "protocol": {"type": "onebot"},
+            "active_transport": "local",
+            "transports": {
+                "local": {
+                    "type": "reverse_websocket",
+                    "bind": "127.0.0.1",
+                    "port": 8600
+                }
+            }
+        }
+    })");
+
+    ConfigLoader loader;
+    const ConfigLoadResult loaded = loader.loadFile(file.path.string());
+    EXPECT_TRUE(loaded.canStart());
+    ASSERT_NE(loaded.config, nullptr);
+    EXPECT_TRUE(loaded.config->affect.enabled);
+
+    SchemaConfig candidate = *loaded.config;
+    candidate.affect.enabled = false;
+    const ConfigDiff diff = compareConfig(*loaded.config, candidate);
+    EXPECT_TRUE(containsChange(diff, "affect.enabled", ConfigChangeImpact::Restart));
+}
+
 TEST(ConfigSnapshotStoreTest, PublishesValidatedCandidateWithoutApplyingRuntimeObjects)
 {
     ConfigLoader loader;

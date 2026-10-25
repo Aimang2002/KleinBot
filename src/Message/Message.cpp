@@ -7,6 +7,8 @@
 #include "../Application/TypingIndicator.h"
 #include "../Perception/PerceptionChannel.h"
 #include "../Perception/GroupContextService.h"
+#include "../Affect/DecisionRecord.h"
+#include "../Affect/DecisionRecorder.h"
 #include "Message.h"
 #include <algorithm>
 #include <iomanip>
@@ -20,12 +22,13 @@ Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatS
                  CommandRegistry &registry, Voice &voice, MessageOptions options,
                  ModelEndpointOptions visionModel, bool &globalVoice,
                  TypingIndicator *typingIndicator, PerceptionChannel *perception,
-                 GroupContextService *groupContext)
+                 GroupContextService *groupContext,
+                 affect::DecisionRecorder *decisionRecorder)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry), voice(voice),
       options(std::move(options)), visionModel(std::move(visionModel)),
       global_Voice(globalVoice), typingIndicator(typingIndicator), perception(perception),
-      groupContext(groupContext)
+      groupContext(groupContext), decisionRecorder(decisionRecorder)
 {
 }
 
@@ -98,7 +101,9 @@ void Message::handleMessage(const InboundMessage &current_data)
 
 		// 群上下文注入（T7b）：内容层优先——按触发句相关性选择的原文块/摘要
 		// （并行话题、他人反驳由此天然入选）；空选时退回关键词热点注记（T7）。
-		// 数据注记走 user 尾部而非 system，管理员前缀缓存保持逐字稳定
+		// 数据注记只进请求副本（requestContext），不写会话历史、
+		// 不参与记忆召回/提取；管理员前缀缓存仍保持逐字稳定
+		std::string requestContext;
 		if (current_data.message_type == "group")
 		{
 			// @ 硬激活（意志层 v2）：回答走下方既有回复路径；话题会话的
@@ -106,14 +111,11 @@ void Message::handleMessage(const InboundMessage &current_data)
 			if (this->groupContext != nullptr)
 				this->groupContext->onAtActivated(current_data.group_id, current_data.plain_text);
 
-			std::string contextNote;
 			if (this->groupContext != nullptr)
-				contextNote = this->groupContext->assemble(current_data.group_id,
+				requestContext = this->groupContext->assemble(current_data.group_id,
 					current_data.plain_text);
-			if (contextNote.empty() && this->perception != nullptr)
-				contextNote = this->perception->topicNoteFor(current_data.group_id);
-			if (!contextNote.empty())
-				conversationText += "\n" + contextNote;
+			if (requestContext.empty() && this->perception != nullptr)
+				requestContext = this->perception->topicNoteFor(current_data.group_id);
 		}
 
 		// 上下文对所有用户开放（2026-09-19 缺陷修正）：每句都写入会话并进长期记忆，
@@ -136,12 +138,36 @@ void Message::handleMessage(const InboundMessage &current_data)
 		if (current_data.message_type == "group")
 			situationNote += GroupContextService::groupConversationContract();
 
+		// M1 影子记录：@/私聊回复路径与主动接话共用同一决策合同；
+		// recorder 关闭时完全 no-op，不改变下面的实际请求。
+		std::string decisionId;
+		if (this->decisionRecorder != nullptr && this->decisionRecorder->enabled())
+		{
+			const std::string triggerMessageId = !current_data.message_id_raw.empty()
+				? current_data.message_id_raw
+				: std::to_string(current_data.message_id);
+			affect::DecisionRecord decision = affect::makeBaselineDecision(
+				current_data.message_type == "group" ? "at_reply" : "private_reply",
+				current_data.message_type == "group" ? current_data.group_id : 0,
+				current_data.user_id, triggerMessageId, "reply");
+			decisionId = this->decisionRecorder->recordDecision(std::move(decision));
+		}
+
 		// 私聊 LLM 调用前触发"正在输入"（能力位门控在 TypingIndicator 内部，fire-and-forget）
 		if (typingIndicator != nullptr && current_data.message_type != "group")
 			typingIndicator->begin(current_data.user_id);
 		ChatReply chatReply = this->chatService.reply(
 			current_data.user_id, conversationText, std::move(currentImage),
-			situationNote);
+			situationNote, requestContext);
+		if (!decisionId.empty() && this->decisionRecorder != nullptr)
+		{
+			affect::ExecutionRecord execution;
+			execution.decisionId = decisionId;
+			execution.status = (chatReply.text.empty() && chatReply.outbound_messages.empty())
+				? "skipped" : "queued";
+			execution.actualText = chatReply.text;
+			this->decisionRecorder->recordExecution(std::move(execution));
+		}
 		if (!inboundAssetId.empty())
 			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
 				chatReply.user_message_id);

@@ -33,10 +33,13 @@ public:
     // situationNote：单轮情境注记（如新朋友第一句话），追加在 system prompt 内——
     // 行为约束归 system 而非用户文本（约束力更强）；仅影响注入的那一轮，
     // 供应商前缀缓存代价为该用户一次性 miss
-    // 上下文对所有用户开放（2026-09-19）：每句都写入会话并进长期记忆队列
+    // requestContext：只进入本次模型请求的临时上下文（如群聊背景），追加在当前
+    // user 消息尾部；不写会话历史/数据库，不参与记忆召回与提取。
+    // 上下文对所有用户开放（2026-09-19）：每句原文都写入会话并进长期记忆队列
     ChatReply reply(uint64_t user_id, const std::string &text,
                     std::optional<ChatImageContent> currentImage = std::nullopt,
-                    const std::string &situationNote = {});
+                    const std::string &situationNote = {},
+                    const std::string &requestContext = {});
     // 人格化单轮回应（T6）：与 reply() 相同的人格装配（用户人格 / soul 兜底 + 服务契约），
     // 但单轮、不带工具、不写会话不入长期记忆——戳一戳、欢迎、提醒转达等被动场景不值得进记忆。
     // 失败返回空串，调用方决定降级，绝不把错误文案当回复发给用户

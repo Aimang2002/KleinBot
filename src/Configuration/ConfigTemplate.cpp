@@ -73,6 +73,9 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
             "idle_minutes": 30,
             "recall_limit": 8
         },
+        "affect": {
+            "enabled": false
+        },
         "web_search": {
             "enabled": false,
             "provider": "tavily",

@@ -37,3 +37,20 @@ bool appendContextNote(ChatRequest &request, const std::string &note)
     }
     return false;
 }
+
+bool appendTransientUserContext(ChatRequest &request, const std::string &context)
+{
+    if (context.empty())
+        return false;
+
+    for (auto iterator = request.history.rbegin(); iterator != request.history.rend(); ++iterator)
+    {
+        if (iterator->role != "user")
+            continue;
+        iterator->content = iterator->content.empty()
+            ? context
+            : iterator->content + "\n" + context;
+        return true;
+    }
+    return false;
+}
