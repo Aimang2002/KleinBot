@@ -24,8 +24,11 @@
 #include "Application/TypingIndicator.h"
 #include "Event/FriendRequestNotifier.h"
 #include "WebUI/ConfigPanelServer.h"
+// 推送门暂时搁置（2026-10-25）：保留 src/Push 模块与测试，恢复时移除 #if 0。
+#if 0
 #include "Push/PushDelivery.h"
 #include "Push/PushServer.h"
+#endif
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
 #include "Perception/PerceptionChannel.h"
@@ -461,11 +464,14 @@ int main(int argc, char **argv)
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;
 	QueuedMessageSender messageSender(outboundQueue);
+	// 推送门暂时搁置（2026-10-25）：接缝构造一并停用，恢复时移除 #if 0。
+#if 0
 	// 推送门接缝：润色器以管理员会话装配人格（与话题会话同源），失败由接缝兜底直发
 	PushDelivery pushDelivery(settings.push, messageSender,
 							  [&chatService, personaSourceId = settings.bot.managerId](
 								  const std::string &prompt)
 		{ return chatService.replyInCharacter(personaSourceId, prompt); });
+#endif
 	OneBotEventDecoder oneBotEventDecoder;
 	OneBotMessageEncoder oneBotMessageEncoder;
 	// API 通道（T1 echo 关联）：WS 模式共用 WebSocketApiChannel，HTTP 模式用同步 HttpApiChannel
@@ -648,13 +654,16 @@ int main(int argc, char **argv)
 			groupListService.get(), std::cref(running), &activeApiChannel);
 	}
 
+	// 推送门暂时搁置（2026-10-25）：保留空线程对象供清理链复用，不再启动 HTTP 门。
 	std::thread pushThread;
+#if 0
 	if (settings.push.enabled)
 	{
 		pushThread = std::thread(
 			PushServer::run,
 			settings.push, std::ref(pushDelivery), std::cref(running));
 	}
+#endif
 
 	while (running.load())
 	{
