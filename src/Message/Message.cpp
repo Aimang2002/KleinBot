@@ -42,6 +42,11 @@ Message::Intent Message::classify(const InboundMessage &data)
 	return Intent::Chat; // 正常聊天
 }
 
+bool Message::isCommand(const InboundMessage &data) const
+{
+	return data.post_type == "message" && this->registry.matches(data.plain_text);
+}
+
 void Message::handleMessage(const InboundMessage &current_data)
 {
 	Intent intent = classify(current_data);
@@ -61,7 +66,8 @@ void Message::handleMessage(const InboundMessage &current_data)
 		if (rs.has_value())
 		{
 			LOG_DEBUG("识别到命令");
-			dispatch(current_data, rs->payload);
+			// 命令确认不是她的群聊发言：不进群内容缓冲、不算会话活动
+			dispatch(current_data, rs->payload, true, {}, false);
 			return;
 		}
 	}
@@ -241,7 +247,8 @@ void Message::handleMessage(const InboundMessage &current_data)
 }
 
 void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg,
-					   bool withReplyContext, const std::string &correlationId)
+					   bool withReplyContext, const std::string &correlationId,
+					   bool observeOutbound)
 {
 	OutboundDelivery delivery;
 	delivery.correlation_id = correlationId;
@@ -249,8 +256,9 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg,
 	{
 		delivery.target = GroupMessageTarget{std::to_string(data.group_id)};
 		// 她的出站也是群内容（T7b）：入库后她下次被 @ 能接上自己说过的话；
-		// 关联键随行入库，回执到达后补真实 message_id（R0.2）
-		if (this->groupContext != nullptr)
+		// 关联键随行入库，回执到达后补真实 message_id（R0.2）。
+		// 命令确认/系统提示不是对话（observeOutbound=false）
+		if (observeOutbound && this->groupContext != nullptr)
 			this->groupContext->recordOutbound(data.group_id, msg, correlationId);
 		// 指向性回复：本轮第一条出站被 @ 才引用+@ 回发起人；
 		// 同一轮后续分条/多消息是裸消息，不再重复引用（固定行为，无配置开关）
@@ -285,10 +293,13 @@ void Message::dispatchText(const InboundMessage &data, const std::string &text,
 	for (std::size_t index = 0; index < segments.size(); ++index)
 	{
 		// 只有第一段是"回复"（引用+@）；后续段直接发到群里，
-		// 避免一次多段回答把同一条 @ 消息引用多次。关联键同样只给第一段
+		// 避免一次多段回答把同一条 @ 消息引用多次。
+		// 关联键每段都带：首段裸键驱动执行记录状态，后续段 "键#序号" 只聚合 message_id
+		std::string segmentCorrelation = correlationId;
+		if (index > 0 && !correlationId.empty())
+			segmentCorrelation += "#" + std::to_string(index);
 		dispatch(data, TextMessage{segments[index]},
-				 withReplyContext && index == 0,
-				 index == 0 ? correlationId : std::string());
+				 withReplyContext && index == 0, segmentCorrelation);
 		// 分条间隔：模拟真人连发节奏，也规避实现端风控
 		if (index + 1 < segments.size())
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -297,7 +308,8 @@ void Message::dispatchText(const InboundMessage &data, const std::string &text,
 
 void Message::sendError(const InboundMessage &current_data, const std::string &text)
 {
-	dispatch(current_data, TextMessage{text});
+	// 系统提示不是她的群聊发言
+	dispatch(current_data, TextMessage{text}, true, {}, false);
 }
 
 bool Message::messageFilter(const InboundMessage &data)

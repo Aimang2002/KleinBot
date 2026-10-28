@@ -279,9 +279,11 @@ void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool at
     session.newMessagesSinceTurn += 1;
     session.messagesSeen += 1;
 
-    // 点名（@ 或提名字）或引用回复她：待回应，立即触发一轮
-    if (!record.isSelf &&
-        (atMentioned || record.mentionsBot || replyToSelf(record)))
+    // 提名字或引用回复她：待回应，立即触发一轮。
+    // @ 不在此列：被 @ 的回答走 Message 的既有回复路径（2026-10-28 修复：之前 @ 同时
+    // 触发会话轮，会话存活期间每次 @ 她都回两次）；@ 消息在这里只算会话活动
+    if (!record.isSelf && !atMentioned &&
+        (record.mentionsBot || replyToSelf(record)))
     {
         const bool alreadyPending = session.addressPending;
         session.addressPending = true;

@@ -57,6 +57,11 @@ public:
 	// 处理一条入站消息：分类 → 命令 / Vision / 普通对话，结果直接经由 sender 发出
 	void handleMessage(const InboundMessage &current_data);
 
+	// 这条消息会不会被当作 #命令 处理（只匹配不执行）。组合根据此把命令消息排除在
+	// 群内容缓冲与话题会话之外——命令往来是协议层对话，不是群聊内容（2026-10-28 修复：
+	// 群里 "@她 #坏" 曾被会话当成点名而多回一句）
+	bool isCommand(const InboundMessage &data) const;
+
 	// 错误消息分发：直接构造 TextMessage 发回去（替代 main.cpp 旧的 isErrorTransfer 分支）
 	void sendError(const InboundMessage &current_data, const std::string &text);
 
@@ -107,11 +112,16 @@ private:
 
 	// 把 OutboundMessage 按 message_type 路由到 send_private / send_group。
 	// withReplyContext=false 时不带引用+@（同一轮的第一条出站之后）。
-	// correlationId 非空时该投递要回执（R0.2）：一轮只给一条出站（主回复）带关联键
+	// correlationId 非空时该投递要回执（R0.2）。observeOutbound=false 时不把这条出站记为
+	// 她的群聊发言（命令确认、系统错误提示都不是对话内容）
 	void dispatch(const InboundMessage &data, const OutboundMessage &msg,
-				  bool withReplyContext = true, const std::string &correlationId = {});
+				  bool withReplyContext = true, const std::string &correlationId = {},
+				  bool observeOutbound = true);
 
-	// 文本超长自动分段发送（utf-8 安全切分）；群聊只有第一段带引用+@，也只有第一段带关联键
+	// 文本超长自动分段发送（utf-8 安全切分）；群聊只有第一段带引用+@。
+	// 关联键每段都带：首段用裸 correlationId（驱动执行记录状态），后续段用
+	// "correlationId#序号"，回执到达后 message_id 都聚合到同一条执行记录——
+	// 引用任意一段打反馈都能精确命中
 	void dispatchText(const InboundMessage &data, const std::string &text,
 					  bool withReplyContext = true, const std::string &correlationId = {});
 	// 在下面添加新的函数用于拓展其他内容...

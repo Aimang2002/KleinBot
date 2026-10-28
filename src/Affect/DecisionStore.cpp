@@ -305,13 +305,15 @@ bool DecisionStore::updateExecutionReceipt(const std::string &executionId,
 
     std::lock_guard<std::mutex> lock(mutex);
     // unknown 只推进 queued；sent/failed 推进 queued 与 unknown。
-    // message_id 只在非空时覆盖（unknown/failed 回执不带 id，不能把已有的擦掉）
+    // message_id 只在非空时写入：首段 id 放列表最前，已有的分段 id（极少数乱序到达）保留在后
     const char *sql = status == "unknown"
         ? "UPDATE affect_executions SET status=?2,"
-          " outbound_message_id=CASE WHEN ?3='' THEN outbound_message_id ELSE ?3 END"
+          " outbound_message_id=CASE WHEN ?3='' THEN outbound_message_id"
+          "   WHEN outbound_message_id='' THEN ?3 ELSE ?3||','||outbound_message_id END"
           " WHERE execution_id=?1 AND status='queued';"
         : "UPDATE affect_executions SET status=?2,"
-          " outbound_message_id=CASE WHEN ?3='' THEN outbound_message_id ELSE ?3 END"
+          " outbound_message_id=CASE WHEN ?3='' THEN outbound_message_id"
+          "   WHEN outbound_message_id='' THEN ?3 ELSE ?3||','||outbound_message_id END"
           " WHERE execution_id=?1 AND status IN ('queued','unknown');";
     sqlite3_stmt *statement = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
@@ -374,6 +376,50 @@ std::optional<ExecutionRecord> DecisionStore::findExecution(const std::string &e
     return result;
 }
 
+bool DecisionStore::appendExecutionMessageId(const std::string &executionId,
+                                             const std::string &outboundMessageId,
+                                             std::string *error)
+{
+    if (db == nullptr)
+    {
+        setError(error, "决策存储未打开");
+        return false;
+    }
+    if (executionId.empty() || outboundMessageId.empty())
+    {
+        setError(error, "execution_id/message_id 不能为空");
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(mutex);
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db,
+                           "UPDATE affect_executions SET outbound_message_id="
+                           " CASE WHEN outbound_message_id='' THEN ?2"
+                           "      WHEN instr(','||outbound_message_id||',', ','||?2||',')>0"
+                           "        THEN outbound_message_id"
+                           "      ELSE outbound_message_id||','||?2 END"
+                           " WHERE execution_id=?1;",
+                           -1, &statement, nullptr) != SQLITE_OK)
+    {
+        setError(error, std::string("分段 message_id 追加准备失败：") + sqlite3_errmsg(db));
+        return false;
+    }
+    const bool ok = bindText(statement, 1, executionId) && bindText(statement, 2, outboundMessageId);
+    if (!ok || sqlite3_step(statement) != SQLITE_DONE)
+    {
+        setError(error, std::string("分段 message_id 追加失败：") + sqlite3_errmsg(db));
+        sqlite3_finalize(statement);
+        return false;
+    }
+    sqlite3_finalize(statement);
+    if (sqlite3_changes(db) == 0)
+    {
+        setError(error, "没有该执行记录：" + executionId);
+        return false;
+    }
+    return true;
+}
+
 std::optional<ExecutionRecord> DecisionStore::findExecutionByOutboundMessageId(
     const std::string &outboundMessageId) const
 {
@@ -381,10 +427,12 @@ std::optional<ExecutionRecord> DecisionStore::findExecutionByOutboundMessageId(
         return std::nullopt;
 
     std::lock_guard<std::mutex> lock(mutex);
+    // outbound_message_id 可能是逗号列表（分段投递），任一段命中即可
     const char *sql =
         "SELECT execution_id, decision_id, created_at, status, actual_text,"
         " outbound_message_id, deviation_reason"
-        " FROM affect_executions WHERE outbound_message_id=?1"
+        " FROM affect_executions"
+        " WHERE instr(','||outbound_message_id||',', ','||?1||',')>0"
         " ORDER BY created_at DESC, execution_id DESC LIMIT 1;";
     sqlite3_stmt *statement = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)

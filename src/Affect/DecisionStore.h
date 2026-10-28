@@ -36,6 +36,11 @@ public:
     bool updateExecutionReceipt(const std::string &executionId, const std::string &status,
                                 const std::string &outboundMessageId,
                                 std::string *error = nullptr);
+    // 分段投递的追加 message_id：outbound_message_id 为逗号分隔列表（首段 + 后续段），
+    // findExecutionByOutboundMessageId 对列表中任一 ID 都能命中。不改状态
+    bool appendExecutionMessageId(const std::string &executionId,
+                                  const std::string &outboundMessageId,
+                                  std::string *error = nullptr);
 
     std::optional<DecisionRecord> findDecision(const std::string &decisionId) const;
     std::optional<ExecutionRecord> findExecution(const std::string &executionId) const;

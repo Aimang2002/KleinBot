@@ -237,8 +237,12 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 	}
 
 	// 群内容入库（T7b）：白名单群的 @ 与非 @ 消息都是群内容（超长的刷屏
-	// 分支已在上文 return，不计入库）；服务内部有开关/白名单/群聊三重门控
-	groupContext.observe(data);
+	// 分支已在上文 return，不计入库）；服务内部有开关/白名单/群聊三重门控。
+	// 例外：会被当作 #命令 处理的消息不是群聊内容，不入库也不喂话题会话
+	// （否则 "@她 #坏" 会被会话当成点名而多回一句，2026-10-28）
+	const bool command = messageClass.messageFilter(data) && messageClass.isCommand(data);
+	if (!command)
+		groupContext.observe(data);
 
 	if (!messageClass.messageFilter(data))
 	{

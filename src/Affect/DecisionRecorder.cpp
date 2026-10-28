@@ -76,6 +76,19 @@ void DecisionRecorder::onReceipt(DeliveryReceipt receipt)
     if (!enabled() || receipt.correlation_id.empty())
         return;
     std::string error;
+    // 分段投递："execution_id#序号" 只把该段的 message_id 聚合到同一条执行记录，
+    // 执行状态由首段（裸 execution_id）驱动；失败/未知的分段回执不改状态
+    const std::size_t hash = receipt.correlation_id.find('#');
+    if (hash != std::string::npos)
+    {
+        if (receipt.status == "sent" && !receipt.message_id_raw.empty())
+        {
+            const std::string executionId = receipt.correlation_id.substr(0, hash);
+            if (!store->appendExecutionMessageId(executionId, receipt.message_id_raw, &error))
+                LOG_DEBUG("分段回执未落库：" + error);
+        }
+        return;
+    }
     if (!store->updateExecutionReceipt(receipt.correlation_id, receipt.status,
                                        receipt.message_id_raw, &error))
     {

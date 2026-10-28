@@ -13,6 +13,8 @@ public:
     void registryCommand(std::unique_ptr<Command> cmd);
     // 查找并执行匹配命令，并且返回是否找到匹配
     std::optional<CommandResult> execute(const std::string &message, const CommandContext &ctx);
+    // 只判断是否命中某条命令，不执行（组合根用它把命令消息排除在群内容/话题会话之外）
+    bool matches(const std::string &message) const;
     // 获取所有帮助命令
     // std::string getAllHelp() const {};
 

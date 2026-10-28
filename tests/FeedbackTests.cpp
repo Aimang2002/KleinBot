@@ -159,6 +159,31 @@ TEST(FeedbackCommandTest, RegistryLetsAnyUserGiveFeedback)
     EXPECT_EQ(action.lastArguments["label"], "good");
     EXPECT_EQ(action.lastContext.user_id, 2U);
     EXPECT_FALSE(registry.execute("随便聊聊", ctx).has_value());
+    // matches 只判断不执行：组合根据此把命令消息排除在群内容之外
+    action.lastArguments = nlohmann::json();
+    EXPECT_TRUE(registry.matches(" #坏:太正式 "));
+    EXPECT_FALSE(registry.matches("随便聊聊"));
+    EXPECT_TRUE(action.lastArguments.empty());
+}
+
+TEST(RecordFeedbackActionTest, MatchesAnySegmentOfASplitReply)
+{
+    TemporaryDirectory directory;
+    affect::DecisionStore store(directory.path() + "/affect.db");
+    ASSERT_TRUE(store.isOpen());
+    affect::DecisionRecorder recorder(&store, [] { return 2000; });
+    const std::string older = seed(recorder, store, "at_reply", 88, 1, "111", 1500);
+    const std::string newer = seed(recorder, store, "engagement_turn", 88, 0, "999", 1900);
+    ASSERT_TRUE(store.appendExecutionMessageId(older, "112"));
+    ASSERT_TRUE(store.appendExecutionMessageId(older, "113"));
+    RecordFeedbackAction action(&store, &recorder, 10001, [] { return 2000; });
+
+    // 引用分段回复的第三段：精确命中旧的那条，而不是最近的主动轮
+    const ActionResult result = action.execute(
+        {{"label", "bad"}, {"reply_to_message_id", "113"}, {"group_id", 88}}, {10001, 0, "#坏"});
+    EXPECT_EQ(result.content.find("按最近一次回复匹配"), std::string::npos);
+    EXPECT_EQ(store.feedbackCount(store.findExecution(older)->decisionId), 1U);
+    EXPECT_EQ(store.feedbackCount(store.findExecution(newer)->decisionId), 0U);
 }
 
 // ---------- Action：定位与落库 ----------

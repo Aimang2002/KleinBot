@@ -274,6 +274,69 @@ TEST(ExecutionReceiptTest, QueuedAdvancesToSentWithMessageId)
     EXPECT_EQ(found->decisionId, decisionId);
 }
 
+TEST(ExecutionReceiptTest, SegmentReceiptsAggregateMessageIdsOnOneExecution)
+{
+    TemporaryDirectory directory;
+    affect::DecisionStore store(directory.path() + "/affect.db");
+    ASSERT_TRUE(store.isOpen());
+    affect::DecisionRecorder recorder(&store, [] { return 1; });
+    affect::ExecutionRecord execution;
+    execution.executionId = "exe-seg";
+    execution.decisionId = "dec-seg";
+    execution.status = "queued";
+    ASSERT_TRUE(recorder.recordExecution(execution));
+    DeliveryReceiptSink &sink = recorder;
+
+    // 首段驱动状态；后续段 "#n" 只聚合 message_id
+    DeliveryReceipt first;
+    first.correlation_id = "exe-seg";
+    first.status = "sent";
+    first.message_id_raw = "-100";
+    sink.onReceipt(first);
+    DeliveryReceipt second;
+    second.correlation_id = "exe-seg#1";
+    second.status = "sent";
+    second.message_id_raw = "-200";
+    sink.onReceipt(second);
+    DeliveryReceipt thirdUnknown;
+    thirdUnknown.correlation_id = "exe-seg#2";
+    thirdUnknown.status = "unknown";
+    sink.onReceipt(thirdUnknown);
+    sink.onReceipt(second); // 重复分段回执不重复追加
+
+    const auto found = store.findExecution("exe-seg");
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->status, "sent");
+    EXPECT_EQ(found->outboundMessageId, "-100,-200");
+    // 任一段的 message_id 都能定位到这条执行记录
+    EXPECT_EQ(store.findExecutionByOutboundMessageId("-100")->executionId, "exe-seg");
+    EXPECT_EQ(store.findExecutionByOutboundMessageId("-200")->executionId, "exe-seg");
+    EXPECT_FALSE(store.findExecutionByOutboundMessageId("-10").has_value()); // 不做子串匹配
+    EXPECT_FALSE(store.findExecutionByOutboundMessageId("100").has_value());
+
+    // 分段回执先于首段到达（极少数乱序）：首段 id 仍排在最前，不丢分段 id
+    affect::ExecutionRecord other = execution;
+    other.executionId = "exe-seg2";
+    ASSERT_TRUE(recorder.recordExecution(other));
+    DeliveryReceipt lateSegment;
+    lateSegment.correlation_id = "exe-seg2#1";
+    lateSegment.status = "sent";
+    lateSegment.message_id_raw = "B";
+    sink.onReceipt(lateSegment);
+    DeliveryReceipt lateFirst;
+    lateFirst.correlation_id = "exe-seg2";
+    lateFirst.status = "sent";
+    lateFirst.message_id_raw = "A";
+    sink.onReceipt(lateFirst);
+    EXPECT_EQ(store.findExecution("exe-seg2")->outboundMessageId, "A,B");
+    // 分段回执指向不存在的执行记录：静默
+    DeliveryReceipt orphan;
+    orphan.correlation_id = "missing#1";
+    orphan.status = "sent";
+    orphan.message_id_raw = "Z";
+    sink.onReceipt(orphan);
+}
+
 TEST(ExecutionReceiptTest, UnknownNeverDowngradesAndLateDefiniteReceiptUpgrades)
 {
     TemporaryDirectory directory;

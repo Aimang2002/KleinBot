@@ -6,6 +6,16 @@ void CommandRegistry::registryCommand(std::unique_ptr<Command> cmd)
     commands.push_back(std::move(cmd));
 }
 
+bool CommandRegistry::matches(const std::string &message) const
+{
+    for (const auto &c : commands)
+    {
+        if (c->canHandle(message))
+            return true;
+    }
+    return false;
+}
+
 std::optional<CommandResult> CommandRegistry::execute(const std::string &message, const CommandContext &ctx)
 {
     for (const auto &c : commands)

@@ -412,6 +412,21 @@ TEST(EngagementSessionTest, AddressPendingTriggersImmediateTurn)
     EXPECT_TRUE(harness.service->sessionOf(8823)->addressPending);
 }
 
+TEST(EngagementSessionTest, AtMentionWhileActiveIsActivityNotAddress)
+{
+    // @ 的回答由 Message 的既有路径给出；会话只记活动，不再自己也回一句（2026-10-28 修复双回复）
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    const std::size_t before = harness.submittedTurns.size();
+    harness.feed(8823, "@Klein 你觉得呢", harness.now + 5, true, true);
+    EXPECT_EQ(harness.submittedTurns.size(), before);
+    auto session = harness.service->sessionOf(8823);
+    ASSERT_TRUE(session.has_value());
+    EXPECT_FALSE(session->addressPending);
+    EXPECT_EQ(session->lastActivityTs, harness.now + 5) << "@ 仍算会话活动";
+    EXPECT_EQ(session->newMessagesSinceTurn, 1);
+}
+
 TEST(EngagementSessionTest, JudgeFuseLimitsRate)
 {
     Harness harness;
