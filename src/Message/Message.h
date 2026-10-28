@@ -106,13 +106,14 @@ private:
 	std::string textToVoice(const std::string &text);
 
 	// 把 OutboundMessage 按 message_type 路由到 send_private / send_group。
-	// withReplyContext=false 时不带引用+@（同一轮的第一条出站之后）
+	// withReplyContext=false 时不带引用+@（同一轮的第一条出站之后）。
+	// correlationId 非空时该投递要回执（R0.2）：一轮只给一条出站（主回复）带关联键
 	void dispatch(const InboundMessage &data, const OutboundMessage &msg,
-				  bool withReplyContext = true);
+				  bool withReplyContext = true, const std::string &correlationId = {});
 
-	// 文本超长自动分段发送（utf-8 安全切分）；群聊只有第一段带引用+@
+	// 文本超长自动分段发送（utf-8 安全切分）；群聊只有第一段带引用+@，也只有第一段带关联键
 	void dispatchText(const InboundMessage &data, const std::string &text,
-					  bool withReplyContext = true);
+					  bool withReplyContext = true, const std::string &correlationId = {});
 	// 在下面添加新的函数用于拓展其他内容...
 
 private:

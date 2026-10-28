@@ -29,7 +29,16 @@ public:
     bool appendExecution(const ExecutionRecord &record, std::string *error = nullptr);
     bool appendFeedback(const FeedbackRecord &record, std::string *error = nullptr);
 
+    // 出站回执回填（R0.2 / B2）：把 queued 推进到 sent/failed/unknown 并写入真实
+    // message_id。unknown 只覆盖 queued（不能把已明确的 sent/failed 退化成未知）；
+    // sent/failed 覆盖 queued 与 unknown（迟到的明确回执优先）。
+    // 返回 true = 有一行被更新；查无此 execution 或状态不允许推进时返回 false
+    bool updateExecutionReceipt(const std::string &executionId, const std::string &status,
+                                const std::string &outboundMessageId,
+                                std::string *error = nullptr);
+
     std::optional<DecisionRecord> findDecision(const std::string &decisionId) const;
+    std::optional<ExecutionRecord> findExecution(const std::string &executionId) const;
     std::vector<DecisionRecord> recentDecisions(std::size_t limit) const;
     std::size_t decisionCount() const;
     std::size_t executionCount(const std::string &decisionId) const;

@@ -50,8 +50,10 @@ public:
     // 白名单群消息入库（@ 与非 @ 都算群内容）；worker 线程调用
     void observe(const InboundMessage &message);
 
-    // Klein 自己的群聊出站入库（文本/占位符），Message::dispatch 调用
-    void recordOutbound(std::uint64_t groupId, const OutboundMessage &outbound);
+    // Klein 自己的群聊出站入库（文本/占位符），Message::dispatch 调用。
+    // correlationId：该投递的回执关联键（R0.2），回执到达后用它回填真实 message_id
+    void recordOutbound(std::uint64_t groupId, const OutboundMessage &outbound,
+                        const std::string &correlationId = {});
 
     // 被 @ 时的上下文装配：返回附在用户消息尾部的注记块；无相关内容返回空串
     std::string assemble(std::uint64_t groupId, const std::string &triggerText) const;

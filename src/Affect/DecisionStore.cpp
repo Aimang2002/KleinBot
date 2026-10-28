@@ -282,6 +282,92 @@ bool DecisionStore::appendFeedback(const FeedbackRecord &record, std::string *er
     return true;
 }
 
+bool DecisionStore::updateExecutionReceipt(const std::string &executionId,
+                                           const std::string &status,
+                                           const std::string &outboundMessageId,
+                                           std::string *error)
+{
+    if (db == nullptr)
+    {
+        setError(error, "决策存储未打开");
+        return false;
+    }
+    if (executionId.empty())
+    {
+        setError(error, "execution_id 不能为空");
+        return false;
+    }
+    if (status != "sent" && status != "failed" && status != "unknown")
+    {
+        setError(error, "回执状态只能是 sent/failed/unknown：" + status);
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex);
+    // unknown 只推进 queued；sent/failed 推进 queued 与 unknown。
+    // message_id 只在非空时覆盖（unknown/failed 回执不带 id，不能把已有的擦掉）
+    const char *sql = status == "unknown"
+        ? "UPDATE affect_executions SET status=?2,"
+          " outbound_message_id=CASE WHEN ?3='' THEN outbound_message_id ELSE ?3 END"
+          " WHERE execution_id=?1 AND status='queued';"
+        : "UPDATE affect_executions SET status=?2,"
+          " outbound_message_id=CASE WHEN ?3='' THEN outbound_message_id ELSE ?3 END"
+          " WHERE execution_id=?1 AND status IN ('queued','unknown');";
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
+    {
+        setError(error, std::string("回执更新准备失败：") + sqlite3_errmsg(db));
+        return false;
+    }
+    const bool ok = bindText(statement, 1, executionId) &&
+                    bindText(statement, 2, status) &&
+                    bindText(statement, 3, outboundMessageId);
+    if (!ok || sqlite3_step(statement) != SQLITE_DONE)
+    {
+        setError(error, std::string("回执更新失败：") + sqlite3_errmsg(db));
+        sqlite3_finalize(statement);
+        return false;
+    }
+    sqlite3_finalize(statement);
+    if (sqlite3_changes(db) == 0)
+    {
+        setError(error, "没有可推进的执行记录（不存在或状态已定）：" + executionId);
+        return false;
+    }
+    return true;
+}
+
+std::optional<ExecutionRecord> DecisionStore::findExecution(const std::string &executionId) const
+{
+    if (db == nullptr || executionId.empty())
+        return std::nullopt;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    const char *sql =
+        "SELECT execution_id, decision_id, created_at, status, actual_text,"
+        " outbound_message_id, deviation_reason"
+        " FROM affect_executions WHERE execution_id=?1 LIMIT 1;";
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
+        return std::nullopt;
+    sqlite3_bind_text(statement, 1, executionId.c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<ExecutionRecord> result;
+    if (sqlite3_step(statement) == SQLITE_ROW)
+    {
+        ExecutionRecord record;
+        record.executionId = columnText(statement, 0);
+        record.decisionId = columnText(statement, 1);
+        record.createdAt = sqlite3_column_int64(statement, 2);
+        record.status = columnText(statement, 3);
+        record.actualText = columnText(statement, 4);
+        record.outboundMessageId = columnText(statement, 5);
+        record.deviationReason = columnText(statement, 6);
+        result = std::move(record);
+    }
+    sqlite3_finalize(statement);
+    return result;
+}
+
 std::optional<DecisionRecord> DecisionStore::findDecision(const std::string &decisionId) const
 {
     if (db == nullptr || decisionId.empty())

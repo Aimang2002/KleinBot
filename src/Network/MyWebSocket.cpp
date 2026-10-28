@@ -23,6 +23,7 @@ void MyWebSocket::connectWebSocket(
     InboundMessageQueue &inboundQueue,
     OutboundMessageQueue &outboundQueue,
     WebSocketApiChannel &apiChannel,
+    DeliveryReceiptRegistry &receipts,
     const OneBotEventDecoder &eventDecoder,
     const OneBotMessageEncoder &messageEncoder,
     const std::atomic<bool> &running)
@@ -59,7 +60,8 @@ void MyWebSocket::connectWebSocket(
             LOG_INFO("WebSocket（服务器模式）连接成功！");
 
             runOneBotWebSocketSession(
-                ws, ioc, inboundQueue, outboundQueue, apiChannel, eventDecoder, messageEncoder, running);
+                ws, ioc, inboundQueue, outboundQueue, apiChannel, receipts,
+                eventDecoder, messageEncoder, running);
         }
         catch (boost::system::system_error const &se)
         {

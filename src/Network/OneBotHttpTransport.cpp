@@ -5,6 +5,7 @@
 #include "WebhookSignature.h"
 #include "WebSocketHead.h"
 #include "../Log/Log.h"
+#include "../Protocol/OneBot/OneBotMessageId.h"
 #include "../utils/Encoding.h"
 
 #include <boost/system/system_error.hpp>
@@ -59,6 +60,51 @@ void sendHttpResponse(
     beast::error_code ignoredError;
     beast::http::write(stream, response, ignoredError);
 }
+
+// 一次投递的回执只发一次：离开作用域时若还没发过，按 unknown 兜底
+// （异常路径、provider 初始化失败等都走这里，不会漏回执也不会伪造 sent）
+class ReceiptOnce
+{
+public:
+    ReceiptOnce(DeliveryReceiptSink *sink, std::string correlationId)
+        : sink(sink), correlationId(std::move(correlationId)) {}
+
+    ~ReceiptOnce()
+    {
+        if (!sent)
+            emit("unknown", "", 0, "未取得协议响应");
+    }
+
+    void emit(const char *status, std::string messageIdRaw, std::int64_t retcode,
+              std::string detail)
+    {
+        if (sent || sink == nullptr || correlationId.empty())
+        {
+            sent = true;
+            return;
+        }
+        sent = true;
+        DeliveryReceipt receipt;
+        receipt.correlation_id = correlationId;
+        receipt.status = status;
+        receipt.message_id_raw = std::move(messageIdRaw);
+        receipt.retcode = retcode;
+        receipt.detail = std::move(detail);
+        try
+        {
+            sink->onReceipt(std::move(receipt));
+        }
+        catch (const std::exception &error)
+        {
+            LOG_ERROR("投递回执处理异常：" + std::string(error.what()));
+        }
+    }
+
+private:
+    DeliveryReceiptSink *const sink;
+    const std::string correlationId;
+    bool sent = false;
+};
 }
 
 void OneBotHttpTransport::run(
@@ -67,12 +113,13 @@ void OneBotHttpTransport::run(
     OutboundMessageQueue &outboundQueue,
     const OneBotEventDecoder &eventDecoder,
     const OneBotMessageEncoder &messageEncoder,
+    DeliveryReceiptSink *receiptSink,
     const std::atomic<bool> &running)
 {
     std::atomic<bool> transportRunning{true};
     std::thread apiThread(
         runApiSender, std::cref(config), std::ref(outboundQueue),
-        std::cref(messageEncoder), std::cref(transportRunning), std::cref(running));
+        std::cref(messageEncoder), receiptSink, std::cref(transportRunning), std::cref(running));
 
     runEventServer(config, inboundQueue, eventDecoder, running);
     transportRunning.store(false);
@@ -88,6 +135,7 @@ void OneBotHttpTransport::runApiSender(
     const TransportConfig &config,
     OutboundMessageQueue &outboundQueue,
     const OneBotMessageEncoder &messageEncoder,
+    DeliveryReceiptSink *receiptSink,
     const std::atomic<bool> &transportRunning,
     const std::atomic<bool> &running)
 {
@@ -103,6 +151,8 @@ void OneBotHttpTransport::runApiSender(
 
         // 投递已离队：无论本轮请求成功与否（队列无重试），语音附件都在迭代结束时删除
         const VoiceAttachmentCleanup voiceCleanup{voiceAttachmentPath(delivery->message)};
+        // 回执（R0.2）：HTTP 是同步请求-响应，响应体就是回执；未显式回报的路径兜底 unknown
+        ReceiptOnce receipt{receiptSink, delivery->correlation_id};
 
         try
         {
@@ -160,17 +210,33 @@ void OneBotHttpTransport::runApiSender(
             if (statusCode < 200 || statusCode >= 300)
             {
                 LOG_ERROR("OneBot HTTP API返回状态码：" + std::to_string(statusCode));
+                receipt.emit("failed", "", statusCode, "HTTP " + std::to_string(statusCode));
                 continue;
             }
 
             if (!responseBody.empty())
             {
                 const nlohmann::json response = nlohmann::json::parse(responseBody);
-                if (response.value("status", "ok") != "ok" || response.value("retcode", 0) != 0)
+                const std::string status = response.value("status", "ok");
+                const std::int64_t retcode = response.value("retcode", 0);
+                if ((status != "ok" && status != "async") || retcode != 0)
                 {
                     LOG_ERROR("OneBot HTTP API返回失败，retcode=" +
                               std::to_string(response.value("retcode", -1)));
+                    receipt.emit("failed", "", retcode, "status=" + status);
                 }
+                else
+                {
+                    const nlohmann::json data = response.contains("data")
+                                                    ? response["data"]
+                                                    : nlohmann::json();
+                    receipt.emit("sent", oneBotMessageIdRaw(data), retcode, "");
+                }
+            }
+            else
+            {
+                // 2xx 但空响应体：协议端已受理但没给 message_id，按 sent（有明确受理）
+                receipt.emit("sent", "", 0, "空响应体");
             }
         }
         catch (const std::exception &error)

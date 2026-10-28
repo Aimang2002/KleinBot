@@ -172,9 +172,12 @@ private:
                              std::int64_t now, const char *source);
     void endSessionLocked(EngagementSession &session, std::int64_t now,
                           std::string reason, bool forced);
-    void deliverText(std::uint64_t groupId, const std::string &text);
+    // correlationId：回执关联键（R0.2）；投递与自消息入库共用同一个，回执到达后
+    // 执行记录推进 sent/failed/unknown、自消息补上真实 message_id
+    void deliverText(std::uint64_t groupId, const std::string &text,
+                     const std::string &correlationId = {});
     void recordEngagementSpeech(std::uint64_t groupId, const std::string &text,
-                                std::int64_t now);
+                                std::int64_t now, const std::string &correlationId = {});
     bool replyToSelf(const GroupMessageRecord &record) const;
     bool allowJudgeLocked(std::uint64_t groupId, std::int64_t now);
     // 材料装配：原文窗口（超长保头截断）+ 预算内直灌；超预算把最旧一段经

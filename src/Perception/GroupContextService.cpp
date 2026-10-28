@@ -78,7 +78,8 @@ void GroupContextService::observe(const InboundMessage &message)
         engagement->onGroupMessage(record, atMentioned);
 }
 
-void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMessage &outbound)
+void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMessage &outbound,
+                                         const std::string &correlationId)
 {
     if (!observingGroup(groupId) || store == nullptr)
         return;
@@ -87,6 +88,7 @@ void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMe
     record.groupId = groupId;
     record.userId = bot.id;
     record.nickname = bot.name;
+    record.correlationId = correlationId;
     if (const auto *text = std::get_if<TextMessage>(&outbound))
         record.text = text->content;
     else if (std::holds_alternative<ImageMessage>(outbound))

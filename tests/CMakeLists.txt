@@ -8,6 +8,7 @@ add_executable(kleinbot_tests
     ConfigTemplateTests.cpp
     ConfigWriterTests.cpp
     CurlRequestControlTests.cpp
+    DeliveryReceiptTests.cpp
     EngagementTests.cpp
     EventRoutingTests.cpp
     FsUtilTests.cpp

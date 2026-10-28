@@ -31,6 +31,9 @@ struct GroupMessageRecord
     bool isSelf = false;             // Klein 自己的出站
     std::string messageId;           // 原始 message_id（数字或字符串形态），回复链解析用
     std::string replyToMessageId;    // 被引用消息的原始 id，空为无引用
+    // 仅自消息、仅内存：出站投递的 correlation_id，回执到达后据此回填 messageId
+    // （R0.2）。不落库——重启后镜像里的自消息要么已有 messageId 要么永远没有
+    std::string correlationId;
 };
 
 // 冷启动自学习状态（每群一行；EMA/武装期/当日帽/冷却截止的持久化形态）
@@ -56,6 +59,10 @@ public:
 
     // 追加一条消息（入站或 Klein 出站），返回 seq；群超上限时淘汰最旧并同步删库
     std::int64_t append(const GroupMessageRecord &record);
+
+    // 自消息 message_id 回填（R0.2）：按 correlationId 找镜像里的自消息，补上协议端
+    // 返回的真实 message_id（镜像 + 落库行）。返回 false = 找不到（已淘汰/从未登记）
+    bool backfillMessageId(const std::string &correlationId, const std::string &messageId);
 
     // TTL/条数清理：pollingThread 周期调用；now 为 unix 秒
     void prune(std::int64_t now);

@@ -2,6 +2,7 @@
 #include "../submodules/CloudMusicID/CloudMusicID.h"
 #include "../utils/Utils.hpp"
 #include "../utils/TextSplit.h"
+#include "../utils/UniqueId.h"
 #include "../Asset/ImageAssetStore.h"
 #include "../Application/ReplyContextRouting.h"
 #include "../Application/TypingIndicator.h"
@@ -159,15 +160,32 @@ void Message::handleMessage(const InboundMessage &current_data)
 		ChatReply chatReply = this->chatService.reply(
 			current_data.user_id, conversationText, std::move(currentImage),
 			situationNote, requestContext);
+		std::string llm_text = chatReply.text;
+		// 群聊收敛契约（T7b）：模型判定无增量时输出 [不回应] 标记，静默不发
+		const bool textSuppressed = current_data.message_type == "group" &&
+			!llm_text.empty() && GroupContextService::isSuppressed(llm_text);
+		const bool textWillSend = !llm_text.empty() && !textSuppressed;
+
+		// 执行记录先落行、后投递（R0.2）：协议端答复经回执把 queued 推进为
+		// sent/failed/unknown 并回填真实 message_id，行必须先存在
+		std::string executionId;
 		if (!decisionId.empty() && this->decisionRecorder != nullptr)
 		{
+			executionId = affect::DecisionRecorder::newExecutionId();
 			affect::ExecutionRecord execution;
+			execution.executionId = executionId;
 			execution.decisionId = decisionId;
-			execution.status = (chatReply.text.empty() && chatReply.outbound_messages.empty())
+			execution.status = (!textWillSend && chatReply.outbound_messages.empty())
 				? "skipped" : "queued";
 			execution.actualText = chatReply.text;
 			this->decisionRecorder->recordExecution(std::move(execution));
 		}
+		// 回执关联键：一轮只给一条出站——有文本回复给文本（主回复），否则给第一条
+		// 出站消息。有记录器时 = execution_id；否则仅群聊需要（自消息 message_id 回填）
+		std::string correlationPending = !executionId.empty()
+			? executionId
+			: (current_data.message_type == "group" && this->groupContext != nullptr
+				? utils::uniqueId("dlv") : std::string());
 		if (!inboundAssetId.empty())
 			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
 				chatReply.user_message_id);
@@ -176,20 +194,20 @@ void Message::handleMessage(const InboundMessage &current_data)
 		bool replyContextPending = true;
 		for (const auto &outbound : chatReply.outbound_messages)
 		{
-			dispatch(current_data, outbound, replyContextPending);
+			dispatch(current_data, outbound, replyContextPending,
+					 textWillSend ? std::string() : correlationPending);
 			replyContextPending = false;
+			if (!textWillSend)
+				correlationPending.clear();
 		}
-		std::string llm_text = chatReply.text;
 
 		if (llm_text.empty())
 		{
 			return;
 		}
 
-		// 群聊收敛契约（T7b）：模型判定无增量时输出 [不回应] 标记，静默不发。
 		// 抑制一律留日志：每次沉默都是可观测的决策，prompt 分寸靠它调
-		if (current_data.message_type == "group" &&
-			GroupContextService::isSuppressed(llm_text))
+		if (textSuppressed)
 		{
 			LOG_INFO("群聊收敛：本轮判定无增量，静默不回应（群 " +
 					 std::to_string(current_data.group_id) + "）");
@@ -203,16 +221,17 @@ void Message::handleMessage(const InboundMessage &current_data)
 			if (audioPath.empty())
 			{
 				dispatch(current_data, TextMessage{"系统提示：语音模块异常。"},
-						 replyContextPending);
+						 replyContextPending, correlationPending);
 			}
 			else
 			{
-				dispatch(current_data, VoiceMessage{audioPath}, replyContextPending);
+				dispatch(current_data, VoiceMessage{audioPath}, replyContextPending,
+						 correlationPending);
 			}
 		}
 		else
 		{
-			dispatchText(current_data, llm_text, replyContextPending);
+			dispatchText(current_data, llm_text, replyContextPending, correlationPending);
 		}
 	}
 	catch (const std::exception &e)
@@ -222,15 +241,17 @@ void Message::handleMessage(const InboundMessage &current_data)
 }
 
 void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg,
-					   bool withReplyContext)
+					   bool withReplyContext, const std::string &correlationId)
 {
 	OutboundDelivery delivery;
+	delivery.correlation_id = correlationId;
 	if (data.message_type == "group")
 	{
 		delivery.target = GroupMessageTarget{std::to_string(data.group_id)};
-		// 她的出站也是群内容（T7b）：入库后她下次被 @ 能接上自己说过的话
+		// 她的出站也是群内容（T7b）：入库后她下次被 @ 能接上自己说过的话；
+		// 关联键随行入库，回执到达后补真实 message_id（R0.2）
 		if (this->groupContext != nullptr)
-			this->groupContext->recordOutbound(data.group_id, msg);
+			this->groupContext->recordOutbound(data.group_id, msg, correlationId);
 		// 指向性回复：本轮第一条出站被 @ 才引用+@ 回发起人；
 		// 同一轮后续分条/多消息是裸消息，不再重复引用（固定行为，无配置开关）
 		delivery.reply = buildReplyContext(data, options.bot, withReplyContext);
@@ -251,7 +272,7 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg,
 }
 
 void Message::dispatchText(const InboundMessage &data, const std::string &text,
-						   bool withReplyContext)
+						   bool withReplyContext, const std::string &correlationId)
 {
 	// 群消息上限 5000 字节，私聊 4096 字符。私聊整条单发（换行原样保留，
 	// 仅超协议上限才按 UTF-8 字符硬切）；群聊按"一句一条"分条（真人打字习惯：
@@ -264,9 +285,10 @@ void Message::dispatchText(const InboundMessage &data, const std::string &text,
 	for (std::size_t index = 0; index < segments.size(); ++index)
 	{
 		// 只有第一段是"回复"（引用+@）；后续段直接发到群里，
-		// 避免一次多段回答把同一条 @ 消息引用多次
+		// 避免一次多段回答把同一条 @ 消息引用多次。关联键同样只给第一段
 		dispatch(data, TextMessage{segments[index]},
-				 withReplyContext && index == 0);
+				 withReplyContext && index == 0,
+				 index == 0 ? correlationId : std::string());
 		// 分条间隔：模拟真人连发节奏，也规避实现端风控
 		if (index + 1 < segments.size())
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));

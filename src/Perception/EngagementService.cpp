@@ -4,6 +4,7 @@
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
 #include "../Tool/ToolArgumentParser.h"
+#include "../utils/UniqueId.h"
 #include "../utils/Utils.hpp"
 
 #include <algorithm>
@@ -853,6 +854,9 @@ void EngagementService::runTurn(std::uint64_t groupId)
     const std::int64_t now = clock();
     bool moodDue = false;
     std::string latestSpeech;
+    // 发言延后到锁外、且在执行记录落库之后再投递（R0.2）：回执可能很快回来，
+    // 行必须先存在；锁内只改会话状态
+    bool deliverPending = false;
     {
         std::lock_guard<std::mutex> lock(mutex);
         auto it = sessions.find(groupId);
@@ -878,8 +882,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
                     endSessionLocked(session, now, "连续沉默", false);
                 break;
             }
-            deliverText(groupId, turn.text);
-            recordEngagementSpeech(groupId, turn.text, now);
+            deliverPending = true;
             session.turnCount += 1;
             session.consecutivePasses = 0;
             if (++session.turnsSinceMood >= kMoodUpdateEveryTurns)
@@ -895,10 +898,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
         case EngagementTurn::Kind::Leave:
             LOG_INFO("会话离场：群 " + std::to_string(groupId) + "（" + turn.reason + "）");
             if (!utils::trim(turn.text).empty())
-            {
-                deliverText(groupId, turn.text);
-                recordEngagementSpeech(groupId, turn.text, now);
-            }
+                deliverPending = true;
             endSessionLocked(session, now, turn.reason.empty() ? "模型离场" : turn.reason, false);
             break;
         case EngagementTurn::Kind::Pass:
@@ -934,19 +934,28 @@ void EngagementService::runTurn(std::uint64_t groupId)
         decisionId = decisionRecorder->recordDecision(std::move(decision));
     }
 
-    // 执行记录：queued 只代表已交给出站队列，不代表协议端送达；
-    // 真实 message_id 的回执属于 B2/M3，此处先记 unknown 语义下的 queued/skipped。
+    // 执行记录：queued 只代表已交给出站队列；协议端答复到达后由回执（R0.2）把它
+    // 推进为 sent/failed/unknown 并回填真实 message_id。先落行、后投递。
+    std::string executionId;
     if (!decisionId.empty() && decisionRecorder != nullptr)
     {
         const bool hasText = !utils::trim(turn.text).empty();
-        const bool attemptedText =
-            hasText && (turn.kind == EngagementTurn::Kind::Speak ||
-                        turn.kind == EngagementTurn::Kind::Leave);
+        executionId = affect::DecisionRecorder::newExecutionId();
         affect::ExecutionRecord execution;
+        execution.executionId = executionId;
         execution.decisionId = decisionId;
-        execution.status = attemptedText && sender != nullptr ? "queued" : "skipped";
+        execution.status = deliverPending && sender != nullptr ? "queued" : "skipped";
         execution.actualText = hasText ? turn.text : std::string();
         decisionRecorder->recordExecution(std::move(execution));
+    }
+
+    if (deliverPending)
+    {
+        // 关联键 = execution_id；无记录器时也要一个键，自消息 message_id 回填靠它
+        const std::string correlationId =
+            executionId.empty() ? utils::uniqueId("dlv") : executionId;
+        deliverText(groupId, turn.text, correlationId);
+        recordEngagementSpeech(groupId, turn.text, now, correlationId);
     }
 
     // 情绪基调更新（worker 调用在锁外；每 N 个发言轮一次，失败保留旧基调）——
@@ -1059,18 +1068,21 @@ void EngagementService::endSessionLocked(EngagementSession &session, std::int64_
              std::to_string(session.groupId) + "，原因：" + reason + "，保留 2 小时");
 }
 
-void EngagementService::deliverText(std::uint64_t groupId, const std::string &text)
+void EngagementService::deliverText(std::uint64_t groupId, const std::string &text,
+                                    const std::string &correlationId)
 {
     if (sender == nullptr || utils::trim(text).empty())
         return;
     OutboundDelivery delivery;
     delivery.target = GroupMessageTarget{std::to_string(groupId)};
     delivery.message = TextMessage{utils::trim(text)};
+    delivery.correlation_id = correlationId;
     sender->deliver(std::move(delivery));
 }
 
 void EngagementService::recordEngagementSpeech(std::uint64_t groupId, const std::string &text,
-                                               std::int64_t now)
+                                               std::int64_t now,
+                                               const std::string &correlationId)
 {
     if (store == nullptr)
         return;
@@ -1081,6 +1093,7 @@ void EngagementService::recordEngagementSpeech(std::uint64_t groupId, const std:
     record.text = text;
     record.timestamp = now;
     record.isSelf = true;
+    record.correlationId = correlationId;
     store->append(record);
 }
 

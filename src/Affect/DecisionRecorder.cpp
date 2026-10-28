@@ -1,11 +1,9 @@
 #include "DecisionRecorder.h"
 
-#include <atomic>
-#include <chrono>
+#include "../Log/Log.h"
+#include "../utils/UniqueId.h"
+
 #include <ctime>
-#include <mutex>
-#include <random>
-#include <sstream>
 
 namespace affect
 {
@@ -13,23 +11,7 @@ namespace
 {
 std::string makeId(const char *prefix)
 {
-    static std::atomic<std::uint64_t> counter{0};
-    static std::mutex randomMutex;
-    static std::mt19937_64 engine(std::random_device{}());
-
-    std::uint64_t randomValue = 0;
-    {
-        std::lock_guard<std::mutex> lock(randomMutex);
-        randomValue = engine();
-    }
-    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-
-    std::ostringstream output;
-    output << prefix << '_' << std::hex
-           << static_cast<std::uint64_t>(now) << '_'
-           << counter.fetch_add(1) << '_' << randomValue;
-    return output.str();
+    return utils::uniqueId(prefix);
 }
 } // namespace
 
@@ -82,5 +64,28 @@ bool DecisionRecorder::recordFeedback(FeedbackRecord record)
     if (record.createdAt == 0)
         record.createdAt = clock();
     return store->appendFeedback(record);
+}
+
+std::string DecisionRecorder::newExecutionId()
+{
+    return makeId("exe");
+}
+
+void DecisionRecorder::onReceipt(DeliveryReceipt receipt)
+{
+    if (!enabled() || receipt.correlation_id.empty())
+        return;
+    std::string error;
+    if (!store->updateExecutionReceipt(receipt.correlation_id, receipt.status,
+                                       receipt.message_id_raw, &error))
+    {
+        // 查无此行通常是无记录器时期的投递或 correlation 不是 execution_id；
+        // 状态已定（sent 后又来 unknown）也在此静默
+        LOG_DEBUG("执行回执未落库：" + error);
+        return;
+    }
+    LOG_DEBUG("执行回执：" + receipt.correlation_id + " → " + receipt.status +
+              (receipt.message_id_raw.empty() ? std::string()
+                                              : "，message_id=" + receipt.message_id_raw));
 }
 } // namespace affect

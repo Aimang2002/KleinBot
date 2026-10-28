@@ -23,6 +23,7 @@ void MyReverseWebSocket::connectReverseWebSocket(
     InboundMessageQueue &inboundQueue,
     OutboundMessageQueue &outboundQueue,
     WebSocketApiChannel &apiChannel,
+    DeliveryReceiptRegistry &receipts,
     const OneBotEventDecoder &eventDecoder,
     const OneBotMessageEncoder &messageEncoder,
     const std::atomic<bool> &running)
@@ -136,7 +137,8 @@ void MyReverseWebSocket::connectReverseWebSocket(
             LOG_INFO("WebSocket（客户端模式）连接成功!");
 
             runOneBotWebSocketSession(
-                ws, ioc, inboundQueue, outboundQueue, apiChannel, eventDecoder, messageEncoder, running);
+                ws, ioc, inboundQueue, outboundQueue, apiChannel, receipts,
+                eventDecoder, messageEncoder, running);
         }
         catch (boost::system::system_error const &se)
         {

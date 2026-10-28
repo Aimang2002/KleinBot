@@ -7,6 +7,7 @@
 #include "Network/OneBotHttpTransport.h"
 #include "Network/TransportConfig.h"
 #include "Network/WebSocketApiChannel.h"
+#include "Network/DeliveryReceiptRegistry.h"
 #include "Protocol/OneBot/OneBotEventDecoder.h"
 #include "Protocol/OneBot/OneBotMessageEncoder.h"
 
@@ -72,6 +73,8 @@ int main(int argc, char **argv)
     OneBotEventDecoder eventDecoder;
     OneBotMessageEncoder messageEncoder;
     WebSocketApiChannel apiChannel;
+    // 契约驱动不验证回执：无 sink 的注册表（投递不带 correlation_id，编码逐字不变）
+    DeliveryReceiptRegistry receipts(nullptr);
     std::atomic<bool> running{true};
 
     sender.deliver(OutboundDelivery{
@@ -83,16 +86,17 @@ int main(int argc, char **argv)
         case TransportMode::ForwardWebSocket:
             MyWebSocket::connectWebSocket(
                 config.forwardWebSocket, inboundQueue, outboundQueue,
-                apiChannel, eventDecoder, messageEncoder, running);
+                apiChannel, receipts, eventDecoder, messageEncoder, running);
             break;
         case TransportMode::ReverseWebSocket:
             MyReverseWebSocket::connectReverseWebSocket(
                 config.reverseWebSocket, inboundQueue, outboundQueue,
-                apiChannel, eventDecoder, messageEncoder, running);
+                apiChannel, receipts, eventDecoder, messageEncoder, running);
             break;
         case TransportMode::Http:
             OneBotHttpTransport::run(
-                config, inboundQueue, outboundQueue, eventDecoder, messageEncoder, running);
+                config, inboundQueue, outboundQueue, eventDecoder, messageEncoder,
+                nullptr, running);
             break;
         }
     });

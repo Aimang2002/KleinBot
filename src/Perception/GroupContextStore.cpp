@@ -188,6 +188,51 @@ std::int64_t GroupContextStore::append(const GroupMessageRecord &record)
     return seq;
 }
 
+bool GroupContextStore::backfillMessageId(const std::string &correlationId,
+                                          const std::string &messageId)
+{
+    if (correlationId.empty() || messageId.empty())
+        return false;
+
+    std::int64_t seq = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        // 自消息总在各群镜像尾部附近：从新到旧找，命中即止
+        for (auto &[groupId, mirror] : mirrors)
+        {
+            for (auto it = mirror.rbegin(); it != mirror.rend(); ++it)
+            {
+                if (it->isSelf && it->correlationId == correlationId)
+                {
+                    it->messageId = messageId;
+                    seq = it->seq;
+                    break;
+                }
+            }
+            if (seq != 0)
+                break;
+        }
+    }
+    if (seq == 0)
+        return false;
+
+    if (db != nullptr)
+    {
+        sqlite3_stmt *statement = nullptr;
+        if (sqlite3_prepare_v2(db,
+                               "UPDATE group_messages SET message_id=?1 WHERE seq=?2;",
+                               -1, &statement, nullptr) == SQLITE_OK)
+        {
+            sqlite3_bind_text(statement, 1, messageId.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(statement, 2, seq);
+            if (sqlite3_step(statement) != SQLITE_DONE)
+                LOG_ERROR("群自消息 message_id 回填失败：" + std::string(sqlite3_errmsg(db)));
+            sqlite3_finalize(statement);
+        }
+    }
+    return true;
+}
+
 void GroupContextStore::prune(std::int64_t now)
 {
     // TTL：库级一次删除 + 镜像同步收缩。条数淘汰已在 append 内逐群处理

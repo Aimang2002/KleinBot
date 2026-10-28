@@ -1,6 +1,7 @@
 #include "OneBotWebSocketSession.h"
 #include "VoiceAttachmentCleanup.h"
 
+#include <chrono>
 #include <optional>
 
 void runOneBotWebSocketSession(
@@ -9,6 +10,7 @@ void runOneBotWebSocketSession(
     InboundMessageQueue &inboundQueue,
     OutboundMessageQueue &outboundQueue,
     WebSocketApiChannel &apiChannel,
+    DeliveryReceiptRegistry &receipts,
     const OneBotEventDecoder &eventDecoder,
     const OneBotMessageEncoder &messageEncoder,
     const std::atomic<bool> &running)
@@ -24,6 +26,8 @@ void runOneBotWebSocketSession(
     std::optional<std::string> writePayload;
     // 与 writePayload 一一对应：本次待写投递的语音附件，写入落定（成功或失败）后删除
     VoiceAttachmentCleanup voiceCleanup;
+    // 回执超时清扫节流：循环每 50ms 一拍，清扫每秒一次足够
+    auto lastReceiptSweep = std::chrono::steady_clock::now();
 
     auto startRead = [&]() {
         readCompleted = false;
@@ -52,7 +56,12 @@ void runOneBotWebSocketSession(
                 else if (auto delivery = outboundQueue.tryPop())
                 {
                     voiceCleanup.hold(voiceAttachmentPath(delivery->message));
-                    writePayload = messageEncoder.encode(*delivery).toJson().dump();
+                    OneBotAction action = messageEncoder.encode(*delivery);
+                    // 要回执的投递带 echo（R0.2）：响应帧由 receipts 兑现；
+                    // 无 correlation 的投递与历史完全一致（不带 echo）
+                    if (!delivery->correlation_id.empty())
+                        action.echo = receipts.track(delivery->correlation_id);
+                    writePayload = action.toJson().dump();
                 }
 
                 if (writePayload)
@@ -72,6 +81,12 @@ void runOneBotWebSocketSession(
 
             ioContext.run_for(std::chrono::milliseconds(50));
             ioContext.restart();
+
+            if (std::chrono::steady_clock::now() - lastReceiptSweep >= std::chrono::seconds(1))
+            {
+                receipts.sweep();
+                lastReceiptSweep = std::chrono::steady_clock::now();
+            }
 
             if (writeCompleted)
             {
@@ -98,7 +113,10 @@ void runOneBotWebSocketSession(
                 {
                     if (auto result = eventDecoder.decodeResponse(payload))
                     {
-                        apiChannel.resolve(std::move(*result));
+                        // echo 空间分段：业务投递回执（高段）先问 receipts，
+                        // 未命中才是 API 调用（低段）
+                        if (!receipts.resolve(*result))
+                            apiChannel.resolve(std::move(*result));
                     }
                     else if (auto event = eventDecoder.decode(payload))
                     {
@@ -116,12 +134,15 @@ void runOneBotWebSocketSession(
     }
     catch (...)
     {
-        // 所有未决 API 调用按失败兑现，调用方不会悬挂到超时
+        // 所有未决 API 调用按失败兑现，调用方不会悬挂到超时；
+        // 未决投递回执按 unknown 兑现（断连不等于没发出去）
         apiChannel.failAll("WebSocket 会话异常断开");
+        receipts.failAll("WebSocket 会话异常断开");
         throw;
     }
 
     apiChannel.failAll("WebSocket 会话已结束");
+    receipts.failAll("WebSocket 会话已结束");
 
     beast::error_code ignoredError;
     webSocket.next_layer().cancel(ignoredError);

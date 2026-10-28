@@ -35,6 +35,10 @@ struct OutboundDelivery
     OutboundTarget target;
     OutboundMessage message;
     std::optional<ReplyContext> reply;
+    // 回执关联键（R0.2 / B2）：非空时传输层向协议端索要答复并经 DeliveryReceiptSink
+    // 回报 sent/failed/unknown 与真实 message_id；空 = fire-and-forget（历史行为）。
+    // 约定取值 = affect 执行记录的 execution_id（无记录器时为任意进程内唯一串）
+    std::string correlation_id;
 };
 
 #endif // OUTBOUND_DELIVERY_H

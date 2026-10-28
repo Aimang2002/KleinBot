@@ -20,6 +20,9 @@
 #include "Network/HttpApiChannel.h"
 #include "Network/TransportConfig.h"
 #include "Network/WebSocketApiChannel.h"
+#include "Network/DeliveryReceiptRegistry.h"
+#include "Application/DeliveryReceiptFanout.h"
+#include "Perception/SelfMessageReceiptSink.h"
 #include "Application/CapabilityBroker.h"
 #include "Application/TypingIndicator.h"
 #include "Event/FriendRequestNotifier.h"
@@ -483,6 +486,13 @@ int main(int argc, char **argv)
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;
 	QueuedMessageSender messageSender(outboundQueue);
+	// 出站回执（R0.2 / B2）：带 correlation_id 的投递由传输层拿回协议端答复
+	// （真实 message_id / 失败 / 未知），扇出给 affect 执行记录与群自消息回填。
+	// registry 只在 WS 模式分配 echo；HTTP 模式同步拿响应体，直接回报 fanout
+	DeliveryReceiptFanout receiptFanout;
+	DeliveryReceiptRegistry deliveryReceipts(&receiptFanout);
+	if (decisionRecorder != nullptr)
+		receiptFanout.addSink(decisionRecorder.get());
 	// 推送门暂时搁置（2026-10-25）：接缝构造一并停用，恢复时移除 #if 0。
 #if 0
 	// 推送门接缝：润色器以管理员会话装配人格（与话题会话同源），失败由接缝兜底直发
@@ -539,6 +549,9 @@ int main(int argc, char **argv)
 				 std::to_string(groupListService->monitoredCount()) +
 				 " 个（群内容短时缓冲：每群300条/24小时）");
 	}
+	// 群自消息 message_id 回填（R0.2）：store 为空时 no-op
+	SelfMessageReceiptSink selfMessageReceiptSink(groupContextStore.get());
+	receiptFanout.addSink(&selfMessageReceiptSink);
 	PerceptionChannel perceptionChannel(groupListService.get(), perceptionStore.get());
 	GroupContextService groupContextService(groupListService.get(), settings.bot,
 											groupContextStore.get(), &messageSender);
@@ -643,7 +656,7 @@ int main(int argc, char **argv)
 			MyWebSocket::connectWebSocket,
 			std::cref(transportConfig.forwardWebSocket),
 			std::ref(inboundQueue), std::ref(outboundQueue),
-			std::ref(webSocketApiChannel),
+			std::ref(webSocketApiChannel), std::ref(deliveryReceipts),
 			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
 			std::cref(running));
 		break;
@@ -652,7 +665,7 @@ int main(int argc, char **argv)
 			MyReverseWebSocket::connectReverseWebSocket,
 			std::cref(transportConfig.reverseWebSocket),
 			std::ref(inboundQueue), std::ref(outboundQueue),
-			std::ref(webSocketApiChannel),
+			std::ref(webSocketApiChannel), std::ref(deliveryReceipts),
 			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
 			std::cref(running));
 		break;
@@ -662,6 +675,7 @@ int main(int argc, char **argv)
 			std::cref(transportConfig),
 			std::ref(inboundQueue), std::ref(outboundQueue),
 			std::cref(oneBotEventDecoder), std::cref(oneBotMessageEncoder),
+			static_cast<DeliveryReceiptSink *>(&receiptFanout),
 			std::cref(running));
 		break;
 	}
