@@ -39,7 +39,8 @@ public:
                      class TypingIndicator *typingIndicator = nullptr,
                      class PerceptionChannel *perception = nullptr,
                      class GroupContextService *groupContext = nullptr,
-                     affect::DecisionRecorder *decisionRecorder = nullptr);
+                     affect::DecisionRecorder *decisionRecorder = nullptr,
+                     ImageAssetStore *sharedAssets = nullptr);
 
 	/**
 	 * @brief 消息过滤：群聊触发门槛与私聊放行
@@ -144,6 +145,9 @@ private:
     class PerceptionChannel *perception = nullptr;    // 可空：未注入则无话题注记
     class GroupContextService *groupContext = nullptr; // 可空：未注入则无内容级群上下文
     affect::DecisionRecorder *decisionRecorder = nullptr; // 可空：M1 影子决策记录
+    // 可空：群资产库（ADR-019）。群聊的当前图片进这里（24h），不进发送者个人库；
+    // 工具经 ToolContext.shared_scope_id 先查它
+    ImageAssetStore *sharedAssets = nullptr;
 };
 
 #endif // MESSAGE_H

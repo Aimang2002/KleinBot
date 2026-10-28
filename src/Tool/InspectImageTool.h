@@ -10,8 +10,10 @@
 class InspectImageTool : public Tool
 {
 public:
-    InspectImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model)
-        : dock(dock), assetStore(assetStore), model(std::move(model)) {}
+    // sharedAssets 可空：群资产库（ADR-019），群聊时优先于个人库解析
+    InspectImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model,
+                     const ImageAssetStore *sharedAssets = nullptr)
+        : dock(dock), assetStore(assetStore), sharedAssets(sharedAssets), model(std::move(model)) {}
 
     std::string name() const override { return "inspect_image"; }
 
@@ -35,7 +37,7 @@ public:
 
             const auto arguments = parseToolArguments(args);
             const std::string question = arguments.value("question", "请详细分析这张图片");
-            const auto asset = resolveImageAsset(assetStore, ctx.user_id, arguments);
+            const auto asset = resolveImageAsset(assetStore, sharedAssets, ctx, arguments);
             if (!asset)
                 return {"错误：没有找到可查看的历史图片。", {}, {}};
 
@@ -69,6 +71,7 @@ public:
 private:
     Dock &dock;
     ImageAssetStore &assetStore;
+    const ImageAssetStore *sharedAssets;
     ModelEndpointOptions model;
 };
 

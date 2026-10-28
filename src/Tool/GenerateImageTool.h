@@ -11,8 +11,10 @@
 class GenerateImageTool : public Tool
 {
 public:
-    GenerateImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model)
-        : dock(dock), assetStore(assetStore), model(std::move(model)) {}
+    // sharedAssets 可空：群资产库（ADR-019），群聊时生成结果存群库（24h），不进个人库
+    GenerateImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model,
+                      ImageAssetStore *sharedAssets = nullptr)
+        : dock(dock), assetStore(assetStore), sharedAssets(sharedAssets), model(std::move(model)) {}
 
     std::string name() const override { return "generate_image"; }
 
@@ -54,8 +56,12 @@ public:
                 return {"错误：图片生成失败：" + reason + "。", {}, {}};
             }
 
-            auto asset = assetStore.saveBase64(ctx.user_id, response.image_base64,
-                                                "generated", prompt, ctx.user_message_id);
+            const bool toShared = ctx.shared_scope_id != 0 && sharedAssets != nullptr;
+            auto asset = toShared
+                ? sharedAssets->saveBase64(ctx.shared_scope_id, response.image_base64,
+                                           "generated", prompt, ctx.user_message_id)
+                : assetStore.saveBase64(ctx.user_id, response.image_base64,
+                                        "generated", prompt, ctx.user_message_id);
             if (!asset)
                 return {"错误：图片已生成，但保存失败。", {}, {}};
 
@@ -73,6 +79,7 @@ public:
 private:
     Dock &dock;
     ImageAssetStore &assetStore;
+    ImageAssetStore *sharedAssets;
     ModelEndpointOptions model;
 };
 

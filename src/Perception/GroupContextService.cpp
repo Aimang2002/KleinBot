@@ -1,5 +1,6 @@
 #include "GroupContextService.h"
 #include "EngagementService.h"
+#include "../Asset/ImageAssetStore.h"
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
 #include "../utils/Utils.hpp"
@@ -50,10 +51,24 @@ void GroupContextService::observe(const InboundMessage &message)
     record.groupId = message.group_id;
     record.userId = message.user_id;
     record.nickname = message.card.empty() ? message.nickname : message.card;
-    record.text = message.plain_text.empty() ? "[图片]" : message.plain_text;
+    record.text = message.plain_text;
     if (!message.message_data_url.empty())
-        record.text = record.text.empty() ? "[图片]"
-                                          : (message.plain_text + " [图片]");
+    {
+        // 群资产（ADR-019）：图片进群库（24h），占位符带 asset_id 让后续轮次能
+        // 识别/重发；没有群库或下载失败时退回 "[图片]"
+        std::string placeholder = "[图片]";
+        std::optional<ImageAsset> asset;
+        if (imageImporter)
+            asset = imageImporter(message.group_id, message.message_data_url, message.message_id);
+        else if (sharedAssets != nullptr)
+            asset = sharedAssets->importFromUrl(message.group_id, message.message_data_url,
+                                                message.message_id);
+        if (asset)
+            placeholder = "[image asset_id=" + asset->asset_id + " source=inbound]";
+        record.text = record.text.empty() ? placeholder : (record.text + " " + placeholder);
+    }
+    if (record.text.empty())
+        record.text = "[图片]";
     record.timestamp = message.message_timestamp > 0 ? message.message_timestamp
                                                      : std::time(nullptr);
     const bool atMentioned =
@@ -91,8 +106,16 @@ void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMe
     record.correlationId = correlationId;
     if (const auto *text = std::get_if<TextMessage>(&outbound))
         record.text = text->content;
-    else if (std::holds_alternative<ImageMessage>(outbound))
+    else if (const auto *image = std::get_if<ImageMessage>(&outbound))
+    {
+        // 她发的图若在群库里（generate_image 存的），占位符带 asset_id 以便"重发那张"
         record.text = "[图片]";
+        if (sharedAssets != nullptr && image->source == ImageMessage::Source::LocalPath)
+        {
+            if (const auto asset = sharedAssets->findByLocalPath(groupId, image->data))
+                record.text = "[image asset_id=" + asset->asset_id + " source=" + asset->source + "]";
+        }
+    }
     else if (std::holds_alternative<VoiceMessage>(outbound))
         record.text = "[语音]";
     else if (std::holds_alternative<MusicMessage>(outbound))

@@ -8,7 +8,9 @@
 class SendImageTool : public Tool
 {
 public:
-    explicit SendImageTool(ImageAssetStore &assetStore) : assetStore(assetStore) {}
+    // sharedAssets 可空：群资产库（ADR-019），群聊时优先于个人库解析
+    explicit SendImageTool(ImageAssetStore &assetStore, const ImageAssetStore *sharedAssets = nullptr)
+        : assetStore(assetStore), sharedAssets(sharedAssets) {}
 
     std::string name() const override { return "send_image"; }
 
@@ -26,7 +28,7 @@ public:
     {
         try
         {
-            const auto asset = resolveImageAsset(assetStore, ctx.user_id, parseToolArguments(args));
+            const auto asset = resolveImageAsset(assetStore, sharedAssets, ctx, parseToolArguments(args));
             if (!asset)
                 return {"错误：没有找到要发送的图片。", {}, {}};
             return {"图片已发送。",
@@ -41,6 +43,7 @@ public:
 
 private:
     ImageAssetStore &assetStore;
+    const ImageAssetStore *sharedAssets;
 };
 
 #endif // SEND_IMAGE_TOOL_H

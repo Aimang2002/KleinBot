@@ -12,7 +12,8 @@
 ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
                              std::optional<ChatImageContent> currentImage,
                              const std::string &situationNote,
-                             const std::string &requestContext)
+                             const std::string &requestContext,
+                             uint64_t sharedScopeId)
 {
     ChatReply resultReply;
     // 1. 增量追加用户这句（内存 + SQLite 同步落盘）：上下文对所有用户开放。
@@ -203,7 +204,7 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
                 else try
                 {
                     toolResult = tool->execute(
-                        call.arguments, ToolContext{user_id, userMessageId, text});
+                        call.arguments, ToolContext{user_id, userMessageId, text, sharedScopeId});
                     LOG_INFO("工具 " + call.name + " 完成，回灌 " +
                              std::to_string(toolResult.model_content.size()) + " 字符");
                 }

@@ -56,22 +56,22 @@ std::string extensionForMime(const std::string &mime)
     return ".jpg";
 }
 
-std::string makeAssetId()
+std::string makeAssetId(const std::string &prefix)
 {
     std::random_device randomSource;
     std::uniform_int_distribution<uint32_t> distribution;
     std::ostringstream stream;
-    stream << "img_" << std::hex << std::setfill('0');
+    stream << prefix << std::hex << std::setfill('0');
     for (int index = 0; index < 4; ++index)
         stream << std::setw(8) << distribution(randomSource);
     return stream.str();
 }
 
-bool assetIdExists(sqlite3 *db, const std::string &assetId)
+bool assetIdExists(sqlite3 *db, const std::string &table, const std::string &assetId)
 {
     sqlite3_stmt *statement = nullptr;
-    if (sqlite3_prepare_v2(db, "SELECT 1 FROM image_assets WHERE asset_id=? LIMIT 1;",
-                           -1, &statement, nullptr) != SQLITE_OK)
+    const std::string sql = "SELECT 1 FROM " + table + " WHERE asset_id=? LIMIT 1;";
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK)
         return true;
     sqlite3_bind_text(statement, 1, assetId.c_str(), -1, SQLITE_TRANSIENT);
     const bool exists = sqlite3_step(statement) == SQLITE_ROW;
@@ -100,8 +100,9 @@ ImageAsset readAsset(sqlite3_stmt *statement)
 }
 }
 
-ImageAssetStore::ImageAssetStore(const std::string &dbPath, const std::string &directory)
-    : assetDirectory(directory)
+ImageAssetStore::ImageAssetStore(const std::string &dbPath, const std::string &directory,
+                                 std::string tableName, std::string prefix)
+    : assetDirectory(directory), table(std::move(tableName)), idPrefix(std::move(prefix))
 {
     std::filesystem::create_directories(assetDirectory);
     utils::ensureParentDirectories(dbPath);
@@ -114,8 +115,8 @@ ImageAssetStore::ImageAssetStore(const std::string &dbPath, const std::string &d
     }
     sqlite3_busy_timeout(db, 5000);
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
-    const char *ddl =
-        "CREATE TABLE IF NOT EXISTS image_assets ("
+    const std::string ddl =
+        "CREATE TABLE IF NOT EXISTS " + table + " ("
         " asset_id TEXT PRIMARY KEY,"
         " user_id INTEGER NOT NULL,"
         " source TEXT NOT NULL,"
@@ -124,10 +125,10 @@ ImageAssetStore::ImageAssetStore(const std::string &dbPath, const std::string &d
         " prompt TEXT NOT NULL DEFAULT '',"
         " source_message_id INTEGER NOT NULL DEFAULT 0,"
         " created_at INTEGER NOT NULL);"
-        "CREATE INDEX IF NOT EXISTS idx_image_assets_user_time "
-        "ON image_assets(user_id, created_at DESC);";
+        "CREATE INDEX IF NOT EXISTS idx_" + table + "_user_time "
+        "ON " + table + "(user_id, created_at DESC);";
     char *error = nullptr;
-    if (sqlite3_exec(db, ddl, nullptr, nullptr, &error) != SQLITE_OK)
+    if (sqlite3_exec(db, ddl.c_str(), nullptr, nullptr, &error) != SQLITE_OK)
     {
         LOG_ERROR("图片资源建表失败：" + std::string(error == nullptr ? "?" : error));
         sqlite3_free(error);
@@ -232,12 +233,12 @@ std::optional<ImageAsset> ImageAssetStore::saveBytes(uint64_t user_id, const std
     constexpr int maxIdAttempts = 16;
     for (int attempt = 0; attempt < maxIdAttempts; ++attempt)
     {
-        asset.asset_id = makeAssetId();
+        asset.asset_id = makeAssetId(idPrefix);
         asset.local_path = std::filesystem::absolute(
                                std::filesystem::path(assetDirectory) /
                                (asset.asset_id + extensionForMime(mime_type)))
                                .string();
-        if (!assetIdExists(db, asset.asset_id) && !std::filesystem::exists(asset.local_path))
+        if (!assetIdExists(db, table, asset.asset_id) && !std::filesystem::exists(asset.local_path))
             break;
         asset.asset_id.clear();
         asset.local_path.clear();
@@ -263,13 +264,19 @@ std::optional<ImageAsset> ImageAssetStore::saveBytes(uint64_t user_id, const std
     return inserted;
 }
 
+std::string ImageAssetStore::selectPrefix() const
+{
+    return "SELECT asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at "
+           "FROM " + table + " ";
+}
+
 std::optional<ImageAsset> ImageAssetStore::insertAsset(const ImageAsset &asset)
 {
-    const char *sql = "INSERT INTO image_assets "
-                      "(asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at) "
-                      "VALUES (?,?,?,?,?,?,?,?);";
+    const std::string sql = "INSERT INTO " + table + " "
+                            "(asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at) "
+                            "VALUES (?,?,?,?,?,?,?,?);";
     sqlite3_stmt *statement = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK)
         return std::nullopt;
     sqlite3_bind_text(statement, 1, asset.asset_id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(statement, 2, static_cast<sqlite3_int64>(asset.user_id));
@@ -311,27 +318,105 @@ std::vector<ImageAsset> ImageAssetStore::query(const std::string &sql, uint64_t 
 
 std::optional<ImageAsset> ImageAssetStore::find(uint64_t user_id, const std::string &asset_id) const
 {
-    auto assets = query("SELECT asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at "
-                        "FROM image_assets WHERE user_id=? AND asset_id=? LIMIT 1;",
+    auto assets = query(selectPrefix() + "WHERE user_id=? AND asset_id=? LIMIT 1;",
                         user_id, asset_id, "", 1);
     return assets.empty() ? std::nullopt : std::optional<ImageAsset>(assets.front());
 }
 
 std::optional<ImageAsset> ImageAssetStore::findLatest(uint64_t user_id, const std::string &source) const
 {
-    auto assets = query("SELECT asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at "
-                        "FROM image_assets WHERE user_id=? AND source=? "
+    auto assets = query(selectPrefix() + "WHERE user_id=? AND source=? "
                         "ORDER BY created_at DESC, rowid DESC LIMIT 1;",
                         user_id, "", source, 1);
     return assets.empty() ? std::nullopt : std::optional<ImageAsset>(assets.front());
 }
 
+std::optional<ImageAsset> ImageAssetStore::findBySourceMessage(uint64_t user_id,
+                                                               int64_t source_message_id) const
+{
+    if (source_message_id == 0)
+        return std::nullopt;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (db == nullptr)
+        return std::nullopt;
+    const std::string sql = selectPrefix() + "WHERE user_id=? AND source_message_id=? "
+                            "ORDER BY created_at DESC, rowid DESC LIMIT 1;";
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK)
+        return std::nullopt;
+    sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(user_id));
+    sqlite3_bind_int64(statement, 2, source_message_id);
+    std::optional<ImageAsset> result;
+    if (sqlite3_step(statement) == SQLITE_ROW)
+        result = readAsset(statement);
+    sqlite3_finalize(statement);
+    return result;
+}
+
+std::optional<ImageAsset> ImageAssetStore::findByLocalPath(uint64_t user_id,
+                                                           const std::string &local_path) const
+{
+    if (local_path.empty())
+        return std::nullopt;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (db == nullptr)
+        return std::nullopt;
+    const std::string sql = selectPrefix() + "WHERE user_id=? AND local_path=? LIMIT 1;";
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK)
+        return std::nullopt;
+    sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(user_id));
+    sqlite3_bind_text(statement, 2, local_path.c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<ImageAsset> result;
+    if (sqlite3_step(statement) == SQLITE_ROW)
+        result = readAsset(statement);
+    sqlite3_finalize(statement);
+    return result;
+}
+
 std::vector<ImageAsset> ImageAssetStore::list(uint64_t user_id, const std::string &source, int limit) const
 {
-    return query("SELECT asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at "
-                 "FROM image_assets WHERE user_id=? AND source=? "
+    return query(selectPrefix() + "WHERE user_id=? AND source=? "
                  "ORDER BY created_at DESC, rowid DESC LIMIT ?;",
                  user_id, "", source, limit);
+}
+
+std::size_t ImageAssetStore::prune(int64_t now, int64_t ttlSeconds, int perOwnerCap)
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    if (db == nullptr)
+        return 0;
+    std::vector<ImageAsset> expired;
+    // TTL 到期的，以及每个 owner 按 created_at 倒序排在 perOwnerCap 之后的
+    const std::string sql = selectPrefix() +
+        "WHERE created_at < ?1 OR asset_id IN ("
+        "  SELECT a.asset_id FROM " + table + " a"
+        "  WHERE (SELECT COUNT(*) FROM " + table + " b WHERE b.user_id=a.user_id"
+        "         AND (b.created_at > a.created_at OR (b.created_at = a.created_at AND b.rowid > a.rowid))) >= ?2);";
+    sqlite3_stmt *select = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &select, nullptr) != SQLITE_OK)
+        return 0;
+    sqlite3_bind_int64(select, 1, now - ttlSeconds);
+    sqlite3_bind_int(select, 2, perOwnerCap);
+    while (sqlite3_step(select) == SQLITE_ROW)
+        expired.push_back(readAsset(select));
+    sqlite3_finalize(select);
+    if (expired.empty())
+        return 0;
+
+    const std::string deleteSql = "DELETE FROM " + table + " WHERE asset_id=?;";
+    for (const ImageAsset &asset : expired)
+    {
+        sqlite3_stmt *statement = nullptr;
+        if (sqlite3_prepare_v2(db, deleteSql.c_str(), -1, &statement, nullptr) == SQLITE_OK)
+        {
+            sqlite3_bind_text(statement, 1, asset.asset_id.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(statement);
+            sqlite3_finalize(statement);
+        }
+    }
+    removeFiles(expired);
+    return expired.size();
 }
 
 std::string ImageAssetStore::readBase64(const ImageAsset &asset) const
@@ -369,8 +454,8 @@ void ImageAssetStore::attachToConversation(uint64_t user_id, const std::string &
     if (db == nullptr || asset_id.empty() || message_id <= 0)
         return;
     sqlite3_stmt *statement = nullptr;
-    const char *sql = "UPDATE image_assets SET source_message_id=? WHERE user_id=? AND asset_id=?;";
-    if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
+    const std::string sql = "UPDATE " + table + " SET source_message_id=? WHERE user_id=? AND asset_id=?;";
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK)
         return;
     sqlite3_bind_int64(statement, 1, message_id);
     sqlite3_bind_int64(statement, 2, static_cast<sqlite3_int64>(user_id));
@@ -395,7 +480,8 @@ void ImageAssetStore::clearUser(uint64_t user_id)
         return;
     std::vector<ImageAsset> assets;
     sqlite3_stmt *select = nullptr;
-    if (sqlite3_prepare_v2(db, "SELECT asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at FROM image_assets WHERE user_id=?;", -1, &select, nullptr) == SQLITE_OK)
+    const std::string selectSql = selectPrefix() + "WHERE user_id=?;";
+    if (sqlite3_prepare_v2(db, selectSql.c_str(), -1, &select, nullptr) == SQLITE_OK)
     {
         sqlite3_bind_int64(select, 1, static_cast<sqlite3_int64>(user_id));
         while (sqlite3_step(select) == SQLITE_ROW)
@@ -403,7 +489,8 @@ void ImageAssetStore::clearUser(uint64_t user_id)
     }
     sqlite3_finalize(select);
     sqlite3_stmt *deleteStatement = nullptr;
-    if (sqlite3_prepare_v2(db, "DELETE FROM image_assets WHERE user_id=?;", -1, &deleteStatement, nullptr) == SQLITE_OK)
+    const std::string deleteSql = "DELETE FROM " + table + " WHERE user_id=?;";
+    if (sqlite3_prepare_v2(db, deleteSql.c_str(), -1, &deleteStatement, nullptr) == SQLITE_OK)
     {
         sqlite3_bind_int64(deleteStatement, 1, static_cast<sqlite3_int64>(user_id));
         sqlite3_step(deleteStatement);
@@ -419,9 +506,8 @@ void ImageAssetStore::removeByConversationFrom(uint64_t user_id, int64_t first_m
         return;
     std::vector<ImageAsset> assets;
     sqlite3_stmt *select = nullptr;
-    const char *selectSql = "SELECT asset_id,user_id,source,local_path,mime_type,prompt,source_message_id,created_at "
-                            "FROM image_assets WHERE user_id=? AND source_message_id>=?;";
-    if (sqlite3_prepare_v2(db, selectSql, -1, &select, nullptr) == SQLITE_OK)
+    const std::string selectSql = selectPrefix() + "WHERE user_id=? AND source_message_id>=?;";
+    if (sqlite3_prepare_v2(db, selectSql.c_str(), -1, &select, nullptr) == SQLITE_OK)
     {
         sqlite3_bind_int64(select, 1, static_cast<sqlite3_int64>(user_id));
         sqlite3_bind_int64(select, 2, first_message_id);
@@ -430,8 +516,8 @@ void ImageAssetStore::removeByConversationFrom(uint64_t user_id, int64_t first_m
     }
     sqlite3_finalize(select);
     sqlite3_stmt *deleteStatement = nullptr;
-    const char *deleteSql = "DELETE FROM image_assets WHERE user_id=? AND source_message_id>=?;";
-    if (sqlite3_prepare_v2(db, deleteSql, -1, &deleteStatement, nullptr) == SQLITE_OK)
+    const std::string deleteSql = "DELETE FROM " + table + " WHERE user_id=? AND source_message_id>=?;";
+    if (sqlite3_prepare_v2(db, deleteSql.c_str(), -1, &deleteStatement, nullptr) == SQLITE_OK)
     {
         sqlite3_bind_int64(deleteStatement, 1, static_cast<sqlite3_int64>(user_id));
         sqlite3_bind_int64(deleteStatement, 2, first_message_id);

@@ -148,7 +148,7 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 				   PerceptionChannel &perception, GroupContextStore *groupContext,
 				   GroupListService *groupList,
 				   GroupContextService &groupContextService,
-				   EngagementService &engagement,
+				   EngagementService &engagement, ImageAssetStore &groupAssets,
 				   uint64_t managerId, const std::atomic<bool> &running)
 {
 	while (running.load())
@@ -200,6 +200,8 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 		// 群内容库 TTL 清理（T7b）：删除 24h 前的消息行（镜像+磁盘）；关闭时无库
 		if (groupContext != nullptr)
 			groupContext->prune(nowSeconds());
+		// 群资产库清理（ADR-019）：与群内容缓冲同规则——24h TTL + 每群 300 张，文件一并删
+		groupAssets.prune(nowSeconds(), 24 * 60 * 60, 300);
 		// 群列表刷新（T7c）：OneBot 就绪后拉取，失败冷却重试；关闭时无服务
 		if (groupList != nullptr)
 			groupList->poll(static_cast<std::int64_t>(now));
@@ -403,6 +405,12 @@ int main(int argc, char **argv)
 		}
 	}
 	ImageAssetStore imageAssetStore(dbPath, settings.storage.imageAssets);
+	// 群资产库（ADR-019）：同一实现的第二个实例——表 group_image_assets、id 前缀 gimg_、
+	// owner=群号、文件在 image_assets/group/。群里的图片（任何人发的、她生成的）只在
+	// 这里存 24h/每群 300 张，随 pollingThread 清理；永不进个人库。恒构造：任何群的 @
+	// 回复都需要它，不依赖观察通道开关
+	ImageAssetStore groupImageAssets(dbPath, settings.storage.imageAssets + "/group",
+									 "group_image_assets", "gimg_");
 	ReminderStore reminderStore(dbPath);
 	// 构造即重建内存队列：24 小时内漏触发的提醒会补发，超窗的滚动或丢弃
 	ReminderService reminderService(reminderStore);
@@ -469,9 +477,11 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<GetTimeTool>());
 	tools.registerTool(std::make_unique<ActionTool>(getCurrentModelAction));
 	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
-	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore, settings.models.drawing));
-	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore, settings.models.vision));
-	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore));
+	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore, settings.models.drawing,
+														   &groupImageAssets));
+	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore, settings.models.vision,
+														  &groupImageAssets));
+	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore, &groupImageAssets));
 	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
 	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
 	SetReminderAction setReminderAction(reminderService);
@@ -568,6 +578,7 @@ int main(int argc, char **argv)
 	groupContextService.setSummarizer([&chatService](const std::string &systemPrompt,
 													 const std::string &userPrompt)
 		{ return chatService.buildOnce(systemPrompt, userPrompt); });
+	groupContextService.setSharedAssets(&groupImageAssets);
 	// 话题会话（意志层 v2）：每群至多一个存活会话，激活→轮次→保留 2h；
 	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=judge/压缩），未配管理员
 	// 则无主模型、跟进自动停摆（与主动发言同一底线）
@@ -612,7 +623,7 @@ int main(int argc, char **argv)
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, settings.models.vision,
 		globalVoice, &typingIndicator, &perceptionChannel, &groupContextService,
-		decisionRecorder.get());
+		decisionRecorder.get(), &groupImageAssets);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,
@@ -656,7 +667,7 @@ int main(int argc, char **argv)
 		std::to_string(settings.messageExecution.initialWorkerThreads) +
 		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
 		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), groupListService.get(), std::ref(groupContextService), std::ref(engagementService), settings.bot.managerId, std::cref(running));
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), groupListService.get(), std::ref(groupContextService), std::ref(engagementService), std::ref(groupImageAssets), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)

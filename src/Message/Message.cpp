@@ -24,12 +24,13 @@ Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatS
                  ModelEndpointOptions visionModel, bool &globalVoice,
                  TypingIndicator *typingIndicator, PerceptionChannel *perception,
                  GroupContextService *groupContext,
-                 affect::DecisionRecorder *decisionRecorder)
+                 affect::DecisionRecorder *decisionRecorder,
+                 ImageAssetStore *sharedAssets)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry), voice(voice),
       options(std::move(options)), visionModel(std::move(visionModel)),
       global_Voice(globalVoice), typingIndicator(typingIndicator), perception(perception),
-      groupContext(groupContext), decisionRecorder(decisionRecorder)
+      groupContext(groupContext), decisionRecorder(decisionRecorder), sharedAssets(sharedAssets)
 {
 }
 
@@ -80,13 +81,29 @@ void Message::handleMessage(const InboundMessage &current_data)
 		std::string conversationText = current_data.plain_text;
 		std::string inboundAssetId;
 		std::optional<ChatImageContent> currentImage;
+		const bool isGroup = current_data.message_type == "group";
 		if (!current_data.message_data_url.empty())
 		{
-			auto asset = this->imageAssetStore.importFromUrl(current_data.user_id,
-				current_data.message_data_url, 0);
+			std::optional<ImageAsset> asset;
+			if (isGroup && this->sharedAssets != nullptr)
+			{
+				// 群聊（ADR-019）：图片进群资产库（24h，群内任何人可引用），不进发送者
+				// 个人库。观察路径通常已先入库，按消息 ID 复用，避免重复下载
+				asset = this->sharedAssets->findBySourceMessage(current_data.group_id,
+					current_data.message_id);
+				if (!asset)
+					asset = this->sharedAssets->importFromUrl(current_data.group_id,
+						current_data.message_data_url, current_data.message_id);
+			}
+			else
+			{
+				asset = this->imageAssetStore.importFromUrl(current_data.user_id,
+					current_data.message_data_url, 0);
+				if (asset)
+					inboundAssetId = asset->asset_id; // 仅个人库资产挂到会话消息上
+			}
 			if (asset)
 			{
-				inboundAssetId = asset->asset_id;
 				if (!conversationText.empty())
 					conversationText += "\n";
 				conversationText += "[image asset_id=" + asset->asset_id + " source=inbound]";
@@ -163,9 +180,10 @@ void Message::handleMessage(const InboundMessage &current_data)
 		// 私聊 LLM 调用前触发"正在输入"（能力位门控在 TypingIndicator 内部，fire-and-forget）
 		if (typingIndicator != nullptr && current_data.message_type != "group")
 			typingIndicator->begin(current_data.user_id);
+		// 共享作用域（ADR-019）：群聊传群号，图片类工具据此先查群资产库
 		ChatReply chatReply = this->chatService.reply(
 			current_data.user_id, conversationText, std::move(currentImage),
-			situationNote, requestContext);
+			situationNote, requestContext, isGroup ? current_data.group_id : 0);
 		std::string llm_text = chatReply.text;
 		// 群聊收敛契约（T7b）：模型判定无增量时输出 [不回应] 标记，静默不发
 		const bool textSuppressed = current_data.message_type == "group" &&

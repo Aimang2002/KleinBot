@@ -11,6 +11,10 @@ struct ToolContext
     uint64_t user_id = 0;
     int64_t user_message_id = 0;
     std::string user_text;
+    // 共享上下文作用域（ADR-019）：群聊时为群号，私聊/无为 0。
+    // 图片类工具据此先查该作用域的短时资产库（24h），再回退 user_id 的个人永久库；
+    // 生成结果在作用域非 0 时存进作用域库，不进个人库
+    uint64_t shared_scope_id = 0;
 };
 
 #endif // TOOL_CONTEXT_H

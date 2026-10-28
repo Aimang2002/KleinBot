@@ -19,17 +19,20 @@
 #include "GroupContextStore.h"
 #include "GroupListService.h"
 #include "../Application/BotIdentity.h"
+#include "../Asset/ImageAsset.h"
 #include "../Port/InboundMessage.h"
 #include "../Port/OutboundMessage.h"
 #include "../Port/MessageSenderPort.h"
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
 class EngagementService;
+class ImageAssetStore;
 
 class GroupContextService
 {
@@ -46,6 +49,14 @@ public:
     void setSummarizer(Summarizer summarizer) { this->summarizer = std::move(summarizer); }
     // 话题会话服务（组合根注入；观察入库/@ 激活/出站活动都喂给它）
     void setEngagement(EngagementService *engagement) { this->engagement = engagement; }
+    // 群资产库（ADR-019）：入站图片在此入库，缓冲文本写 [image asset_id=…] 占位符而非
+    // "[图片]"；出站生成图按本地路径反查占位符。可空 = 维持旧占位符行为
+    void setSharedAssets(ImageAssetStore *assets) { this->sharedAssets = assets; }
+    // 图片导入 seam（默认走 sharedAssets->importFromUrl；测试注入 fake 免网络）
+    using ImageImporter = std::function<std::optional<ImageAsset>(std::uint64_t groupId,
+                                                                   const std::string &url,
+                                                                   std::int64_t messageId)>;
+    void setImageImporter(ImageImporter importer) { this->imageImporter = std::move(importer); }
 
     // 白名单群消息入库（@ 与非 @ 都算群内容）；worker 线程调用
     void observe(const InboundMessage &message);
@@ -88,6 +99,8 @@ private:
     MessageSenderPort *const sender;
     Summarizer summarizer;
     EngagementService *engagement = nullptr;
+    ImageAssetStore *sharedAssets = nullptr;
+    ImageImporter imageImporter;
 };
 
 #endif // GROUP_CONTEXT_SERVICE_H
