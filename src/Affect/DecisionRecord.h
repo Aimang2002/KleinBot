@@ -44,7 +44,8 @@ struct FeedbackRecord
     std::string feedbackId;
     std::string decisionId;
     std::int64_t createdAt = 0;
-    std::string source; // explicit_reply / mention / manual / none
+    std::string source; // explicit_reply / mention / manual_admin / manual_user / none
+                        // （manual_* 为 #好/#坏 人工反馈，按标注人分管理员与网友，R0.3）
     std::string status;
     double confidence = 0.0;
     std::string evidenceJson = "{}";

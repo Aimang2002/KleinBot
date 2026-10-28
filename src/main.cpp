@@ -56,6 +56,8 @@
 #include "Action/VoiceModeAction.h"
 #include "Action/AdminControlAction.h"
 #include "Command/AdminCommand.h"
+#include "Command/FeedbackCommand.h"
+#include "Action/RecordFeedbackAction.h"
 #include "Command/GeneratePictureCommand.h"
 #include "Command/HelpCommand.h"
 #include "Command/ModelListCommand.h"
@@ -533,6 +535,10 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));
 	commandRegistry.registryCommand(std::make_unique<RemoveContextCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
+	// 人工反馈 #好/#坏（R0.3，所有人可用）：affect 关闭时 store/recorder 为空，命令回"未启用"
+	RecordFeedbackAction recordFeedbackAction(decisionStore.get(), decisionRecorder.get(),
+											  settings.bot.managerId);
+	commandRegistry.registryCommand(std::make_unique<FeedbackCommand>(recordFeedbackAction));
 	// 观察通道状态与群列表（唯一真值在数据库，见 GroupListService）：
 	// 总开关与监控群集都是运行时状态，面板改动即时生效、无需重启；
 	// 状态服务恒构造（群列表选择器在功能关闭时也要可用）

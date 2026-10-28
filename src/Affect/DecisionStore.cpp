@@ -337,6 +337,22 @@ bool DecisionStore::updateExecutionReceipt(const std::string &executionId,
     return true;
 }
 
+namespace
+{
+ExecutionRecord readExecution(sqlite3_stmt *statement)
+{
+    ExecutionRecord record;
+    record.executionId = columnText(statement, 0);
+    record.decisionId = columnText(statement, 1);
+    record.createdAt = sqlite3_column_int64(statement, 2);
+    record.status = columnText(statement, 3);
+    record.actualText = columnText(statement, 4);
+    record.outboundMessageId = columnText(statement, 5);
+    record.deviationReason = columnText(statement, 6);
+    return record;
+}
+} // namespace
+
 std::optional<ExecutionRecord> DecisionStore::findExecution(const std::string &executionId) const
 {
     if (db == nullptr || executionId.empty())
@@ -353,17 +369,59 @@ std::optional<ExecutionRecord> DecisionStore::findExecution(const std::string &e
     sqlite3_bind_text(statement, 1, executionId.c_str(), -1, SQLITE_TRANSIENT);
     std::optional<ExecutionRecord> result;
     if (sqlite3_step(statement) == SQLITE_ROW)
-    {
-        ExecutionRecord record;
-        record.executionId = columnText(statement, 0);
-        record.decisionId = columnText(statement, 1);
-        record.createdAt = sqlite3_column_int64(statement, 2);
-        record.status = columnText(statement, 3);
-        record.actualText = columnText(statement, 4);
-        record.outboundMessageId = columnText(statement, 5);
-        record.deviationReason = columnText(statement, 6);
-        result = std::move(record);
-    }
+        result = readExecution(statement);
+    sqlite3_finalize(statement);
+    return result;
+}
+
+std::optional<ExecutionRecord> DecisionStore::findExecutionByOutboundMessageId(
+    const std::string &outboundMessageId) const
+{
+    if (db == nullptr || outboundMessageId.empty())
+        return std::nullopt;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    const char *sql =
+        "SELECT execution_id, decision_id, created_at, status, actual_text,"
+        " outbound_message_id, deviation_reason"
+        " FROM affect_executions WHERE outbound_message_id=?1"
+        " ORDER BY created_at DESC, execution_id DESC LIMIT 1;";
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
+        return std::nullopt;
+    sqlite3_bind_text(statement, 1, outboundMessageId.c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<ExecutionRecord> result;
+    if (sqlite3_step(statement) == SQLITE_ROW)
+        result = readExecution(statement);
+    sqlite3_finalize(statement);
+    return result;
+}
+
+std::optional<ExecutionRecord> DecisionStore::latestExecution(std::uint64_t groupId,
+                                                              std::uint64_t userId,
+                                                              std::int64_t since) const
+{
+    if (db == nullptr)
+        return std::nullopt;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    // 群：按群匹配（@ 回复与主动轮的 user_id 不同，只看群）；私聊：group_id=0 且本人
+    const char *sql =
+        "SELECT e.execution_id, e.decision_id, e.created_at, e.status, e.actual_text,"
+        " e.outbound_message_id, e.deviation_reason"
+        " FROM affect_executions e JOIN affect_decisions d ON d.decision_id=e.decision_id"
+        " WHERE e.created_at>=?3 AND e.status<>'skipped'"
+        " AND ((?1<>0 AND d.group_id=?1) OR (?1=0 AND d.group_id=0 AND d.user_id=?2))"
+        " ORDER BY e.created_at DESC, e.execution_id DESC LIMIT 1;";
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
+        return std::nullopt;
+    sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(groupId));
+    sqlite3_bind_int64(statement, 2, static_cast<sqlite3_int64>(userId));
+    sqlite3_bind_int64(statement, 3, since);
+    std::optional<ExecutionRecord> result;
+    if (sqlite3_step(statement) == SQLITE_ROW)
+        result = readExecution(statement);
     sqlite3_finalize(statement);
     return result;
 }
@@ -447,6 +505,37 @@ std::size_t DecisionStore::executionCount(const std::string &decisionId) const
         count = static_cast<std::size_t>(sqlite3_column_int64(statement, 0));
     sqlite3_finalize(statement);
     return count;
+}
+
+std::vector<FeedbackRecord> DecisionStore::feedbackFor(const std::string &decisionId) const
+{
+    std::vector<FeedbackRecord> result;
+    if (db == nullptr || decisionId.empty())
+        return result;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT feedback_id, decision_id, created_at, source, status,"
+                           " confidence, evidence_json FROM affect_feedback"
+                           " WHERE decision_id=?1 ORDER BY created_at ASC, feedback_id ASC;",
+                           -1, &statement, nullptr) != SQLITE_OK)
+        return result;
+    sqlite3_bind_text(statement, 1, decisionId.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(statement) == SQLITE_ROW)
+    {
+        FeedbackRecord record;
+        record.feedbackId = columnText(statement, 0);
+        record.decisionId = columnText(statement, 1);
+        record.createdAt = sqlite3_column_int64(statement, 2);
+        record.source = columnText(statement, 3);
+        record.status = columnText(statement, 4);
+        record.confidence = sqlite3_column_double(statement, 5);
+        record.evidenceJson = columnText(statement, 6);
+        result.push_back(std::move(record));
+    }
+    sqlite3_finalize(statement);
+    return result;
 }
 
 std::size_t DecisionStore::feedbackCount(const std::string &decisionId) const

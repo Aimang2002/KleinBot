@@ -39,10 +39,20 @@ public:
 
     std::optional<DecisionRecord> findDecision(const std::string &decisionId) const;
     std::optional<ExecutionRecord> findExecution(const std::string &executionId) const;
+
+    // 反馈定位（R0.3）：按协议端消息 ID 找执行记录（引用回复她的消息时）；
+    // 找不到时按"该群 / 该私聊用户最近一次非 skipped 执行（created_at ≥ since）"兜底。
+    // groupId≠0 按群匹配（忽略 userId）；groupId=0 按私聊用户匹配
+    std::optional<ExecutionRecord> findExecutionByOutboundMessageId(
+        const std::string &outboundMessageId) const;
+    std::optional<ExecutionRecord> latestExecution(std::uint64_t groupId, std::uint64_t userId,
+                                                   std::int64_t since) const;
     std::vector<DecisionRecord> recentDecisions(std::size_t limit) const;
     std::size_t decisionCount() const;
     std::size_t executionCount(const std::string &decisionId) const;
     std::size_t feedbackCount(const std::string &decisionId) const;
+    // 某决策的全部反馈（created_at 升序）；评测/反思与测试读回用
+    std::vector<FeedbackRecord> feedbackFor(const std::string &decisionId) const;
 
 private:
     sqlite3 *db = nullptr;
