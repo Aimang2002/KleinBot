@@ -604,8 +604,18 @@ int main(int argc, char **argv)
 				requestModel.api_standard = vision.apiStandard;
 				const VisionResponse response = dock.RequestVision(
 					requestModel, vision.model, GlanceService::visionPrompt(hint), base64);
-				if (response.cancelled || response.code != 200)
+				if (response.cancelled)
 					return {};
+				if (response.code != 200)
+				{
+					// 失败原因进日志（生产只留 WARNING+），否则排障只能看到"无结果"
+					LOG_WARNING("群聊瞥视视觉调用失败：HTTP " + std::to_string(response.code) +
+								(response.error_message.empty() ? "" : "，" + response.error_message) +
+								"（" + asset.asset_id + "）");
+					return {};
+				}
+				if (response.content.empty() && !response.refusal.empty())
+					LOG_WARNING("群聊瞥视视觉拒绝：" + response.refusal + "（" + asset.asset_id + "）");
 				return response.content;
 			});
 	}
