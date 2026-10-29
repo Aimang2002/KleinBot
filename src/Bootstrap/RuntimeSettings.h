@@ -11,6 +11,7 @@
 #include "../ModelApiCaller/ModelEndpointOptions.h"
 #include "../ModelApiCaller/Voice/VoiceOptions.h"
 #include "../Network/TransportConfig.h"
+#include "../Perception/GlanceOptions.h"
 #include "../Push/PushSettings.h"
 #include "../WebFetch/WebFetchOptions.h"
 #include "../WebSearch/WebSearchOptions.h"
@@ -52,6 +53,7 @@ struct RuntimeSettings
     VoiceOptions voice;
     MemoryOptions memory;
     AffectSettings affect;
+    GlanceOptions glance;
     WebSearchOptions webSearch;
     WebFetchOptions webFetch;
     MessageOptions message;

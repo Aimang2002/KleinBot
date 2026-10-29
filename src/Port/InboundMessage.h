@@ -19,6 +19,13 @@ struct InboundMessage
     std::string raw_message;
     std::string plain_text;
     std::string message_data_url;
+    // 零成本表情信号（R1.1）：image 段 data.sub_type==1 或 data.summary 非空视为表情包
+    // 形态发送；summary 原样保存（如 "[动画表情]"）。与 message_data_url 同取最后一个 image 段
+    bool image_is_sticker = false;
+    std::string image_summary;
+    // mface 段的 data.summary（如 "[狗头]"）与 face 段的 "face:<id>"，按出现顺序。
+    // 只有群观察路径消费（拼成 [表情 …] 进群缓冲），私聊路径不读
+    std::vector<std::string> face_summaries;
 
     // 入站 @ 的结构化记录：at 段的 qq 列表（"all" 广播不含 bot 个人，不记录）。
     // 替代旧 raw_message 的 CQ:at 字符串匹配——群聊触发门槛与指向性回复都以它为准

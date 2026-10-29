@@ -13,6 +13,7 @@ add_executable(kleinbot_tests
     EventRoutingTests.cpp
     FeedbackTests.cpp
     FsUtilTests.cpp
+    GlanceTests.cpp
     GroupAssetTests.cpp
     GroupContextTests.cpp
     GroupListTests.cpp

@@ -399,3 +399,40 @@ TEST(GroupContextStoreTest, EngagementColdRoundtripAndReopen)
         EXPECT_EQ(reloaded[77002].coldToday, 0) << "未写字段按默认值覆盖";
     }
 }
+
+// R1.1 瞥视写回的存储接缝：updateText/findText 改镜像 + 落库，重开后持久
+TEST(GroupContextStoreTest, UpdateTextAndFindTextRoundtripAndPersist)
+{
+    TemporaryDirectory temporaryDirectory;
+    const std::string dbPath = temporaryDirectory.path() + "/conversation.db";
+    std::int64_t imageSeq = 0;
+    std::int64_t otherSeq = 0;
+    {
+        GroupContextStore store(dbPath);
+        ASSERT_TRUE(store.isOpen());
+        otherSeq = store.append(record(8823, 10, "小白", "前一条", 1000));
+        imageSeq = store.append(record(8823, 20, "小黑", "看 [image asset_id=gimg_a source=inbound]", 1001));
+        store.append(record(9001, 30, "路人", "别的群", 1002));
+
+        ASSERT_TRUE(store.findText(8823, imageSeq).has_value());
+        EXPECT_EQ(*store.findText(8823, imageSeq), "看 [image asset_id=gimg_a source=inbound]");
+        EXPECT_FALSE(store.findText(8823, 424242).has_value());
+        EXPECT_FALSE(store.findText(9001, imageSeq).has_value()) << "seq 属于别的群";
+
+        EXPECT_TRUE(store.updateText(8823, imageSeq, "看 [image asset_id=gimg_a source=inbound | 照片：猫]"));
+        EXPECT_FALSE(store.updateText(8823, 424242, "不存在"));
+        EXPECT_FALSE(store.updateText(7777, imageSeq, "群不存在"));
+
+        const auto snapshot = store.snapshot(8823);
+        ASSERT_EQ(snapshot.size(), 2U);
+        EXPECT_EQ(snapshot[0].text, "前一条") << "只改目标 seq";
+        EXPECT_EQ(snapshot[1].text, "看 [image asset_id=gimg_a source=inbound | 照片：猫]");
+        EXPECT_EQ(snapshot[1].nickname, "小黑") << "其余字段不动";
+    }
+    {
+        GroupContextStore reopened(dbPath);
+        EXPECT_EQ(reopened.findText(8823, imageSeq).value_or(""),
+                  "看 [image asset_id=gimg_a source=inbound | 照片：猫]");
+        EXPECT_EQ(reopened.findText(8823, otherSeq).value_or(""), "前一条");
+    }
+}

@@ -121,6 +121,100 @@ TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)
     EXPECT_TRUE(containsChange(diff, "affect.enabled", ConfigChangeImpact::Restart));
 }
 
+// R1.1 群聊瞥视配置节：缺省默认值、解析、越界回默认 + 诊断、Restart 级
+TEST(ConfigLoaderGlanceTest, DefaultsWhenSectionMissing)
+{
+    ConfigLoader loader;
+    const ConfigLoadResult loaded = loader.loadText(validConfig);
+    ASSERT_TRUE(loaded.canStart());
+    ASSERT_NE(loaded.config, nullptr);
+    EXPECT_FALSE(loaded.config->glance.enabled);
+    EXPECT_EQ(loaded.config->glance.perGroupPerMinute, 6);
+}
+
+TEST(ConfigLoaderGlanceTest, ParsesSectionAndClassifiesRestart)
+{
+    ConfigLoader loader;
+    const ConfigLoadResult loaded = loader.loadText(R"({
+        "schema_version": 1,
+        "bot": {"id": 10001, "manager_id": 10002, "name": "Klein"},
+        "chat": {"default_model": "test-model"},
+        "models": {"registry_path": "ModelsName.json"},
+        "glance": {"enabled": true, "per_group_per_minute": 12},
+        "communication": {
+            "protocol": {"type": "onebot"},
+            "active_transport": "local",
+            "transports": {
+                "local": {
+                    "type": "reverse_websocket",
+                    "bind": "127.0.0.1",
+                    "port": 8600
+                }
+            }
+        }
+    })");
+    ASSERT_TRUE(loaded.canStart());
+    ASSERT_NE(loaded.config, nullptr);
+    EXPECT_TRUE(loaded.config->glance.enabled);
+    EXPECT_EQ(loaded.config->glance.perGroupPerMinute, 12);
+    for (const ConfigDiagnostic &diagnostic : loaded.diagnostics)
+        EXPECT_EQ(diagnostic.path.rfind("glance", 0), std::string::npos)
+            << "合法 glance 节不应产生诊断：" << diagnostic.path << " " << diagnostic.message;
+
+    SchemaConfig candidate = *loaded.config;
+    candidate.glance.enabled = false;
+    candidate.glance.perGroupPerMinute = 3;
+    const ConfigDiff diff = compareConfig(*loaded.config, candidate);
+    EXPECT_EQ(diff.size(), 2U);
+    EXPECT_TRUE(containsChange(diff, "glance.enabled", ConfigChangeImpact::Restart));
+    EXPECT_TRUE(containsChange(diff, "glance.per_group_per_minute", ConfigChangeImpact::Restart));
+}
+
+TEST(ConfigLoaderGlanceTest, OutOfRangeBudgetFallsBackToDefaultWithDiagnostic)
+{
+    for (const char *value : {"0", "61", "-3"})
+    {
+        ConfigLoader loader;
+        const std::string text = std::string(R"({
+            "schema_version": 1,
+            "bot": {"id": 10001, "manager_id": 10002, "name": "Klein"},
+            "chat": {"default_model": "test-model"},
+            "models": {"registry_path": "ModelsName.json"},
+            "glance": {"enabled": true, "per_group_per_minute": )") + value + R"(, "extra": 1},
+            "communication": {
+                "protocol": {"type": "onebot"},
+                "active_transport": "local",
+                "transports": {
+                    "local": {
+                        "type": "reverse_websocket",
+                        "bind": "127.0.0.1",
+                        "port": 8600
+                    }
+                }
+            }
+        })";
+        const ConfigLoadResult loaded = loader.loadText(text);
+        ASSERT_TRUE(loaded.canStart()) << value;
+        ASSERT_NE(loaded.config, nullptr);
+        EXPECT_TRUE(loaded.config->glance.enabled);
+        EXPECT_EQ(loaded.config->glance.perGroupPerMinute, 6) << value;
+        bool rangeDiagnostic = false;
+        bool unknownDiagnostic = false;
+        for (const ConfigDiagnostic &diagnostic : loaded.diagnostics)
+        {
+            if (diagnostic.path == "glance.per_group_per_minute" &&
+                diagnostic.category == ConfigErrorCategory::Range)
+                rangeDiagnostic = true;
+            if (diagnostic.category == ConfigErrorCategory::Unknown &&
+                diagnostic.path.find("glance") != std::string::npos &&
+                diagnostic.path.find("extra") != std::string::npos)
+                unknownDiagnostic = true;
+        }
+        EXPECT_TRUE(rangeDiagnostic) << value;
+        EXPECT_TRUE(unknownDiagnostic) << "节内白名单生效";
+    }
+}
+
 TEST(ConfigSnapshotStoreTest, PublishesValidatedCandidateWithoutApplyingRuntimeObjects)
 {
     ConfigLoader loader;

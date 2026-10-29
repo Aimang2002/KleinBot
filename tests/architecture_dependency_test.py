@@ -13,6 +13,7 @@ CORE_DIRECTORIES = {
     "Message",
     "ModelApiCaller",
     "Network",
+    "Perception",
     "Tool",
     "UserSession",
 }

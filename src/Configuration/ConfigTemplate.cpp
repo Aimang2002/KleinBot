@@ -76,6 +76,10 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
         "affect": {
             "enabled": false
         },
+        "glance": {
+            "enabled": false,
+            "per_group_per_minute": 6
+        },
         "web_search": {
             "enabled": false,
             "provider": "tavily",

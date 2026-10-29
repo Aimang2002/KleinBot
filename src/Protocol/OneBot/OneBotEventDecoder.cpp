@@ -149,6 +149,27 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
             else if (type == "image")
             {
                 message.message_data_url = stringField(segment["data"], "url", "");
+                // 表情包形态（NapCat/LLOneBot：sub_type=1，summary="[动画表情]"）：
+                // sub_type 可能是数字或字符串，宽容提取
+                message.image_summary = stringField(segment["data"], "summary", "");
+                message.image_is_sticker = int64Field(segment["data"], "sub_type", 0) == 1 ||
+                                           !message.image_summary.empty();
+            }
+            else if (type == "mface")
+            {
+                // 商城表情：只取文字摘要（如 "[狗头]"），不下载
+                const std::string summary = stringField(segment["data"], "summary", "");
+                if (!summary.empty())
+                    message.face_summaries.push_back(summary);
+            }
+            else if (type == "face")
+            {
+                // 系统小黄脸：id 数字或字符串
+                const nlohmann::json *id = fieldOf(segment["data"], "id");
+                if (id != nullptr && id->is_string() && !id->get<std::string>().empty())
+                    message.face_summaries.push_back("face:" + id->get<std::string>());
+                else if (id != nullptr && id->is_number_integer())
+                    message.face_summaries.push_back("face:" + std::to_string(id->get<std::int64_t>()));
             }
             else if (type == "reply")
             {

@@ -602,7 +602,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     Decoder decoder(result.diagnostics);
     decoder.unknownFields(document,
                           {"schema_version", "bot", "chat", "models", "voice",
-                           "memory", "affect", "web_search", "web_fetch", "perception",
+                           "memory", "affect", "glance", "web_search", "web_fetch", "perception",
                            "storage", "network", "communication", "webui", "push"},
                           "$" );
 
@@ -845,6 +845,17 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     {
         decoder.unknownFields(*affect, {"enabled"}, "affect");
         config.affect.enabled = decoder.boolean(*affect, "enabled", "affect.enabled", false);
+    }
+
+    // R1.1 群聊瞥视（ADR-020）：默认关闭；每群每分钟视觉调用预算 1–60，
+    // 越界给诊断并回默认 6。视觉模型复用 models.vision，未配置时运行期自动不启动
+    const json *glance = decoder.object(document, "glance", "glance");
+    if (glance != nullptr)
+    {
+        decoder.unknownFields(*glance, {"enabled", "per_group_per_minute"}, "glance");
+        config.glance.enabled = decoder.boolean(*glance, "enabled", "glance.enabled", false);
+        config.glance.perGroupPerMinute = static_cast<int>(decoder.integer(
+            *glance, "per_group_per_minute", "glance.per_group_per_minute", 6, 1, 60));
     }
 
     // 推送门（外部投递入口）：语义与 webui 镜像——令牌缺失或白名单为空时

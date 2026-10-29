@@ -1,5 +1,6 @@
 #include "GroupContextService.h"
 #include "EngagementService.h"
+#include "GlanceService.h"
 #include "../Asset/ImageAssetStore.h"
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
@@ -52,19 +53,32 @@ void GroupContextService::observe(const InboundMessage &message)
     record.userId = message.user_id;
     record.nickname = message.card.empty() ? message.nickname : message.card;
     record.text = message.plain_text;
+    // 零成本表情（R1.1）：mface/face 段只有文字摘要，直接拼进缓冲文本，不下载不瞥视。
+    // mface 的 summary 常自带方括号（"[狗头]"），去掉外层再包成 [表情 狗头]
+    for (const std::string &face : message.face_summaries)
+    {
+        std::string label = face;
+        if (label.size() >= 2 && label.front() == '[' && label.back() == ']')
+            label = label.substr(1, label.size() - 2);
+        if (label.empty())
+            continue;
+        const std::string token = "[表情 " + label + "]";
+        record.text = record.text.empty() ? token : (record.text + " " + token);
+    }
+    std::optional<ImageAsset> asset;
     if (!message.message_data_url.empty())
     {
         // 群资产（ADR-019）：图片进群库（24h），占位符带 asset_id 让后续轮次能
         // 识别/重发；没有群库或下载失败时退回 "[图片]"
         std::string placeholder = "[图片]";
-        std::optional<ImageAsset> asset;
         if (imageImporter)
             asset = imageImporter(message.group_id, message.message_data_url, message.message_id);
         else if (sharedAssets != nullptr)
             asset = sharedAssets->importFromUrl(message.group_id, message.message_data_url,
                                                 message.message_id);
         if (asset)
-            placeholder = "[image asset_id=" + asset->asset_id + " source=inbound]";
+            placeholder = "[image asset_id=" + asset->asset_id + " source=inbound" +
+                          (message.image_is_sticker ? " sticker" : "") + "]";
         record.text = record.text.empty() ? placeholder : (record.text + " " + placeholder);
     }
     if (record.text.empty())
@@ -86,7 +100,19 @@ void GroupContextService::observe(const InboundMessage &message)
                                   : (message.reply_to_message_id != 0
                                          ? std::to_string(message.reply_to_message_id)
                                          : "");
-    store->append(record);
+    const std::int64_t seq = store->append(record);
+
+    // 群聊瞥视（R1.1）：只入队（不阻塞、不做 IO），描述由瞥视 worker 异步写回占位符
+    if (glance != nullptr && asset)
+    {
+        GlanceJob job;
+        job.groupId = record.groupId;
+        job.seq = seq;
+        job.asset = *asset;
+        job.hint = message.image_is_sticker ? "发送者以表情包形式发送" : "";
+        job.timestamp = record.timestamp;
+        glance->enqueue(std::move(job));
+    }
 
     // 话题会话喂食：活动/点名/软激活信号都由 EngagementService 决策
     if (engagement != nullptr)

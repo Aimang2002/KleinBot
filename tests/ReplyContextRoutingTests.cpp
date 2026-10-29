@@ -258,3 +258,79 @@ TEST(OneBotEventDecoderMentionTest, ParsesReplySegmentInBothIdForms)
     EXPECT_EQ(plain->reply_to_message_id, 0);
     EXPECT_TRUE(plain->reply_to_message_id_raw.empty());
 }
+
+// R1.1 零成本表情信号：image 段 sub_type/summary、mface、face 段
+TEST(OneBotEventDecoderStickerTest, ParsesStickerImageMfaceAndFaceSegments)
+{
+    OneBotEventDecoder decoder;
+
+    const auto sticker = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [
+            {"type": "text", "data": {"text": "哈哈"}},
+            {"type": "image", "data": {"url": "http://img/s.gif", "sub_type": 1, "summary": "[动画表情]"}},
+            {"type": "mface", "data": {"emoji_id": "abc", "summary": "[狗头]"}},
+            {"type": "face", "data": {"id": "14"}},
+            {"type": "face", "data": {"id": 178}}
+        ],
+        "message_id": 7801,
+        "time": 1757010600
+    })");
+    ASSERT_TRUE(sticker.has_value());
+    EXPECT_EQ(sticker->plain_text, "哈哈");
+    EXPECT_EQ(sticker->message_data_url, "http://img/s.gif");
+    EXPECT_TRUE(sticker->image_is_sticker);
+    EXPECT_EQ(sticker->image_summary, "[动画表情]");
+    ASSERT_EQ(sticker->face_summaries.size(), 3U);
+    EXPECT_EQ(sticker->face_summaries[0], "[狗头]");
+    EXPECT_EQ(sticker->face_summaries[1], "face:14");
+    EXPECT_EQ(sticker->face_summaries[2], "face:178");
+
+    // sub_type 字符串形态（JS 系实现端）也算；无 summary 时仍按 sub_type 判定
+    const auto stringSubType = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [{"type": "image", "data": {"url": "http://img/t.gif", "sub_type": "1"}}],
+        "message_id": 7802,
+        "time": 1757010601
+    })");
+    ASSERT_TRUE(stringSubType.has_value());
+    EXPECT_TRUE(stringSubType->image_is_sticker);
+    EXPECT_TRUE(stringSubType->image_summary.empty());
+
+    // 普通图片：sub_type=0、无 summary → 不是贴纸
+    const auto photo = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [{"type": "image", "data": {"url": "http://img/p.jpg", "sub_type": 0}}],
+        "message_id": 7803,
+        "time": 1757010602
+    })");
+    ASSERT_TRUE(photo.has_value());
+    EXPECT_FALSE(photo->image_is_sticker);
+    EXPECT_TRUE(photo->face_summaries.empty());
+
+    // 私聊纯文本：新字段保持默认，原有字段不变
+    const auto privateText = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "private",
+        "user_id": 30001,
+        "message": [{"type": "text", "data": {"text": "你好"}}],
+        "message_id": 7804,
+        "time": 1757010603
+    })");
+    ASSERT_TRUE(privateText.has_value());
+    EXPECT_EQ(privateText->plain_text, "你好");
+    EXPECT_TRUE(privateText->message_data_url.empty());
+    EXPECT_FALSE(privateText->image_is_sticker);
+    EXPECT_TRUE(privateText->image_summary.empty());
+    EXPECT_TRUE(privateText->face_summaries.empty());
+    EXPECT_EQ(privateText->message_id, 7804);
+}

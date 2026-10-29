@@ -137,6 +137,12 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     addIfChanged(diff, current.affect.enabled, candidate.affect.enabled,
                  "affect.enabled", ConfigChangeImpact::Restart);
 
+    // R1.1 群聊瞥视：worker 线程与预算在组合根启动时确定，改动需重启
+    addIfChanged(diff, current.glance.enabled, candidate.glance.enabled,
+                 "glance.enabled", ConfigChangeImpact::Restart);
+    addIfChanged(diff, current.glance.perGroupPerMinute, candidate.glance.perGroupPerMinute,
+                 "glance.per_group_per_minute", ConfigChangeImpact::Restart);
+
     addIfChanged(diff, current.webSearch.enabled, candidate.webSearch.enabled,
                  "web_search.enabled", rebuild);
     addIfChanged(diff, current.webSearch.provider, candidate.webSearch.provider,

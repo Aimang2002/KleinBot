@@ -78,6 +78,14 @@ struct AffectSchema
     bool enabled = false;
 };
 
+// R1.1 群聊瞥视：每张群图异步瞥视成一行派生描述写回群缓冲（ADR-020）。
+// 默认关闭；预算是资源护栏（1–60 次/群/分钟），不是行为规则
+struct GlanceSchema
+{
+    bool enabled = false;
+    int perGroupPerMinute = 6;
+};
+
 struct WebSearchSchema
 {
     bool enabled = false;
@@ -170,6 +178,7 @@ struct SchemaConfig
     VoiceSchema voice;
     MemorySchema memory;
     AffectSchema affect;
+    GlanceSchema glance;
     WebSearchSchema webSearch;
     WebFetchSchema webFetch;
     StorageSchema storage;

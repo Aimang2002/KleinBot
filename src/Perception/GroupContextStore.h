@@ -13,6 +13,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -63,6 +64,12 @@ public:
     // 自消息 message_id 回填（R0.2）：按 correlationId 找镜像里的自消息，补上协议端
     // 返回的真实 message_id（镜像 + 落库行）。返回 false = 找不到（已淘汰/从未登记）
     bool backfillMessageId(const std::string &correlationId, const std::string &messageId);
+
+    // 改写一条记录的文本（R1.1 瞥视写回图片描述）：镜像 + 落库行。
+    // 返回 false = 该群镜像里已无此 seq（已淘汰），不落库
+    bool updateText(std::uint64_t groupId, std::int64_t seq, const std::string &text);
+    // 读一条记录的当前文本（锁内拷贝）；已淘汰返回 nullopt
+    std::optional<std::string> findText(std::uint64_t groupId, std::int64_t seq) const;
 
     // TTL/条数清理：pollingThread 周期调用；now 为 unix 秒
     void prune(std::int64_t now);

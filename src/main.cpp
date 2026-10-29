@@ -41,6 +41,7 @@
 #include "Perception/GroupContextStore.h"
 #include "Perception/GroupContextService.h"
 #include "Perception/EngagementService.h"
+#include "Perception/GlanceService.h"
 #include "Perception/GroupListService.h"
 #include "MessageSender/QueuedMessageSender.h"
 #include "MessageQueue/OutboundMessageQueue.h"
@@ -259,7 +260,7 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 }
 
 void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWorkers,
-					 MemoryService &memoryService,
+					 GlanceService &glanceService, MemoryService &memoryService,
 					 std::thread &timingThread, std::thread &transportThread,
 					 std::thread &panelThread, std::thread &pushThread)
 {
@@ -267,6 +268,11 @@ void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWork
 	LOG_INFO("正在停止消息执行器并等待活动任务退出...");
 	messageWorkers.shutdown();
 	LOG_INFO("消息执行器已退出");
+	// 群聊瞥视（R1.1）：观察入队已随消息执行器停止；丢弃 pending，进行中的视觉
+	// HTTP 已随 running=false 取消，worker 返回后不写回
+	LOG_INFO("正在等待群聊瞥视服务退出...");
+	glanceService.shutdown();
+	LOG_INFO("群聊瞥视服务已退出");
 	LOG_INFO("正在等待长期记忆服务退出...");
 	memoryService.shutdown();
 	LOG_INFO("长期记忆服务已退出");
@@ -579,6 +585,31 @@ int main(int argc, char **argv)
 													 const std::string &userPrompt)
 		{ return chatService.buildOnce(systemPrompt, userPrompt); });
 	groupContextService.setSharedAssets(&groupImageAssets);
+	// 群聊瞥视（R1.1，ADR-020）：群图异步瞥视成一行派生描述写回群缓冲占位符，
+	// 零行为变化（只丰富文本、不触发回应）。视觉复用 models.vision：未就绪时不设
+	// seam，start() 报"视觉模型未配置"并保持 no-op；观察通道关闭时 store 为空同理
+	GlanceService glanceService(groupContextStore.get(), &groupImageAssets, settings.glance);
+	if (modelEndpointReadinessText(settings.models.vision, "视觉", "models.vision").empty())
+	{
+		glanceService.setVision(
+			[&dock, &groupImageAssets, vision = settings.models.vision](
+				const ImageAsset &asset, const std::string &hint) -> std::string
+			{
+				const std::string base64 = groupImageAssets.readBase64(asset);
+				if (base64.empty())
+					return {};
+				ChatModel requestModel;
+				requestModel.endpoint = vision.endpoint;
+				requestModel.api_key = vision.apiKey;
+				requestModel.api_standard = vision.apiStandard;
+				const VisionResponse response = dock.RequestVision(
+					requestModel, vision.model, GlanceService::visionPrompt(hint), base64);
+				if (response.cancelled || response.code != 200)
+					return {};
+				return response.content;
+			});
+	}
+	groupContextService.setGlance(&glanceService);
 	// 话题会话（意志层 v2）：每群至多一个存活会话，激活→轮次→保留 2h；
 	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=judge/压缩），未配管理员
 	// 则无主模型、跟进自动停摆（与主动发言同一底线）
@@ -667,6 +698,7 @@ int main(int argc, char **argv)
 		std::to_string(settings.messageExecution.initialWorkerThreads) +
 		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
 		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
+	glanceService.start();
 	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), groupListService.get(), std::ref(groupContextService), std::ref(engagementService), std::ref(groupImageAssets), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
@@ -753,7 +785,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	resourceCleanup(running, messageWorkers, memoryService, timingThread,
+	resourceCleanup(running, messageWorkers, glanceService, memoryService, timingThread,
 					transportThread, panelThread, pushThread);
 	Log::getInstance().shutdown();
 

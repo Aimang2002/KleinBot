@@ -32,6 +32,7 @@
 #include <vector>
 
 class EngagementService;
+class GlanceService;
 class ImageAssetStore;
 
 class GroupContextService
@@ -57,6 +58,9 @@ public:
                                                                    const std::string &url,
                                                                    std::int64_t messageId)>;
     void setImageImporter(ImageImporter importer) { this->imageImporter = std::move(importer); }
+    // 群聊瞥视（R1.1）：入站图片入库并拿到 seq 后交给它异步写回描述；可空 = 不瞥视。
+    // 她自己的出站图不瞥视
+    void setGlance(GlanceService *glance) { this->glance = glance; }
 
     // 白名单群消息入库（@ 与非 @ 都算群内容）；worker 线程调用
     void observe(const InboundMessage &message);
@@ -101,6 +105,7 @@ private:
     EngagementService *engagement = nullptr;
     ImageAssetStore *sharedAssets = nullptr;
     ImageImporter imageImporter;
+    GlanceService *glance = nullptr;
 };
 
 #endif // GROUP_CONTEXT_SERVICE_H

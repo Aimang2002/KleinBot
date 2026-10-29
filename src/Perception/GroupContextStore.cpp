@@ -233,6 +233,66 @@ bool GroupContextStore::backfillMessageId(const std::string &correlationId,
     return true;
 }
 
+namespace
+{
+// 镜像按 seq 严格递增（append 锁内分配），二分定位
+template <typename Mirror>
+auto findBySeq(Mirror &mirror, std::int64_t seq) -> decltype(mirror.begin())
+{
+    const auto it = std::lower_bound(mirror.begin(), mirror.end(), seq,
+                                     [](const GroupMessageRecord &record, std::int64_t value) {
+                                         return record.seq < value;
+                                     });
+    if (it != mirror.end() && it->seq == seq)
+        return it;
+    return mirror.end();
+}
+}
+
+bool GroupContextStore::updateText(std::uint64_t groupId, std::int64_t seq,
+                                   const std::string &text)
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        const auto group = mirrors.find(groupId);
+        if (group == mirrors.end())
+            return false;
+        const auto it = findBySeq(group->second, seq);
+        if (it == group->second.end())
+            return false;
+        it->text = text;
+    }
+
+    // 落库在锁外（与 append 同一做法）
+    if (db != nullptr)
+    {
+        sqlite3_stmt *statement = nullptr;
+        if (sqlite3_prepare_v2(db, "UPDATE group_messages SET text=?1 WHERE seq=?2;", -1,
+                               &statement, nullptr) == SQLITE_OK)
+        {
+            sqlite3_bind_text(statement, 1, text.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(statement, 2, seq);
+            if (sqlite3_step(statement) != SQLITE_DONE)
+                LOG_ERROR("群消息文本改写失败：" + std::string(sqlite3_errmsg(db)));
+            sqlite3_finalize(statement);
+        }
+    }
+    return true;
+}
+
+std::optional<std::string> GroupContextStore::findText(std::uint64_t groupId,
+                                                       std::int64_t seq) const
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    const auto group = mirrors.find(groupId);
+    if (group == mirrors.end())
+        return std::nullopt;
+    const auto it = findBySeq(group->second, seq);
+    if (it == group->second.end())
+        return std::nullopt;
+    return it->text;
+}
+
 void GroupContextStore::prune(std::int64_t now)
 {
     // TTL：库级一次删除 + 镜像同步收缩。条数淘汰已在 append 内逐群处理

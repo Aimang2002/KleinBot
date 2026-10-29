@@ -242,3 +242,71 @@ TEST(GroupContextImageTest, ObserveImportsImageIntoSharedStoreAndWritesPlacehold
     EXPECT_TRUE(after[3].isSelf);
     EXPECT_EQ(after[4].text, "[图片]");
 }
+
+// R1.1 零成本表情：贴纸图占位符带 sticker 标记，mface/face 摘要拼成 [表情 …]
+TEST(GroupContextImageTest, ObserveMarksStickerAndAppendsFaceSummaries)
+{
+    TemporaryDirectory directory;
+    const std::string dbPath = directory.path() + "/ctx.db";
+    GroupContextStore store(dbPath);
+    ImageAssetStore group(dbPath, directory.path() + "/g", "group_image_assets", "gimg_");
+    NoopApiChannel api;
+    GroupListService state(directory.path() + "/state.db", api);
+    state.setFeatureEnabled(true);
+    state.setMonitored(88, true);
+    BotIdentity bot;
+    bot.id = 10086;
+    bot.name = "Klein";
+    GroupContextService service(&state, bot, &store, nullptr);
+    service.setSharedAssets(&group);
+    service.setImageImporter([&group](std::uint64_t groupId, const std::string &, std::int64_t messageId) {
+        return group.saveBase64(groupId, "aGk=", "inbound", "", messageId);
+    });
+
+    InboundMessage sticker;
+    sticker.post_type = "message";
+    sticker.message_type = "group";
+    sticker.group_id = 88;
+    sticker.user_id = 1;
+    sticker.nickname = "A";
+    sticker.message_id = 7001;
+    sticker.message_timestamp = 1000;
+    sticker.plain_text = "哈哈";
+    sticker.message_data_url = "http://img/sticker";
+    sticker.image_is_sticker = true;
+    sticker.image_summary = "[动画表情]";
+    sticker.face_summaries = {"[狗头]", "face:14"};
+    service.observe(sticker);
+
+    // 只有表情段、没有文字没有图片：不再退回 "[图片]"
+    InboundMessage facesOnly;
+    facesOnly.post_type = "message";
+    facesOnly.message_type = "group";
+    facesOnly.group_id = 88;
+    facesOnly.user_id = 2;
+    facesOnly.nickname = "B";
+    facesOnly.message_id = 7002;
+    facesOnly.message_timestamp = 1001;
+    facesOnly.face_summaries = {"[捂脸]"};
+    service.observe(facesOnly);
+
+    // 普通图片不带 sticker
+    InboundMessage photo = sticker;
+    photo.message_id = 7003;
+    photo.plain_text.clear();
+    photo.image_is_sticker = false;
+    photo.image_summary.clear();
+    photo.face_summaries.clear();
+    service.observe(photo);
+
+    const auto records = store.snapshot(88);
+    ASSERT_EQ(records.size(), 3U);
+    const auto stickerAsset = group.findBySourceMessage(88, 7001);
+    ASSERT_TRUE(stickerAsset.has_value());
+    EXPECT_EQ(records[0].text, "哈哈 [表情 狗头] [表情 face:14] [image asset_id=" +
+                                   stickerAsset->asset_id + " source=inbound sticker]");
+    EXPECT_EQ(records[1].text, "[表情 捂脸]");
+    const auto photoAsset = group.findBySourceMessage(88, 7003);
+    ASSERT_TRUE(photoAsset.has_value());
+    EXPECT_EQ(records[2].text, "[image asset_id=" + photoAsset->asset_id + " source=inbound]");
+}

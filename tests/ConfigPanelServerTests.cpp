@@ -256,6 +256,9 @@ TEST_F(PanelServerFixture, RootServesPageFileWithoutAuth)
     EXPECT_NE(result->body.find("<!DOCTYPE html>"), std::string::npos);
     EXPECT_NE(result->body.find("Klein"), std::string::npos);
     EXPECT_NE(result->get_header_value("Cache-Control").find("no-store"), std::string::npos);
+    // 配置节通用分区注册（关联点：骨架有节而面板未注册时分区不按序渲染）
+    EXPECT_NE(result->body.find("glance: [\"enabled\", \"per_group_per_minute\"]"), std::string::npos);
+    EXPECT_NE(result->body.find("glance: \"群聊瞥视\""), std::string::npos);
 }
 
 TEST_F(PanelServerFixture, RootReturns500WhenPageFileMissing)
