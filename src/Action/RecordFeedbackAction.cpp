@@ -61,7 +61,7 @@ ActionResult RecordFeedbackAction::execute(const nlohmann::json &arguments,
                                            const ActionContext &context)
 {
     if (store == nullptr || recorder == nullptr || !recorder->enabled())
-        return textResult("心境决策记录未启用（affect.enabled=false），无法记录反馈。");
+        return textResult("功能未开启");
 
     const std::string label = arguments.value("label", std::string());
     if (label != "good" && label != "bad")
@@ -85,7 +85,7 @@ ActionResult RecordFeedbackAction::execute(const nlohmann::json &arguments,
             matchedBy = "fallback";
     }
     if (!hit)
-        return textResult("最近 10 分钟内没有可标注的回复；请引用她的那条消息再发一次。");
+        return textResult("zzz");
 
     // 标注人分类：管理员 / 网友——落在 source 列，评测按列分组即可
     const bool isAdmin = managerId != 0 && context.user_id == managerId;
@@ -110,18 +110,14 @@ ActionResult RecordFeedbackAction::execute(const nlohmann::json &arguments,
     if (!recorder->recordFeedback(feedback))
     {
         LOG_ERROR("人工反馈写入失败：decision_id=" + hit->decisionId);
-        return textResult("错误：反馈写入失败，请查看日志。");
+        return textResult("记不住了");
     }
 
-    std::string reply = std::string("记下了：") + (label == "good" ? "好" : "坏");
-    if (!note.empty())
-        reply += "（" + note + "）";
-    reply += "，对应她 " + clockText(hit->createdAt) + " 的回复";
-    if (matchedBy == "fallback")
-        reply += replyToMessageId.empty() ? "（未引用消息，按最近一次回复匹配）"
-                                          : "（引用的消息未匹配到记录，按最近一次回复匹配）";
-    reply += "。";
-    LOG_INFO("人工反馈：" + label + "（" + feedback.source + "），decision_id=" + hit->decisionId +
-             "，matched_by=" + matchedBy);
-    return textResult(std::move(reply));
+    // 回复只说一句人话（用户定规 2026-10-29）：匹配方式、时间、备注这些是她的内部事务，
+    // 不暴露给群友；排障信息全部进日志
+    LOG_INFO("人工反馈：" + label + "（" + feedback.source + "）" +
+             (note.empty() ? "" : "，备注=" + note) + "，decision_id=" + hit->decisionId +
+             "，对应 " + clockText(hit->createdAt) + " 的回复，matched_by=" + matchedBy +
+             (matchedBy == "fallback" && !replyToMessageId.empty() ? "（引用未命中）" : ""));
+    return textResult("好的，我记住了。");
 }

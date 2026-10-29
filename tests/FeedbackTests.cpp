@@ -181,7 +181,7 @@ TEST(RecordFeedbackActionTest, MatchesAnySegmentOfASplitReply)
     // 引用分段回复的第三段：精确命中旧的那条，而不是最近的主动轮
     const ActionResult result = action.execute(
         {{"label", "bad"}, {"reply_to_message_id", "113"}, {"group_id", 88}}, {10001, 0, "#坏"});
-    EXPECT_EQ(result.content.find("按最近一次回复匹配"), std::string::npos);
+    EXPECT_EQ(result.content, "好的，我记住了。");
     EXPECT_EQ(store.feedbackCount(store.findExecution(older)->decisionId), 1U);
     EXPECT_EQ(store.feedbackCount(store.findExecution(newer)->decisionId), 0U);
 }
@@ -202,8 +202,8 @@ TEST(RecordFeedbackActionTest, MatchesByReplyMessageIdAndWritesEvidence)
     const ActionResult result = action.execute(
         {{"label", "good"}, {"note", "接得自然"}, {"reply_to_message_id", "111"}, {"group_id", 88}},
         {10001, 0, "#好:接得自然"});
-    EXPECT_NE(result.content.find("记下了：好（接得自然）"), std::string::npos);
-    EXPECT_EQ(result.content.find("按最近一次回复匹配"), std::string::npos);
+    // 回复只有一句人话：备注、时间、匹配方式都不暴露
+    EXPECT_EQ(result.content, "好的，我记住了。");
 
     const auto olderExecution = store.findExecution(older);
     ASSERT_TRUE(olderExecution.has_value());
@@ -227,15 +227,15 @@ TEST(RecordFeedbackActionTest, FallsBackToLatestInWindowPerGroupOrPrivateUser)
 
     // 群：没引用 → 该群最近一次（跨 @ 回复与主动轮），不是别的群
     ActionResult result = action.execute({{"label", "bad"}, {"group_id", 88}}, {10001, 0, "#坏"});
-    EXPECT_NE(result.content.find("未引用消息，按最近一次回复匹配"), std::string::npos);
+    EXPECT_EQ(result.content, "好的，我记住了。"); // 兜底也不向群友解释匹配方式
     EXPECT_EQ(store.feedbackCount(store.findExecution(groupNew)->decisionId), 1U);
     EXPECT_EQ(store.feedbackCount(store.findExecution(groupOld)->decisionId), 0U);
     EXPECT_EQ(store.feedbackCount(store.findExecution(otherGroup)->decisionId), 0U);
 
-    // 引用了消息但没匹配到记录（分段第二条）→ 同样兜底，提示语不同
+    // 引用了消息但没匹配到记录（分段第二条）→ 同样兜底，回复不变
     result = action.execute({{"label", "good"}, {"reply_to_message_id", "no-such"}, {"group_id", 88}},
                             {10001, 0, "#好"});
-    EXPECT_NE(result.content.find("引用的消息未匹配到记录"), std::string::npos);
+    EXPECT_EQ(result.content, "好的，我记住了。");
     EXPECT_EQ(store.feedbackCount(store.findExecution(groupNew)->decisionId), 2U);
 
     // 私聊：按本人匹配，不串到别人的私聊
@@ -246,7 +246,7 @@ TEST(RecordFeedbackActionTest, FallsBackToLatestInWindowPerGroupOrPrivateUser)
     // 超出 10 分钟窗口 → 明确拒绝，不乱贴
     now = 2900 + RecordFeedbackAction::kFallbackWindowSeconds + 1;
     result = action.execute({{"label", "bad"}, {"group_id", 88}}, {10001, 0, "#坏"});
-    EXPECT_NE(result.content.find("没有可标注的回复"), std::string::npos);
+    EXPECT_EQ(result.content, "zzz");
     EXPECT_EQ(store.feedbackCount(store.findExecution(groupNew)->decisionId), 2U);
 }
 
@@ -301,7 +301,7 @@ TEST(RecordFeedbackActionTest, SkippedExecutionsAreNotFeedbackTargets)
     recorder.recordExecution(execution);
     RecordFeedbackAction action(&store, &recorder, 10001, [] { return 100; });
     const ActionResult result = action.execute({{"label", "bad"}, {"group_id", 88}}, {10001, 0, "#坏"});
-    EXPECT_NE(result.content.find("没有可标注的回复"), std::string::npos);
+    EXPECT_EQ(result.content, "zzz");
     EXPECT_EQ(store.feedbackCount(decisionId), 0U);
 }
 
@@ -315,11 +315,11 @@ TEST(RecordFeedbackActionTest, RejectsBadLabelAndReportsDisabledRecorder)
               std::string::npos);
 
     RecordFeedbackAction disabled(nullptr, nullptr, 10001);
-    EXPECT_NE(disabled.execute({{"label", "good"}}, {1, 0, ""}).content.find("未启用"),
+    EXPECT_NE(disabled.execute({{"label", "good"}}, {1, 0, ""}).content.find("功能未开启"),
               std::string::npos);
     affect::DecisionRecorder noStore(nullptr);
     RecordFeedbackAction disabledRecorder(&store, &noStore, 10001);
-    EXPECT_NE(disabledRecorder.execute({{"label", "good"}}, {1, 0, ""}).content.find("未启用"),
+    EXPECT_NE(disabledRecorder.execute({{"label", "good"}}, {1, 0, ""}).content.find("功能未开启"),
               std::string::npos);
 
     EXPECT_EQ(action.descriptor().name, "record_feedback");
