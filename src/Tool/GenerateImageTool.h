@@ -48,20 +48,27 @@ public:
             const ImageResponse response = dock.RequestDraw(requestModel, model.model, prompt);
             if (response.cancelled)
                 return {{}, {}, {}, false, true};
-            if (response.code >= 400 || response.image_base64.empty())
+            if (response.code >= 400 ||
+                (response.image_base64.empty() && response.image_url.empty()))
             {
                 const std::string reason = response.error_message.empty()
-                                               ? std::string("接口未返回具体原因")
+                                               ? (response.code >= 400
+                                                      ? std::string("接口未返回具体原因（HTTP " +
+                                                                    std::to_string(response.code) + "）")
+                                                      : std::string("接口既未返回 b64_json 也未返回 url"))
                                                : response.error_message;
                 return {"错误：图片生成失败：" + reason + "。", {}, {}};
             }
 
             const bool toShared = ctx.shared_scope_id != 0 && sharedAssets != nullptr;
-            auto asset = toShared
-                ? sharedAssets->saveBase64(ctx.shared_scope_id, response.image_base64,
-                                           "generated", prompt, ctx.user_message_id)
-                : assetStore.saveBase64(ctx.user_id, response.image_base64,
-                                        "generated", prompt, ctx.user_message_id);
+            ImageAssetStore &target = toShared ? *sharedAssets : assetStore;
+            const uint64_t owner = toShared ? ctx.shared_scope_id : ctx.user_id;
+            // 优先 b64；中转站只回 url 时下载入库（真机 2026-10-30）
+            auto asset = !response.image_base64.empty()
+                ? target.saveBase64(owner, response.image_base64, "generated", prompt,
+                                    ctx.user_message_id)
+                : target.importFromUrl(owner, response.image_url, "generated", prompt,
+                                       ctx.user_message_id);
             if (!asset)
                 return {"错误：图片已生成，但保存失败。", {}, {}};
 

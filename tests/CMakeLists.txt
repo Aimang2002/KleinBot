@@ -15,6 +15,7 @@ add_executable(kleinbot_tests
     FsUtilTests.cpp
     GlanceTests.cpp
     GroupAssetTests.cpp
+    OpenAIImageParseTests.cpp
     GroupContextTests.cpp
     GroupListTests.cpp
     MemoryRecallTests.cpp

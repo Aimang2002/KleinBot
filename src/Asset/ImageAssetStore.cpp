@@ -147,6 +147,14 @@ ImageAssetStore::~ImageAssetStore()
 std::optional<ImageAsset> ImageAssetStore::importFromUrl(uint64_t user_id, const std::string &url,
                                                          int64_t source_message_id)
 {
+    return importFromUrl(user_id, url, "inbound", "", source_message_id);
+}
+
+std::optional<ImageAsset> ImageAssetStore::importFromUrl(uint64_t user_id, const std::string &url,
+                                                         const std::string &source,
+                                                         const std::string &prompt,
+                                                         int64_t source_message_id)
+{
     if (url.empty())
         return std::nullopt;
 
@@ -192,7 +200,7 @@ std::optional<ImageAsset> ImageAssetStore::importFromUrl(uint64_t user_id, const
         return std::nullopt;
     }
     return saveBytes(user_id, bytes, contentType.empty() ? "image/jpeg" : contentType,
-                     "inbound", "", source_message_id);
+                     source, prompt, source_message_id);
 }
 
 std::optional<ImageAsset> ImageAssetStore::saveBase64(uint64_t user_id, const std::string &base64,

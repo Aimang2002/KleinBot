@@ -27,6 +27,10 @@ public:
 
     std::optional<ImageAsset> importFromUrl(uint64_t user_id, const std::string &url,
                                             int64_t source_message_id);
+    // 指定来源与提示词的下载入库（生图接口只回 url 时按 generated 入库）
+    std::optional<ImageAsset> importFromUrl(uint64_t user_id, const std::string &url,
+                                            const std::string &source, const std::string &prompt,
+                                            int64_t source_message_id);
     std::optional<ImageAsset> saveBase64(uint64_t user_id, const std::string &base64,
                                          const std::string &source, const std::string &prompt,
                                          int64_t source_message_id);

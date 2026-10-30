@@ -116,6 +116,9 @@ ImageResponse OpenAIStandard::request_image(const ChatModel &model, const std::s
     payload_json["n"] = 1;
     payload_json["quality"] = "high";
     payload_json["size"] = "1024x1024";
+    // 真机 2026-10-30：中转站默认只回 url，不回 b64_json，生图一直"接口未返回具体原因"。
+    // 明确要 base64；不理会的网关由 draw_json_parse 记下 url，工具侧再下载兜底
+    payload_json["response_format"] = "b64_json";
     std::string payload = payload_json.dump();
 
     // 发送请求
@@ -317,6 +320,7 @@ ImageResponse OpenAIStandard::draw_json_parse(const std::string &response)
         if (doc.contains("data") && doc["data"].is_array() && !doc["data"].empty())
         {
             responseFormat.image_base64 = doc["data"][0].value("b64_json", "");
+            responseFormat.image_url = doc["data"][0].value("url", "");
             std::string prefix = responseFormat.image_base64.substr(0, 22);
             if (prefix.find("data:image/png;base64,") != std::string::npos)
             {

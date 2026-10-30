@@ -22,12 +22,13 @@ public:
 
     ImageResponse request_image(const ChatModel &model, const std::string &model_name, const std::string &prompt) override;
 
+    // 生图响应解析（公开便于单测）：data[0].b64_json 优先，只有 url 时记到 image_url
+    ImageResponse draw_json_parse(const std::string &response);
+
 private:
     std::pair<std::string, long> http_post(const std::string &url, const std::string &api_key, const std::string &payload);
 
     ChatResponse chat_json_parse(const std::string &response);
-
-    ImageResponse draw_json_parse(const std::string &response);
 
     VisionResponse vision_json_parse(const std::string &response);
 
