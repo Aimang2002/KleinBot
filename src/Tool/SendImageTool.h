@@ -28,10 +28,12 @@ public:
     {
         try
         {
-            const auto asset = resolveImageAsset(assetStore, sharedAssets, ctx, parseToolArguments(args));
+            std::string resolveNote;
+            const auto asset = resolveImageAsset(assetStore, sharedAssets, ctx, parseToolArguments(args),
+                                                 &resolveNote);
             if (!asset)
                 return {"错误：没有找到要发送的图片。", {}, {}};
-            return {"图片已发送。",
+            return {resolveNote.empty() ? std::string("图片已发送。") : "图片已发送。注意：" + resolveNote,
                     {ImageMessage{ImageMessage::Source::LocalPath, asset->local_path}}, {},
                     true, false, true};
         }

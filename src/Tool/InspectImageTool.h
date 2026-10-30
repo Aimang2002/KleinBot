@@ -37,7 +37,8 @@ public:
 
             const auto arguments = parseToolArguments(args);
             const std::string question = arguments.value("question", "请详细分析这张图片");
-            const auto asset = resolveImageAsset(assetStore, sharedAssets, ctx, arguments);
+            std::string resolveNote;
+            const auto asset = resolveImageAsset(assetStore, sharedAssets, ctx, arguments, &resolveNote);
             if (!asset)
                 return {"错误：没有找到可查看的历史图片。", {}, {}};
 
@@ -60,7 +61,8 @@ public:
                 return {"错误：视觉模型调用失败：" + reason + "。", {}, {}};
             }
 
-            return {"图片视觉分析结果：\n" + response.content, {}, {}};
+            return {(resolveNote.empty() ? std::string() : "注意：" + resolveNote + "\n") +
+                        "图片视觉分析结果：\n" + response.content, {}, {}};
         }
         catch (const std::exception &error)
         {

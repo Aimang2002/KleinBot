@@ -331,6 +331,13 @@ std::optional<ImageAsset> ImageAssetStore::findLatest(uint64_t user_id, const st
     return assets.empty() ? std::nullopt : std::optional<ImageAsset>(assets.front());
 }
 
+std::optional<ImageAsset> ImageAssetStore::findLatest(uint64_t user_id) const
+{
+    auto assets = query(selectPrefix() + "WHERE user_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1;",
+                        user_id, "", "", 1);
+    return assets.empty() ? std::nullopt : std::optional<ImageAsset>(assets.front());
+}
+
 std::optional<ImageAsset> ImageAssetStore::findBySourceMessage(uint64_t user_id,
                                                                int64_t source_message_id) const
 {

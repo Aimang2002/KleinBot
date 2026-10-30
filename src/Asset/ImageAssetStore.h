@@ -32,6 +32,8 @@ public:
                                          int64_t source_message_id);
     std::optional<ImageAsset> find(uint64_t user_id, const std::string &asset_id) const;
     std::optional<ImageAsset> findLatest(uint64_t user_id, const std::string &source) const;
+    // 不分来源的最近一张（工具解析的最后兜底：群友说"看看这个图"时多半指最新那张）
+    std::optional<ImageAsset> findLatest(uint64_t user_id) const;
     // 按来源消息 ID 找（群实例：observe 先入库，Message 的 @ 路径据此复用，不重复下载）
     std::optional<ImageAsset> findBySourceMessage(uint64_t user_id, int64_t source_message_id) const;
     // 按本地文件路径找（群实例：出站 ImageMessage 只带路径，入库占位符要 asset_id）

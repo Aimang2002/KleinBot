@@ -141,16 +141,54 @@ TEST(ImageToolScopeTest, SharedScopeResolvesGroupFirstThenPersonalAndPrivateUnch
     // 群里：asset_id 指向本人的个人资产 → 群库查不到，回退个人库命中
     EXPECT_EQ(resolveImageAsset(personal, &group, inGroup, {{"asset_id", personalIn->asset_id}})->asset_id,
               personalIn->asset_id);
-    // 群里：别人引用你的个人资产 id → 群库没有、他的个人库也没有 → 查不到（不泄漏）
-    EXPECT_FALSE(resolveImageAsset(personal, &group, strangerInGroup, {{"asset_id", personalIn->asset_id}}).has_value());
-    // 群里无参数：群库没有 generated → 回退本人最近一张生成图
-    EXPECT_EQ(resolveImageAsset(personal, &group, inGroup, nlohmann::json::object())->asset_id,
+    // 群里：别人引用你的个人资产 id → 群库没有、他的个人库也没有这个 id → 不泄漏你的那张，
+    // 而是兜底到群库最近一张，并在 note 里说明改用了哪张（2026-10-29 真机缺陷修复）
+    {
+        std::string note;
+        const auto asset = resolveImageAsset(personal, &group, strangerInGroup,
+                                             {{"asset_id", personalIn->asset_id}}, &note);
+        ASSERT_TRUE(asset.has_value());
+        EXPECT_EQ(asset->asset_id, groupIn->asset_id);
+        EXPECT_NE(note.find(personalIn->asset_id), std::string::npos);
+        EXPECT_NE(note.find(groupIn->asset_id), std::string::npos);
+    }
+    // 群里无参数：不再默认"最近一张生成图"，而是群库里最近一张（任意来源）
+    {
+        std::string note;
+        const auto asset = resolveImageAsset(personal, &group, inGroup, nlohmann::json::object(), &note);
+        ASSERT_TRUE(asset.has_value());
+        EXPECT_EQ(asset->asset_id, groupIn->asset_id);
+        EXPECT_TRUE(note.empty()); // 没给 id 就不算"改用"，不打扰模型
+    }
+    // 群里给了抄错的 id：群库最近一张兜底 + note
+    {
+        std::string note;
+        const auto asset = resolveImageAsset(personal, &group, inGroup, {{"asset_id", "gimg_no_such"}}, &note);
+        ASSERT_TRUE(asset.has_value());
+        EXPECT_EQ(asset->asset_id, groupIn->asset_id);
+        EXPECT_NE(note.find("gimg_no_such"), std::string::npos);
+    }
+    // 群里 source=generated 但群库没有生成图 → 个人库本人的生成图（第 2 级在个人库命中）
+    EXPECT_EQ(resolveImageAsset(personal, &group, inGroup, {{"source", "generated"}})->asset_id,
               personalGen->asset_id);
     // 私聊：只看个人库，群库里的图不可见；行为与旧签名一致
     EXPECT_EQ(resolveImageAsset(personal, &group, inPrivate, {{"source", "inbound"}})->asset_id,
               personalIn->asset_id);
     EXPECT_EQ(resolveImageAsset(personal, 10, {{"source", "inbound"}})->asset_id, personalIn->asset_id);
-    EXPECT_FALSE(resolveImageAsset(personal, &group, inPrivate, {{"asset_id", groupIn->asset_id}}).has_value());
+    // 私聊引用群库 id：群库不可见，个人库没有这个 id → 兜底到本人最近一张（任意来源）
+    {
+        std::string note;
+        const auto asset = resolveImageAsset(personal, &group, inPrivate, {{"asset_id", groupIn->asset_id}}, &note);
+        ASSERT_TRUE(asset.has_value());
+        EXPECT_EQ(asset->asset_id, personalIn->asset_id);
+        EXPECT_FALSE(note.empty());
+    }
+    // 私聊无参数：最近一张（任意来源），不再偏向生成图
+    EXPECT_EQ(resolveImageAsset(personal, &group, inPrivate, nlohmann::json::object())->asset_id,
+              personalIn->asset_id);
+    // 什么都没有的人：三级都空 → 查不到
+    ToolContext nobody{30, 0, "", 0};
+    EXPECT_FALSE(resolveImageAsset(personal, &group, nobody, nlohmann::json::object()).has_value());
     // 没有群库指针时群聊退化为个人库
     EXPECT_EQ(resolveImageAsset(personal, nullptr, inGroup, {{"source", "inbound"}})->asset_id,
               personalIn->asset_id);

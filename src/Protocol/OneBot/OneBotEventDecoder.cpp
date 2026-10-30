@@ -149,6 +149,15 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
             else if (type == "image")
             {
                 message.message_data_url = stringField(segment["data"], "url", "");
+                if (message.message_data_url.empty())
+                {
+                    // 真机观察 2026-10-29：部分图片段不带 url，整条只能退化成 "[图片]"，
+                    // 既入不了群库也瞥视不了。把该段有哪些字段名记下来，便于补解析
+                    std::string keys;
+                    for (auto it = segment["data"].begin(); it != segment["data"].end(); ++it)
+                        keys += (keys.empty() ? "" : ",") + it.key();
+                    LOG_WARNING("图片段没有 url 字段，无法入库（data 字段：" + keys + "）");
+                }
                 // 表情包形态（NapCat/LLOneBot：sub_type=1，summary="[动画表情]"）：
                 // sub_type 可能是数字或字符串，宽容提取
                 message.image_summary = stringField(segment["data"], "summary", "");
