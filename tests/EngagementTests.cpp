@@ -8,6 +8,8 @@
 #include "Perception/GroupListService.h"
 #include "Network/OneBotApiChannel.h"
 #include "Port/OutboundDelivery.h"
+#include "Tool/Tool.h"
+#include "Tool/ToolRegistry.h"
 
 #include <chrono>
 
@@ -109,6 +111,7 @@ struct Harness
     std::vector<ChatResponse> turnResponses; // 依次弹出；空则默认 pass
     std::vector<std::string> agentContracts; // 主 Agent 每次请求的 system 注记
     std::vector<std::vector<ChatMessage>> agentHistories;
+    std::vector<std::vector<std::string>> agentSchemas; // 主 Agent 每次请求的工具表
     std::vector<std::string> workerSystems; // 杂务模型调用记录
     std::vector<std::string> workerUsers;
 
@@ -122,10 +125,11 @@ struct Harness
         service->setSubmitJudge([this](std::uint64_t group) { submittedJudges.push_back(group); });
         service->setMainAgent(
             [this](const std::string &contract, const std::vector<ChatMessage> &history,
-                   const std::vector<std::string> &)
+                   const std::vector<std::string> &schemas)
             {
                 agentContracts.push_back(contract);
                 agentHistories.push_back(history);
+                agentSchemas.push_back(schemas);
                 if (turnResponses.empty())
                     return passResponse();
                 ChatResponse response = turnResponses.front();
@@ -616,6 +620,253 @@ TEST(EngagementContextTest, RecallNoteReflectsBudgetInContract)
     harness.turnResponses.push_back(sayResponse("第一轮"));
     harness.service->runTurn(8823);
     EXPECT_NE(harness.agentContracts.front().find("还有 1 次上下文召回"), std::string::npos);
+}
+
+// ===== 会话轮注册表工具（inspect_image）=====
+
+namespace
+{
+class FakeInspectTool : public Tool
+{
+public:
+    std::string name() const override { return "inspect_image"; }
+    std::string description() const override { return "查看历史图片的实际内容。"; }
+    std::string parametersSchema() const override
+    {
+        return R"({"type":"object","properties":{"asset_id":{"type":"string"},"question":{"type":"string"}},"required":["question"]})";
+    }
+    ToolResult execute(const std::string &args, const ToolContext &ctx) override
+    {
+        receivedArgs.push_back(args);
+        receivedContexts.push_back(ctx);
+        return ToolResult{"图片视觉分析结果：一只猫", {}, {}};
+    }
+
+    std::vector<std::string> receivedArgs;
+    std::vector<ToolContext> receivedContexts;
+};
+
+class FakeAdminTool : public Tool
+{
+public:
+    std::string name() const override { return "admin_tool"; }
+    std::string description() const override { return "管理员专用。"; }
+    std::string parametersSchema() const override { return R"({"type":"object","properties":{}})"; }
+    bool requiresAdmin() const override { return true; }
+    ToolResult execute(const std::string &, const ToolContext &) override
+    {
+        executions += 1;
+        return ToolResult{"管理员操作已执行", {}, {}};
+    }
+
+    int executions = 0;
+};
+
+ChatResponse inspectResponse(const std::string &id, const std::string &arguments)
+{
+    ChatResponse response;
+    response.code = 200;
+    response.finish_reason = "tool_calls";
+    response.tool_calls.push_back({id, "inspect_image", arguments});
+    return response;
+}
+
+bool schemasMention(const std::vector<std::string> &schemas, const std::string &name)
+{
+    for (const std::string &schema : schemas)
+    {
+        if (schema.find("\"" + name + "\"") != std::string::npos)
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+TEST(EngagementToolTest, TurnOffersInspectImageOnlyWhenToolsSet)
+{
+    ToolRegistry registry;
+    registry.registerTool(std::make_unique<FakeInspectTool>());
+
+    // 未 setTools：工具表与契约保持原样
+    Harness plain;
+    plain.service->onAtActivated(8823, "话题");
+    plain.feed(8823, "现场消息", plain.now);
+    plain.service->runTurn(8823);
+    ASSERT_EQ(plain.agentSchemas.size(), 1U);
+    EXPECT_EQ(plain.agentSchemas.front().size(), 3U) << "group_say/leave_topic/recall_context";
+    EXPECT_FALSE(schemasMention(plain.agentSchemas.front(), "inspect_image"));
+    EXPECT_EQ(plain.agentContracts.front().find("瞥了一眼"), std::string::npos);
+
+    // setTools：会话工具原样在前，inspect_image 追加在后，契约追加看图注
+    Harness withTools;
+    withTools.service->setTools(&registry, {"inspect_image"});
+    withTools.service->onAtActivated(8823, "话题");
+    withTools.feed(8823, "现场消息", withTools.now);
+    withTools.service->runTurn(8823);
+    ASSERT_EQ(withTools.agentSchemas.size(), 1U);
+    const std::vector<std::string> &schemas = withTools.agentSchemas.front();
+    ASSERT_EQ(schemas.size(), 4U);
+    for (std::size_t index = 0; index < 3; ++index)
+        EXPECT_EQ(schemas[index], plain.agentSchemas.front()[index]);
+    EXPECT_EQ(schemas[3], *registry.schemaFor("inspect_image"));
+    const std::string &contract = withTools.agentContracts.front();
+    EXPECT_EQ(contract.rfind(plain.agentContracts.front(), 0), 0U) << "原契约逐字节保留为前缀";
+    EXPECT_NE(contract.find("瞥了一眼"), std::string::npos);
+
+    EXPECT_FALSE(registry.schemaFor("not_registered").has_value());
+}
+
+TEST(EngagementToolTest, TurnExecutesInspectImageThenSpeaks)
+{
+    ToolRegistry registry;
+    auto inspect = std::make_unique<FakeInspectTool>();
+    FakeInspectTool *inspectTool = inspect.get();
+    registry.registerTool(std::move(inspect));
+
+    Harness harness;
+    harness.service->setTools(&registry, {"inspect_image"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "[image asset_id=gimg_x source=inbound | 一张图]", harness.now);
+    harness.turnResponses.push_back(
+        inspectResponse("ii-1", R"({"asset_id":"gimg_x","question":"什么图"})"));
+    harness.turnResponses.push_back(sayResponse("是只猫"));
+    harness.service->runTurn(8823);
+
+    // 工具拿到的是群作用域、无个人语境
+    ASSERT_EQ(inspectTool->receivedContexts.size(), 1U);
+    EXPECT_EQ(inspectTool->receivedContexts.front().shared_scope_id, 8823U);
+    EXPECT_EQ(inspectTool->receivedContexts.front().user_id, 0U);
+    const nlohmann::json args = nlohmann::json::parse(inspectTool->receivedArgs.front());
+    EXPECT_EQ(args.value("asset_id", ""), "gimg_x");
+    EXPECT_EQ(args.value("question", ""), "什么图");
+
+    // 第二次请求带回 assistant(tool_calls) + tool 结果
+    ASSERT_EQ(harness.agentHistories.size(), 2U);
+    const std::vector<ChatMessage> &second = harness.agentHistories[1];
+    ASSERT_EQ(second.size(), 3U);
+    EXPECT_EQ(second[1].role, "assistant");
+    ASSERT_EQ(second[1].tool_calls.size(), 1U);
+    EXPECT_EQ(second[1].tool_calls.front().id, "ii-1");
+    EXPECT_EQ(second[1].tool_calls.front().name, "inspect_image");
+    EXPECT_EQ(nlohmann::json::parse(second[1].tool_calls.front().arguments).value("asset_id", ""),
+              "gimg_x");
+    EXPECT_EQ(second[2].role, "tool");
+    EXPECT_EQ(second[2].tool_call_id, "ii-1");
+    EXPECT_EQ(second[2].content, "图片视觉分析结果：一只猫");
+
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(harness.sender->texts.front(), "是只猫");
+    EXPECT_EQ(harness.service->sessionOf(8823)->turnCount, 1);
+}
+
+TEST(EngagementToolTest, AdminToolsNeverOfferedToTurns)
+{
+    ToolRegistry registry;
+    auto inspect = std::make_unique<FakeInspectTool>();
+    FakeInspectTool *inspectTool = inspect.get();
+    registry.registerTool(std::move(inspect));
+    auto admin = std::make_unique<FakeAdminTool>();
+    FakeAdminTool *adminTool = admin.get();
+    registry.registerTool(std::move(admin));
+
+    Harness harness;
+    harness.service->setTools(&registry, {"inspect_image", "admin_tool", "not_registered"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+
+    // 模型硬调管理员工具（与 inspect_image 同一回复）：只回灌"未知工具"，不执行
+    ChatResponse both = inspectResponse("ii-1", R"({"question":"看看"})");
+    both.tool_calls.push_back({"ad-1", "admin_tool", "{}"});
+    harness.turnResponses.push_back(both);
+    harness.turnResponses.push_back(passResponse());
+    harness.service->runTurn(8823);
+
+    ASSERT_FALSE(harness.agentSchemas.empty());
+    const std::vector<std::string> &schemas = harness.agentSchemas.front();
+    EXPECT_TRUE(schemasMention(schemas, "inspect_image"));
+    EXPECT_FALSE(schemasMention(schemas, "admin_tool"));
+    EXPECT_FALSE(schemasMention(schemas, "not_registered"));
+    EXPECT_EQ(schemas.size(), 4U);
+
+    EXPECT_EQ(adminTool->executions, 0);
+    EXPECT_EQ(inspectTool->receivedArgs.size(), 1U);
+    ASSERT_EQ(harness.agentHistories.size(), 2U);
+    const std::vector<ChatMessage> &second = harness.agentHistories[1];
+    ASSERT_EQ(second.size(), 4U);
+    EXPECT_EQ(second[3].tool_call_id, "ad-1");
+    EXPECT_EQ(second[3].content.rfind("错误：未知工具", 0), 0U);
+}
+
+TEST(EngagementToolTest, RecallAndInspectInOneResponseBothRunBeforeNextRequest)
+{
+    ToolRegistry registry;
+    auto inspect = std::make_unique<FakeInspectTool>();
+    FakeInspectTool *inspectTool = inspect.get();
+    registry.registerTool(std::move(inspect));
+
+    Harness harness;
+    harness.service->setTools(&registry, {"inspect_image"});
+    harness.service->onAtActivated(8823, "话题");
+    // 32 条：窗口只装最后 30 条，最早 2 条只能靠召回
+    for (int index = 0; index < 32; ++index)
+    {
+        const std::string text = index < 2 ? "船新版本介绍" + std::to_string(index)
+                                           : "闲聊" + std::to_string(index);
+        harness.feedRaw(8823, text, harness.now + index);
+    }
+
+    ChatResponse combined;
+    combined.code = 200;
+    combined.finish_reason = "tool_calls";
+    combined.tool_calls.push_back({"rc-1", "recall_context", R"({"keywords":["船新","版本"]})"});
+    combined.tool_calls.push_back({"ii-1", "inspect_image", R"({"question":"什么图"})"});
+    harness.turnResponses.push_back(combined);
+    harness.turnResponses.push_back(sayResponse("原来如此"));
+    harness.service->runTurn(8823);
+
+    // 两个调用都在下一次请求之前执行完毕：一条 assistant + 两条 tool
+    ASSERT_EQ(harness.agentHistories.size(), 2U);
+    const std::vector<ChatMessage> &second = harness.agentHistories[1];
+    ASSERT_EQ(second.size(), 4U);
+    EXPECT_EQ(second[1].role, "assistant");
+    EXPECT_EQ(second[1].tool_calls.size(), 2U);
+    EXPECT_EQ(second[2].role, "tool");
+    EXPECT_EQ(second[2].tool_call_id, "rc-1");
+    EXPECT_NE(second[2].content.find("船新版本介绍0"), std::string::npos);
+    EXPECT_EQ(second[3].role, "tool");
+    EXPECT_EQ(second[3].tool_call_id, "ii-1");
+    EXPECT_EQ(second[3].content, "图片视觉分析结果：一只猫");
+    EXPECT_EQ(inspectTool->receivedArgs.size(), 1U);
+    EXPECT_EQ(harness.service->sessionOf(8823)->recallUsed, 1);
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(harness.sender->texts.front(), "原来如此");
+}
+
+TEST(EngagementToolTest, ToolRoundCapEndsAsPass)
+{
+    ToolRegistry registry;
+    auto inspect = std::make_unique<FakeInspectTool>();
+    FakeInspectTool *inspectTool = inspect.get();
+    registry.registerTool(std::move(inspect));
+
+    Harness harness;
+    harness.service->setTools(&registry, {"inspect_image"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    for (int index = 0; index < 4; ++index)
+        harness.turnResponses.push_back(
+            inspectResponse("ii-" + std::to_string(index), R"({"question":"再看看"})"));
+    harness.service->runTurn(8823);
+
+    // 3 趟工具轮后模型仍要工具：本拍按沉默处理
+    EXPECT_EQ(inspectTool->receivedArgs.size(), 3U);
+    EXPECT_EQ(harness.agentHistories.size(), 4U);
+    EXPECT_TRUE(harness.sender->texts.empty());
+    auto session = harness.service->sessionOf(8823);
+    ASSERT_TRUE(session.has_value());
+    EXPECT_EQ(session->state, EngagementState::Active);
+    EXPECT_EQ(session->consecutivePasses, 1);
+    EXPECT_EQ(session->turnCount, 0);
 }
 
 // ===== 集成：GroupContextService.observe → EngagementService 全链路 =====

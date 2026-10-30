@@ -158,11 +158,54 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
                         keys += (keys.empty() ? "" : ",") + it.key();
                     LOG_WARNING("图片段没有 url 字段，无法入库（data 字段：" + keys + "）");
                 }
-                // 表情包形态（NapCat/LLOneBot：sub_type=1，summary="[动画表情]"）：
-                // sub_type 可能是数字或字符串，宽容提取
+                // 表情包形态（2026-10-30 核对 LLOneBot 源码 incoming.ts + 线上 2983 条 image 段）：
+                // LLOneBot 发 {file, subType, url, file_size}——驼峰 subType、无 summary；
+                // NapCat 发 sub_type + summary。两种键名都认，数字或字符串都认。值是 QQ NT 的
+                // picSubType 原样透传：0 普通图/截图，1 表情包，7 贴图（联想表情），13 热搜图，
+                // 11 未见文档——非零一律视为"以表情包形式发送"
                 message.image_summary = stringField(segment["data"], "summary", "");
-                message.image_is_sticker = int64Field(segment["data"], "sub_type", 0) == 1 ||
-                                           !message.image_summary.empty();
+                const std::int64_t subType = int64Field(segment["data"], "subType",
+                                                        int64Field(segment["data"], "sub_type", 0));
+                message.image_is_sticker = subType != 0 || !message.image_summary.empty();
+            }
+            else if (type == "video")
+            {
+                message.attachment_labels.push_back("[视频]");
+            }
+            else if (type == "record")
+            {
+                message.attachment_labels.push_back("[语音]");
+            }
+            else if (type == "file")
+            {
+                // 大图常以文件形式发（真机见过 38MB 的 png）：留文件名让她知道那是什么
+                const std::string name = stringField(segment["data"], "file", "");
+                message.attachment_labels.push_back(name.empty() ? "[文件]" : "[文件 " + name + "]");
+            }
+            else if (type == "json")
+            {
+                // 分享卡片/小程序：data.data 是一段 JSON 字符串，prompt 是卡片的一句话标题
+                std::string label = "[卡片]";
+                const std::string inner = stringField(segment["data"], "data", "");
+                if (!inner.empty())
+                {
+                    const nlohmann::json card = nlohmann::json::parse(inner, nullptr, false);
+                    if (card.is_object())
+                    {
+                        const std::string prompt = stringField(card, "prompt", "");
+                        if (!prompt.empty())
+                            label = "[卡片 " + prompt + "]";
+                    }
+                }
+                message.attachment_labels.push_back(label);
+            }
+            else if (type == "forward")
+            {
+                message.attachment_labels.push_back("[合并转发]");
+            }
+            else if (type == "markdown" || type == "keyboard")
+            {
+                message.attachment_labels.push_back("[卡片]");
             }
             else if (type == "mface")
             {

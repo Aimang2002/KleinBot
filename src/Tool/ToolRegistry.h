@@ -5,6 +5,7 @@
 #include "../../Library/nlohmann/json.hpp"
 #include <vector>
 #include <memory>
+#include <optional>
 #include <string>
 
 class ToolRegistry
@@ -20,15 +21,18 @@ public:
     {
         std::vector<std::string> result;
         for (const auto &t : tools)
-        {
-            nlohmann::json tool_def;
-            tool_def["type"] = "function";
-            tool_def["function"]["name"] = t->name();
-            tool_def["function"]["description"] = t->description();
-            tool_def["function"]["parameters"] = nlohmann::json::parse(t->parametersSchema());
-            result.push_back(tool_def.dump());
-        }
+            result.push_back(schemaOf(*t));
         return result;
+    }
+
+    // 单个工具的 OpenAI tool 定义（与 allSchemas() 同形）；未注册返回 nullopt。
+    // 供只开放部分工具的调用方（如群会话轮）按名挑选
+    std::optional<std::string> schemaFor(const std::string &name) const
+    {
+        const Tool *tool = find(name);
+        if (tool == nullptr)
+            return std::nullopt;
+        return schemaOf(*tool);
     }
 
     // 按名查找，未注册返回 nullptr
@@ -54,6 +58,16 @@ public:
     }
 
 private:
+    static std::string schemaOf(const Tool &tool)
+    {
+        nlohmann::json tool_def;
+        tool_def["type"] = "function";
+        tool_def["function"]["name"] = tool.name();
+        tool_def["function"]["description"] = tool.description();
+        tool_def["function"]["parameters"] = nlohmann::json::parse(tool.parametersSchema());
+        return tool_def.dump();
+    }
+
     std::vector<std::unique_ptr<Tool>> tools;
 };
 

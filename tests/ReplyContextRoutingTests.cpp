@@ -289,6 +289,48 @@ TEST(OneBotEventDecoderStickerTest, ParsesStickerImageMfaceAndFaceSegments)
     EXPECT_EQ(sticker->face_summaries[1], "face:14");
     EXPECT_EQ(sticker->face_summaries[2], "face:178");
 
+    // LLOneBot 键名是驼峰 subType（2026-10-30 源码核对 + 线上实测）：非零即表情包形态
+    //（7=贴图、13=热搜图）；此前只读 NapCat 形态的 sub_type，线上贴纸标记从未生效
+    const auto camel = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [{"type": "image", "data": {"url": "http://img/u.jpg", "subType": 7, "file": "u.jpg"}}],
+        "message_id": 7803,
+        "time": 1757010602
+    })");
+    ASSERT_TRUE(camel.has_value());
+    EXPECT_TRUE(camel->image_is_sticker);
+
+    // 无正文段打标签：视频 / 语音 / 文件（带名）/ 分享卡片（带 prompt）/ 合并转发
+    const auto labels = decoder.decode(R"({
+        "post_type": "message",
+        "message_type": "group",
+        "user_id": 20001,
+        "group_id": 8823,
+        "message": [
+            {"type": "video", "data": {"url": "http://v/a.mp4", "file": "a.mp4"}},
+            {"type": "record", "data": {"url": "http://v/a.amr"}},
+            {"type": "file", "data": {"file": "7B0A6697.png", "file_size": "38895864"}},
+            {"type": "json", "data": {"data": "{\"ver\":\"1.0\",\"prompt\":\"[QQ小程序]某视频\"}"}},
+            {"type": "json", "data": {"data": "not json"}},
+            {"type": "forward", "data": {"id": "123"}}
+        ],
+        "message_id": 7804,
+        "time": 1757010603
+    })");
+    ASSERT_TRUE(labels.has_value());
+    EXPECT_TRUE(labels->plain_text.empty());
+    EXPECT_TRUE(labels->message_data_url.empty()) << "视频/语音的 url 不是图片，不进 message_data_url";
+    ASSERT_EQ(labels->attachment_labels.size(), 6U);
+    EXPECT_EQ(labels->attachment_labels[0], "[视频]");
+    EXPECT_EQ(labels->attachment_labels[1], "[语音]");
+    EXPECT_EQ(labels->attachment_labels[2], "[文件 7B0A6697.png]");
+    EXPECT_EQ(labels->attachment_labels[3], "[卡片 [QQ小程序]某视频]");
+    EXPECT_EQ(labels->attachment_labels[4], "[卡片]");
+    EXPECT_EQ(labels->attachment_labels[5], "[合并转发]");
+
     // sub_type 字符串形态（JS 系实现端）也算；无 summary 时仍按 sub_type 判定
     const auto stringSubType = decoder.decode(R"({
         "post_type": "message",

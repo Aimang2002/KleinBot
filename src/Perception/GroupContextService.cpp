@@ -65,6 +65,14 @@ void GroupContextService::observe(const InboundMessage &message)
         const std::string token = "[表情 " + label + "]";
         record.text = record.text.empty() ? token : (record.text + " " + token);
     }
+    // 无正文段的文字标签（视频/语音/文件/卡片/合并转发）：原样拼进缓冲，她至少知道
+    // 群里发了个什么；此前这类消息整条退化成裸 "[图片]"
+    for (const std::string &label : message.attachment_labels)
+    {
+        if (label.empty())
+            continue;
+        record.text = record.text.empty() ? label : (record.text + " " + label);
+    }
     std::optional<ImageAsset> asset;
     if (!message.message_data_url.empty())
     {

@@ -13,7 +13,9 @@
  *
  * 轮次循环：主 Agent（人格 system + 公共上下文材料 + 动作工具表）每轮
  * 三选一——group_say（说话）/ 不调用工具且无文字（pass，连续 3 拍收场）/
- * leave_topic（离场，可带最后一句）。硬后盖不依赖模型自觉：轮次上限、
+ * leave_topic（离场，可带最后一句）。定案前可走至多 3 趟工具轮（recall_context
+ * 召回 + setTools 开放的只读注册表工具，如 inspect_image），结果回灌后再定案。
+ * 硬后盖不依赖模型自觉：轮次上限、
  * 会话时长、群内不活跃时长任一触顶强制结束。
  *
  * 结束不是删除：会话（含话题行）保留 2 小时，期间 judge 材料可引用
@@ -44,6 +46,7 @@ namespace affect
 {
 class DecisionRecorder;
 }
+class ToolRegistry;
 
 enum class EngagementState
 {
@@ -127,6 +130,11 @@ public:
     {
         this->decisionRecorder = recorder;
     }
+    // 会话轮可用的注册表工具（只读类，如 inspect_image）：tools 由组合根持有、
+    // 须比本服务活得久；allowedNames 当场过滤——未注册或 requiresAdmin() 的
+    // 名字丢弃并告警（L3 护栏：管理员工具永不开放给会话轮）。不调用 = 无注册表
+    // 工具，会话轮 prompt 与工具表与此前一致
+    void setTools(const ToolRegistry *tools, std::vector<std::string> allowedNames);
 
     // worker 线程：监控群新消息（record 已入库）。会话存活期喂活动/点名；
     // 无存活会话时提名字无 @ 是软激活信号（judge 保险丝后提交判定）
@@ -224,6 +232,8 @@ private:
     Submit submitJudge;
     MemberProvider memberProvider;
     affect::DecisionRecorder *decisionRecorder = nullptr;
+    const ToolRegistry *tools = nullptr;
+    std::vector<std::string> turnToolNames; // setTools 过滤后的会话轮注册表工具名
 };
 
 #endif // ENGAGEMENT_SERVICE_H

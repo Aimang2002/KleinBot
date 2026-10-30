@@ -26,6 +26,10 @@ struct InboundMessage
     // mface 段的 data.summary（如 "[狗头]"）与 face 段的 "face:<id>"，按出现顺序。
     // 只有群观察路径消费（拼成 [表情 …] 进群缓冲），私聊路径不读
     std::vector<std::string> face_summaries;
+    // 没有正文也没有可下载 url 的段的文字标签（2026-10-30，真机：这类消息此前整条退化成
+    // 裸 "[图片]"）：video→"[视频]"、record→"[语音]"、file→"[文件 名]"、json→"[卡片 提示语]"、
+    // forward→"[合并转发]"、markdown/keyboard→"[卡片]"。按出现顺序；群观察路径与 @ 路径都消费
+    std::vector<std::string> attachment_labels;
 
     // 入站 @ 的结构化记录：at 段的 qq 列表（"all" 广播不含 bot 个人，不记录）。
     // 替代旧 raw_message 的 CQ:at 字符串匹配——群聊触发门槛与指向性回复都以它为准

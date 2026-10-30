@@ -281,6 +281,44 @@ TEST(GroupContextImageTest, ObserveImportsImageIntoSharedStoreAndWritesPlacehold
     EXPECT_EQ(after[4].text, "[图片]");
 }
 
+// 无正文段（视频/文件/卡片）不再整条退化成裸 "[图片]"，标签原样进缓冲（2026-10-30）
+TEST(GroupContextImageTest, ObserveWritesAttachmentLabelsInsteadOfBarePlaceholder)
+{
+    TemporaryDirectory directory;
+    const std::string dbPath = directory.path() + "/ctx.db";
+    GroupContextStore store(dbPath);
+    NoopApiChannel api;
+    GroupListService state(directory.path() + "/state.db", api);
+    state.setFeatureEnabled(true);
+    state.setMonitored(88, true);
+    BotIdentity bot;
+    bot.id = 10086;
+    bot.name = "Klein";
+    GroupContextService service(&state, bot, &store, nullptr);
+
+    InboundMessage video;
+    video.post_type = "message";
+    video.message_type = "group";
+    video.group_id = 88;
+    video.user_id = 7;
+    video.nickname = "小白";
+    video.message_id = 6001;
+    video.message_timestamp = 1000;
+    video.attachment_labels = {"[视频]", "[文件 a.png]"};
+    service.observe(video);
+
+    InboundMessage card = video;
+    card.message_id = 6002;
+    card.plain_text = "看这个";
+    card.attachment_labels = {"[卡片 [QQ小程序]某视频]"};
+    service.observe(card);
+
+    const auto records = store.snapshot(88);
+    ASSERT_EQ(records.size(), 2U);
+    EXPECT_EQ(records[0].text, "[视频] [文件 a.png]");
+    EXPECT_EQ(records[1].text, "看这个 [卡片 [QQ小程序]某视频]");
+}
+
 // R1.1 零成本表情：贴纸图占位符带 sticker 标记，mface/face 摘要拼成 [表情 …]
 TEST(GroupContextImageTest, ObserveMarksStickerAndAppendsFaceSummaries)
 {

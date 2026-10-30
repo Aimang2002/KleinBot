@@ -4,6 +4,8 @@
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
 #include "../Tool/ToolArgumentParser.h"
+#include "../Tool/ToolContext.h"
+#include "../Tool/ToolRegistry.h"
 #include "../utils/UniqueId.h"
 #include "../utils/Utils.hpp"
 
@@ -22,6 +24,7 @@ constexpr std::size_t kSingleMessageTokenLimit = 1000; // 超长单条截断门�
 constexpr std::size_t kTruncateHeadChars = 120;        // 截断保头长度（字符，句读收尾）
 constexpr int kRecallBudget = 1;                  // 上下文召回：每会话 1 次
 constexpr std::size_t kRecallTopK = 8;            // 召回返回条数上限
+constexpr int kTurnToolRounds = 3;                // 会话轮工具轮上限（召回 + 注册表工具）
 constexpr double kRecallFloor = 4.0;              // 召回相关性门槛（复用 TextRecall）
 constexpr int kMaxTurnsPerSession = 20;           // 单会话轮次统计（不再作硬帽，日志观测用）
 constexpr std::int64_t kMaxSessionMessages = 300; // 单会话强制收场：群消息量上限
@@ -97,6 +100,13 @@ const char *const kRecallAvailableNote =
 
 const char *const kRecallExhaustedNote =
     "\n\n[系统注] 上下文召回机会已用尽，基于现有材料判断。";
+
+// 会话轮开放了 inspect_image 时追加：材料里的图片占位符只是瞥视印象
+// （R1.1 GlanceService 写回），需要细节时去看图本身
+const char *const kImageToolNote =
+    "\n\n[系统注] 材料里 [image asset_id=… source=inbound | …] 占位符中 | 之后那句话是你当时瞥了一眼的印象，不是图片本身。"
+    "需要看清细节（文字、人物、局部、第二张/那张图）时调用 inspect_image 并带上 asset_id；"
+    "不确定是哪张就省略 asset_id，系统会取最近一张。";
 
 const char *const kEntryAsk =
     "\n\n以上是这个群话题的现场记录。你刚决定介入这个对话：先把现场读完——"
@@ -649,6 +659,30 @@ EngagementService::PreparedContext EngagementService::prepareContext(
         return context;
 }
 
+void EngagementService::setTools(const ToolRegistry *tools, std::vector<std::string> allowedNames)
+{
+    this->tools = tools;
+    turnToolNames.clear();
+    if (tools == nullptr)
+        return;
+    for (const std::string &name : allowedNames)
+    {
+        const Tool *tool = tools->find(name);
+        if (tool == nullptr)
+        {
+            LOG_WARNING("会话轮工具未注册，已忽略：" + name);
+            continue;
+        }
+        if (tool->requiresAdmin())
+        {
+            LOG_WARNING("会话轮不开放管理员工具，已忽略：" + name);
+            continue;
+        }
+        if (std::find(turnToolNames.begin(), turnToolNames.end(), name) == turnToolNames.end())
+            turnToolNames.push_back(name);
+    }
+}
+
 std::string EngagementService::runContextRecall(const nlohmann::json &arguments,
                                                 std::uint64_t groupId,
                                                 const std::vector<std::int64_t> &shownSeqs) const
@@ -784,65 +818,143 @@ void EngagementService::runTurn(std::uint64_t groupId)
         ask = kColdEntryAsk;
     else if (kind == TurnKind::Address)
         ask = kAddressAsk;
-    const std::string contract = std::string(kEngagementContract) +
-                                 (recallAvailable ? kRecallAvailableNote : kRecallExhaustedNote);
-
     std::vector<ChatMessage> history;
     history.push_back({"user", context.material + ask});
     std::vector<std::string> schemas = {kSaySchema, kLeaveSchema};
     if (recallAvailable)
         schemas.push_back(kRecallSchema);
-
-    ChatResponse response = mainAgent(contract, history, schemas);
-    // 召回轮：主模型请求检索更早记录 → 回灌结果再定案（最多来回 2 趟）
-    for (int round = 0; round < 2; ++round)
+    // 注册表工具（setTools 开放的只读工具，如 inspect_image）排在会话工具之后；
+    // 未 setTools 时工具表与契约与此前逐字节一致
+    const auto isTurnTool = [this](const std::string &name)
     {
-        if (response.cancelled || response.code != 200)
-            break;
-        const ResponseToolCall *recallCall = nullptr;
-        for (const ResponseToolCall &call : response.tool_calls)
+        return tools != nullptr &&
+               std::find(turnToolNames.begin(), turnToolNames.end(), name) != turnToolNames.end();
+    };
+    bool imageToolOffered = false;
+    if (tools != nullptr)
+    {
+        for (const std::string &name : turnToolNames)
         {
-            if (call.name == "recall_context")
-                recallCall = &call;
-        }
-        if (recallCall == nullptr)
-            break;
-
-        // 预算检查与扣减（同群 lane 串行，这里仍以防万一加锁校验）
-        bool allowed = false;
-        {
-            std::lock_guard<std::mutex> lock(mutex);
-            auto it = sessions.find(groupId);
-            if (it != sessions.end() && it->second.state == EngagementState::Active &&
-                it->second.startTs == startTs && it->second.recallUsed < kRecallBudget)
+            if (const std::optional<std::string> schema = tools->schemaFor(name))
             {
-                it->second.recallUsed += 1;
-                allowed = true;
+                schemas.push_back(*schema);
+                if (name == "inspect_image")
+                    imageToolOffered = true;
             }
         }
-        std::string toolResult;
-        if (!allowed)
-        {
-            toolResult = "召回预算已用尽（本次会话不再提供召回），基于现有材料行动。";
-        }
-        else
-        {
-            toolResult = runContextRecall(parseToolArguments(recallCall->arguments),
-                                          groupId, shownSeqs);
-            LOG_INFO("上下文召回执行：群 " + std::to_string(groupId) + "，回灌 " +
-                     std::to_string(toolResult.size()) + " 字符");
-        }
+    }
+    const std::string contract = std::string(kEngagementContract) +
+                                 (recallAvailable ? kRecallAvailableNote : kRecallExhaustedNote) +
+                                 (imageToolOffered ? kImageToolNote : "");
 
+    ChatResponse response = mainAgent(contract, history, schemas);
+    // 工具轮：召回 / 注册表只读工具 → 回灌结果再定案（至多 kTurnToolRounds 趟）。
+    // group_say/leave_topic 是定案动作：同一回复里的其它调用不执行
+    int toolRounds = 0;
+    while (!response.cancelled && response.code == 200 && !response.tool_calls.empty())
+    {
+        bool definitive = false;
+        bool actionable = false;
+        for (const ResponseToolCall &call : response.tool_calls)
+        {
+            if (call.name == "group_say" || call.name == "leave_topic")
+                definitive = true;
+            else if (call.name == "recall_context" || isTurnTool(call.name))
+                actionable = true;
+        }
+        // 只有未知工具：与此前一致按本拍沉默处理（parseTurn 给 Pass），不再追问
+        if (definitive || !actionable)
+            break;
+        if (toolRounds >= kTurnToolRounds)
+        {
+            LOG_WARNING("会话轮工具轮次达上限（" + std::to_string(kTurnToolRounds) +
+                        " 趟）仍在请求工具，本拍按沉默处理：群 " + std::to_string(groupId));
+            break;
+        }
+        ++toolRounds;
+
+        // 一条 assistant 消息带全部 tool_calls（参数归一化），随后每个调用一条 tool 消息
         ChatMessage assistantMsg;
         assistantMsg.role = "assistant";
         for (const ResponseToolCall &call : response.tool_calls)
             assistantMsg.tool_calls.push_back({call.id, call.name, normalizeToolArguments(call.arguments)});
         history.push_back(assistantMsg);
-        ChatMessage toolMsg;
-        toolMsg.role = "tool";
-        toolMsg.tool_call_id = recallCall->id;
-        toolMsg.content = toolResult;
-        history.push_back(toolMsg);
+
+        for (const ResponseToolCall &call : response.tool_calls)
+        {
+            std::string toolResult;
+            if (call.name == "recall_context")
+            {
+                // 预算检查与扣减（同群 lane 串行，这里仍以防万一加锁校验）
+                bool allowed = false;
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    auto it = sessions.find(groupId);
+                    if (it != sessions.end() && it->second.state == EngagementState::Active &&
+                        it->second.startTs == startTs && it->second.recallUsed < kRecallBudget)
+                    {
+                        it->second.recallUsed += 1;
+                        allowed = true;
+                    }
+                }
+                if (!allowed)
+                {
+                    toolResult = "召回预算已用尽（本次会话不再提供召回），基于现有材料行动。";
+                }
+                else
+                {
+                    toolResult = runContextRecall(parseToolArguments(call.arguments),
+                                                  groupId, shownSeqs);
+                    LOG_INFO("上下文召回执行：群 " + std::to_string(groupId) + "，回灌 " +
+                             std::to_string(toolResult.size()) + " 字符");
+                }
+            }
+            else if (isTurnTool(call.name))
+            {
+                Tool *tool = tools->find(call.name);
+                ToolResult result;
+                if (tool == nullptr)
+                {
+                    result.model_content = "错误：未知工具 " + call.name;
+                    LOG_WARNING("会话轮调用了未注册的工具：" + call.name);
+                }
+                else
+                {
+                    // user_id=0：会话轮没有个人语境，图片解析只看本群 24h 群库
+                    try
+                    {
+                        result = tool->execute(normalizeToolArguments(call.arguments),
+                                               ToolContext{0, 0, std::string(), groupId});
+                    }
+                    catch (const std::exception &e)
+                    {
+                        result.model_content = "错误：工具执行失败 " + std::string(e.what());
+                        LOG_ERROR("会话轮工具 " + call.name + " 执行异常：" +
+                                  std::string(e.what()));
+                    }
+                }
+                if (result.cancelled)
+                    return;
+                if (!result.outbound_messages.empty())
+                    LOG_WARNING("会话轮工具 " + call.name + " 产生了出站消息，会话轮不发送，已丢弃：群 " +
+                                std::to_string(groupId));
+                toolResult = result.model_content;
+                LOG_INFO("会话轮工具 " + call.name + " 完成，回灌 " +
+                         std::to_string(toolResult.size()) + " 字符：群 " +
+                         std::to_string(groupId));
+            }
+            else
+            {
+                toolResult = "错误：未知工具 " + call.name;
+                LOG_WARNING("会话轮调用了未开放的工具：" + call.name + "（群 " +
+                            std::to_string(groupId) + "）");
+            }
+            ChatMessage toolMsg;
+            toolMsg.role = "tool";
+            toolMsg.tool_call_id = call.id;
+            toolMsg.content = toolResult;
+            history.push_back(toolMsg);
+        }
         response = mainAgent(contract, history, schemas);
     }
     if (response.cancelled || response.code != 200)
