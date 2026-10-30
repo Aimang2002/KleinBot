@@ -101,12 +101,14 @@ const char *const kRecallAvailableNote =
 const char *const kRecallExhaustedNote =
     "\n\n[系统注] 上下文召回机会已用尽，基于现有材料判断。";
 
-// 会话轮开放了 inspect_image 时追加：材料里的图片占位符只是瞥视印象
-// （R1.1 GlanceService 写回），需要细节时去看图本身
+// 会话轮开放了任一图片工具（inspect_image/generate_image/send_image）时追加：
+// 材料里的图片占位符只是瞥视印象（R1.1 GlanceService 写回），需要细节时去看图本身；
+// 生图/重发图的结果当场发到群里（2026-10-30 真机：点名让她画图，她只能嘴上说）
 const char *const kImageToolNote =
     "\n\n[系统注] 材料里 [image asset_id=… source=inbound | …] 占位符中 | 之后那句话是你当时瞥了一眼的印象，不是图片本身。"
     "需要看清细节（文字、人物、局部、第二张/那张图）时调用 inspect_image 并带上 asset_id；"
-    "不确定是哪张就省略 asset_id，系统会取最近一张。";
+    "不确定是哪张就省略 asset_id，系统会取最近一张。"
+    "generate_image 会直接把图发到群里，send_image 可以重发群里 24 小时内的图，调用成功后不必再描述那张图。";
 
 const char *const kEntryAsk =
     "\n\n以上是这个群话题的现场记录。你刚决定介入这个对话：先把现场读完——"
@@ -139,10 +141,23 @@ const char *const kRecallSchema =
 
 // 判定器 system：角色名来自组合根注入的 BotIdentity，不硬编码进代码
 //（用户定规 2026-09-18：嵌入 prompt 不得与 soul.md 产生隐性耦合）
-std::string judgeSystemFor(const std::string &botName)
+std::string judgeSystemFor(const BotIdentity &bot)
 {
+    const std::string &botName = bot.name;
+    // 别名（bot.aliases）也算点名：一并告诉判定器，免得它因字面不符判 NO
+    std::string names = "「" + botName + "」";
+    bool hasAlias = false;
+    for (const std::string &alias : bot.aliases)
+    {
+        if (alias.empty())
+            continue;
+        names += "或「" + alias + "」";
+        hasAlias = true;
+    }
+    if (hasAlias)
+        names += "（都是对 " + botName + " 的称呼）";
     return "你是判定器。QQ群聊机器人 " + botName + " 监控了一段群聊记录，"
-           "最后一条消息提到了「" + botName + "」这个名字但没有 @ 他。"
+           "最后一条消息提到了" + names + "这个名字但没有 @ 他。"
            "判断 " + botName + " 是否应该介入这段对话。"
            "只输出一行：介入输出 YES；不介入输出 NO 加冒号和一句话理由。"
            "倾向：明显在对 " + botName + " 说话、提问或呼唤 → YES；"
@@ -514,7 +529,7 @@ void EngagementService::runJudge(std::uint64_t groupId)
             material += "　← 这句提到了你";
         material += "\n";
     }
-    const std::string verdict = worker(judgeSystemFor(bot.name), material);
+    const std::string verdict = worker(judgeSystemFor(bot), material);
     if (verdict.empty())
     {
         LOG_WARNING("话题介入判定失败（杂务模型无返回）：群 " + std::to_string(groupId));
@@ -823,7 +838,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     std::vector<std::string> schemas = {kSaySchema, kLeaveSchema};
     if (recallAvailable)
         schemas.push_back(kRecallSchema);
-    // 注册表工具（setTools 开放的只读工具，如 inspect_image）排在会话工具之后；
+    // 注册表工具（setTools 开放的工具，如 inspect_image/generate_image）排在会话工具之后；
     // 未 setTools 时工具表与契约与此前逐字节一致
     const auto isTurnTool = [this](const std::string &name)
     {
@@ -838,7 +853,8 @@ void EngagementService::runTurn(std::uint64_t groupId)
             if (const std::optional<std::string> schema = tools->schemaFor(name))
             {
                 schemas.push_back(*schema);
-                if (name == "inspect_image")
+                if (name == "inspect_image" || name == "generate_image" ||
+                    name == "send_image")
                     imageToolOffered = true;
             }
         }
@@ -848,7 +864,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
                                  (imageToolOffered ? kImageToolNote : "");
 
     ChatResponse response = mainAgent(contract, history, schemas);
-    // 工具轮：召回 / 注册表只读工具 → 回灌结果再定案（至多 kTurnToolRounds 趟）。
+    // 工具轮：召回 / 注册表工具 → 回灌结果再定案（至多 kTurnToolRounds 趟）。
     // group_say/leave_topic 是定案动作：同一回复里的其它调用不执行
     int toolRounds = 0;
     while (!response.cancelled && response.code == 200 && !response.tool_calls.empty())
@@ -935,9 +951,32 @@ void EngagementService::runTurn(std::uint64_t groupId)
                 }
                 if (result.cancelled)
                     return;
+                // 工具出站消息（generate_image/send_image 的图）当场发到群里，再回灌
+                // model_content；它们不是"她的发言"，不挂本轮执行记录。关联键只给
+                // 第一条（回执回填 message_id 用），与 @ 路径一致先入群缓冲、后投递
                 if (!result.outbound_messages.empty())
-                    LOG_WARNING("会话轮工具 " + call.name + " 产生了出站消息，会话轮不发送，已丢弃：群 " +
-                                std::to_string(groupId));
+                {
+                    if (sender == nullptr)
+                    {
+                        LOG_WARNING("会话轮工具 " + call.name + " 产生了出站消息，但未接出站端口：群 " +
+                                    std::to_string(groupId));
+                    }
+                    else
+                    {
+                        for (std::size_t index = 0; index < result.outbound_messages.size(); ++index)
+                        {
+                            const OutboundMessage &message = result.outbound_messages[index];
+                            const std::string correlationId =
+                                index == 0 ? utils::uniqueId("dlv") : std::string();
+                            if (outboundRecorder)
+                                outboundRecorder(groupId, message, correlationId);
+                            deliverMessage(groupId, message, correlationId);
+                        }
+                        LOG_INFO("会话轮工具 " + call.name + " 投递出站消息 " +
+                                 std::to_string(result.outbound_messages.size()) + " 条：群 " +
+                                 std::to_string(groupId));
+                    }
+                }
                 toolResult = result.model_content;
                 LOG_INFO("会话轮工具 " + call.name + " 完成，回灌 " +
                          std::to_string(toolResult.size()) + " 字符：群 " +
@@ -1187,9 +1226,17 @@ void EngagementService::deliverText(std::uint64_t groupId, const std::string &te
 {
     if (sender == nullptr || utils::trim(text).empty())
         return;
+    deliverMessage(groupId, TextMessage{utils::trim(text)}, correlationId);
+}
+
+void EngagementService::deliverMessage(std::uint64_t groupId, const OutboundMessage &message,
+                                       const std::string &correlationId)
+{
+    if (sender == nullptr)
+        return;
     OutboundDelivery delivery;
     delivery.target = GroupMessageTarget{std::to_string(groupId)};
-    delivery.message = TextMessage{utils::trim(text)};
+    delivery.message = message;
     delivery.correlation_id = correlationId;
     sender->deliver(std::move(delivery));
 }

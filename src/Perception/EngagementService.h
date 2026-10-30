@@ -14,7 +14,8 @@
  * 轮次循环：主 Agent（人格 system + 公共上下文材料 + 动作工具表）每轮
  * 三选一——group_say（说话）/ 不调用工具且无文字（pass，连续 3 拍收场）/
  * leave_topic（离场，可带最后一句）。定案前可走至多 3 趟工具轮（recall_context
- * 召回 + setTools 开放的只读注册表工具，如 inspect_image），结果回灌后再定案。
+ * 召回 + setTools 开放的注册表工具，如 inspect_image / generate_image），结果回灌后
+ * 再定案；工具产出的出站消息（图）当场投递并入群缓冲。
  * 硬后盖不依赖模型自觉：轮次上限、
  * 会话时长、群内不活跃时长任一触顶强制结束。
  *
@@ -112,6 +113,12 @@ public:
     // 群人数查询 seam（组合根适配 GroupListService 镜像；冷启动阈值的人数
     // 地板/先验用；查不到返回 0）。测试注入常量
     using MemberProvider = std::function<long(std::uint64_t groupId)>;
+    // 工具出站入库 seam（组合根适配 GroupContextService::recordOutbound）：会话轮
+    // 工具产出的出站消息（generate_image/send_image 的图）投递时同步记进群缓冲，
+    // 占位符与 @ 路径一致；可空 = 只投递不入库
+    using OutboundRecorder = std::function<void(std::uint64_t groupId,
+                                                const OutboundMessage &message,
+                                                const std::string &correlationId)>;
 
     EngagementService(BotIdentity bot, GroupContextStore *store,
                       MessageSenderPort *sender = nullptr,
@@ -125,14 +132,19 @@ public:
     {
         this->memberProvider = std::move(memberProvider);
     }
+    void setOutboundRecorder(OutboundRecorder outboundRecorder)
+    {
+        this->outboundRecorder = std::move(outboundRecorder);
+    }
     // M1 影子记录：可空；非空且启用时记录每轮决策/执行，不改变动作
     void setDecisionRecorder(affect::DecisionRecorder *recorder)
     {
         this->decisionRecorder = recorder;
     }
-    // 会话轮可用的注册表工具（只读类，如 inspect_image）：tools 由组合根持有、
-    // 须比本服务活得久；allowedNames 当场过滤——未注册或 requiresAdmin() 的
-    // 名字丢弃并告警（L3 护栏：管理员工具永不开放给会话轮）。不调用 = 无注册表
+    // 会话轮可用的注册表工具（如 inspect_image / generate_image / send_image）：
+    // tools 由组合根持有、须比本服务活得久；allowedNames 当场过滤——未注册或
+    // requiresAdmin() 的名字丢弃并告警（L3 护栏：管理员工具永不开放给会话轮）。
+    // 工具的出站消息直接投递到群并经 OutboundRecorder 入库。不调用 = 无注册表
     // 工具，会话轮 prompt 与工具表与此前一致
     void setTools(const ToolRegistry *tools, std::vector<std::string> allowedNames);
 
@@ -185,6 +197,8 @@ private:
     // 执行记录推进 sent/failed/unknown、自消息补上真实 message_id
     void deliverText(std::uint64_t groupId, const std::string &text,
                      const std::string &correlationId = {});
+    void deliverMessage(std::uint64_t groupId, const OutboundMessage &message,
+                        const std::string &correlationId = {});
     void recordEngagementSpeech(std::uint64_t groupId, const std::string &text,
                                 std::int64_t now, const std::string &correlationId = {});
     bool replyToSelf(const GroupMessageRecord &record) const;
@@ -231,6 +245,7 @@ private:
     Submit submitTurn;
     Submit submitJudge;
     MemberProvider memberProvider;
+    OutboundRecorder outboundRecorder;
     affect::DecisionRecorder *decisionRecorder = nullptr;
     const ToolRegistry *tools = nullptr;
     std::vector<std::string> turnToolNames; // setTools 过滤后的会话轮注册表工具名

@@ -653,9 +653,15 @@ int main(int argc, char **argv)
 			}
 			return chatService.buildOnceWith(worker, systemPrompt, userPrompt);
 		});
-	// 会话轮可用的只读注册表工具：群友发图时她能经 inspect_image 看图本身，
-	// 而不止占位符里的瞥视一句话（2026-10-30 真机缺陷）。管理员工具由 setTools 过滤
-	engagementService.setTools(&tools, {"inspect_image"});
+	// 会话轮可用的注册表工具：群友发图时她能经 inspect_image 看图本身，
+	// 而不止占位符里的瞥视一句话（2026-10-30 真机缺陷）；点名让她画图/重发图时
+	// generate_image/send_image 的图当场发到群里（生图存群库）。管理员工具由 setTools 过滤
+	engagementService.setTools(&tools, {"inspect_image", "generate_image", "send_image"});
+	// 工具出站图入群缓冲：占位符与 @ 路径（Message::dispatch）一致
+	engagementService.setOutboundRecorder(
+		[&groupContextService](std::uint64_t groupId, const OutboundMessage &message,
+							   const std::string &correlationId)
+		{ groupContextService.recordOutbound(groupId, message, correlationId); });
 	// 冷启动阈值的人数地板/先验：从群列表镜像查成员数
 	engagementService.setMemberProvider([&groupListService](std::uint64_t groupId) -> long
 		{

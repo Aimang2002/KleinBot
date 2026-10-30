@@ -48,11 +48,16 @@ private:
 class FakeSender : public MessageSenderPort
 {
 public:
+    // texts 只收文本（既有断言按它数"她说了几句"）；deliveries 按序收全部投递
+    // （含工具出站的图片），非文本不再 std::get 抛异常
     void deliver(OutboundDelivery delivery) override
     {
-        texts.push_back(std::get<TextMessage>(delivery.message).content);
+        if (const auto *text = std::get_if<TextMessage>(&delivery.message))
+            texts.push_back(text->content);
+        deliveries.push_back(std::move(delivery));
     }
     std::vector<std::string> texts;
+    std::vector<OutboundDelivery> deliveries;
 };
 
 GroupMessageRecord record(std::uint64_t group, std::uint64_t qq, const std::string &nickname,
@@ -662,6 +667,32 @@ public:
     int executions = 0;
 };
 
+// 生图工具替身：结果形态与 GenerateImageTool 成功分支一致（出站图 + 占位符 + 终态）
+class FakeDrawTool : public Tool
+{
+public:
+    std::string name() const override { return "generate_image"; }
+    std::string description() const override { return "根据提示词生成图片。"; }
+    std::string parametersSchema() const override
+    {
+        return R"({"type":"object","properties":{"prompt":{"type":"string"}},"required":["prompt"]})";
+    }
+    ToolResult execute(const std::string &args, const ToolContext &ctx) override
+    {
+        receivedArgs.push_back(args);
+        receivedContexts.push_back(ctx);
+        return ToolResult{"图片已生成，可以继续询问它的内容，或要求重新发送。",
+                          {ImageMessage{ImageMessage::Source::LocalPath, "/tmp/x.png"}},
+                          "[image asset_id=gimg_t source=generated]",
+                          true,
+                          false,
+                          true};
+    }
+
+    std::vector<std::string> receivedArgs;
+    std::vector<ToolContext> receivedContexts;
+};
+
 ChatResponse inspectResponse(const std::string &id, const std::string &arguments)
 {
     ChatResponse response;
@@ -867,6 +898,95 @@ TEST(EngagementToolTest, ToolRoundCapEndsAsPass)
     EXPECT_EQ(session->state, EngagementState::Active);
     EXPECT_EQ(session->consecutivePasses, 1);
     EXPECT_EQ(session->turnCount, 0);
+}
+
+TEST(EngagementToolTest, TurnDeliversToolOutboundImageAndRecordsPlaceholder)
+{
+    ToolRegistry registry;
+    auto draw = std::make_unique<FakeDrawTool>();
+    FakeDrawTool *drawTool = draw.get();
+    registry.registerTool(std::move(draw));
+
+    Harness harness;
+    harness.service->setTools(&registry, {"generate_image"});
+    struct Recorded
+    {
+        std::uint64_t groupId;
+        OutboundMessage message;
+        std::string correlationId;
+    };
+    std::vector<Recorded> recorded;
+    harness.service->setOutboundRecorder(
+        [&recorded](std::uint64_t groupId, const OutboundMessage &message,
+                    const std::string &correlationId)
+        { recorded.push_back({groupId, message, correlationId}); });
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "能画一只猫吗", harness.now);
+
+    ChatResponse drawCall;
+    drawCall.code = 200;
+    drawCall.finish_reason = "tool_calls";
+    drawCall.tool_calls.push_back({"gi-1", "generate_image", R"({"prompt":"一只猫"})"});
+    harness.turnResponses.push_back(drawCall);
+    harness.turnResponses.push_back(sayResponse("画好了"));
+    harness.service->runTurn(8823);
+
+    // 生图在群作用域执行（存群库），无个人语境
+    ASSERT_EQ(drawTool->receivedContexts.size(), 1U);
+    EXPECT_EQ(drawTool->receivedContexts.front().shared_scope_id, 8823U);
+    EXPECT_EQ(drawTool->receivedContexts.front().user_id, 0U);
+
+    // 先投递工具出站图，再投递她的那句话
+    ASSERT_EQ(harness.sender->deliveries.size(), 2U);
+    const OutboundDelivery &imageDelivery = harness.sender->deliveries[0];
+    const auto *image = std::get_if<ImageMessage>(&imageDelivery.message);
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->source, ImageMessage::Source::LocalPath);
+    EXPECT_EQ(image->data, "/tmp/x.png");
+    const auto *target = std::get_if<GroupMessageTarget>(&imageDelivery.target);
+    ASSERT_NE(target, nullptr);
+    EXPECT_EQ(target->group_id, "8823");
+    EXPECT_FALSE(imageDelivery.correlation_id.empty());
+
+    // 入库 seam 拿到同一张图与同一个关联键（占位符由 GroupContextService 生成）
+    ASSERT_EQ(recorded.size(), 1U);
+    EXPECT_EQ(recorded.front().groupId, 8823U);
+    const auto *recordedImage = std::get_if<ImageMessage>(&recorded.front().message);
+    ASSERT_NE(recordedImage, nullptr);
+    EXPECT_EQ(recordedImage->data, "/tmp/x.png");
+    EXPECT_EQ(recorded.front().correlationId, imageDelivery.correlation_id);
+
+    // 工具结果照常回灌，模型随后定案说话
+    ASSERT_EQ(harness.agentHistories.size(), 2U);
+    const std::vector<ChatMessage> &second = harness.agentHistories[1];
+    ASSERT_EQ(second.size(), 3U);
+    EXPECT_EQ(second[2].role, "tool");
+    EXPECT_EQ(second[2].tool_call_id, "gi-1");
+    EXPECT_EQ(second[2].content, "图片已生成，可以继续询问它的内容，或要求重新发送。");
+
+    EXPECT_TRUE(std::holds_alternative<TextMessage>(harness.sender->deliveries[1].message));
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(harness.sender->texts.front(), "画好了");
+    EXPECT_EQ(harness.service->sessionOf(8823)->turnCount, 1);
+}
+
+TEST(EngagementToolTest, ImageToolNoteMentionsGenerateWhenOffered)
+{
+    ToolRegistry registry;
+    registry.registerTool(std::make_unique<FakeDrawTool>());
+
+    // 只开放 generate_image（没有 inspect_image）也追加图片注
+    Harness harness;
+    harness.service->setTools(&registry, {"generate_image"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.service->runTurn(8823);
+
+    ASSERT_EQ(harness.agentContracts.size(), 1U);
+    const std::string &contract = harness.agentContracts.front();
+    EXPECT_NE(contract.find("瞥了一眼"), std::string::npos);
+    EXPECT_NE(contract.find("generate_image"), std::string::npos);
+    EXPECT_TRUE(schemasMention(harness.agentSchemas.front(), "generate_image"));
 }
 
 // ===== 集成：GroupContextService.observe → EngagementService 全链路 =====
