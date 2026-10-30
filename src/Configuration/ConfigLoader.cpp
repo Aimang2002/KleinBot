@@ -256,6 +256,42 @@ std::vector<std::int64_t> decodeIdArray(Decoder &decoder, const json &parent,
     return result;
 }
 
+// 字符串数组（bot.aliases 等）：元素级宽容——非字符串/空串告警跳过，重复项去重
+std::vector<std::string> decodeStringArray(Decoder &decoder, const json &parent,
+                                           const std::string &key, const std::string &path)
+{
+    std::vector<std::string> result;
+    auto iterator = parent.find(key);
+    if (iterator == parent.end())
+        return result;
+    if (!iterator->is_array())
+    {
+        decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
+                           path, "必须是字符串数组");
+        return result;
+    }
+    for (const auto &entry : *iterator)
+    {
+        if (!entry.is_string())
+        {
+            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
+                               path, "元素必须是字符串，已跳过");
+            continue;
+        }
+        std::string value = entry.get<std::string>();
+        if (value.empty())
+        {
+            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Range,
+                               path, "元素不能为空字符串，已跳过");
+            continue;
+        }
+        if (std::find(result.begin(), result.end(), value) != result.end())
+            continue;
+        result.push_back(std::move(value));
+    }
+    return result;
+}
+
 ModelEndpointSchema decodeModelEndpoint(Decoder &decoder, const json &parent,
                                         const std::string &key, const std::string &path,
                                         bool allowRegistryForm = false)
@@ -613,10 +649,11 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     const json *bot = decoder.object(document, "bot", "bot", true);
     if (bot != nullptr)
     {
-        decoder.unknownFields(*bot, {"id", "manager_id", "name", "group_chat_enabled"}, "bot");
+        decoder.unknownFields(*bot, {"id", "manager_id", "name", "aliases", "group_chat_enabled"}, "bot");
         config.bot.id = decoder.unsignedInteger(*bot, "id", "bot.id", true);
         config.bot.managerId = decoder.unsignedInteger(*bot, "manager_id", "bot.manager_id", false);
         config.bot.name = decoder.string(*bot, "name", "bot.name", "Klein");
+        config.bot.aliases = decodeStringArray(decoder, *bot, "aliases", "bot.aliases");
         config.bot.groupChatEnabled = decoder.boolean(*bot, "group_chat_enabled", "bot.group_chat_enabled", true);
     }
 

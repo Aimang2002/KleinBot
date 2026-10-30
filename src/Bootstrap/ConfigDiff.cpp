@@ -91,6 +91,8 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
                  "bot.manager_id", ConfigChangeImpact::Restart);
     addIfChanged(diff, current.bot.name, candidate.bot.name,
                  "bot.name", ConfigChangeImpact::Restart);
+    addIfChanged(diff, current.bot.aliases, candidate.bot.aliases,
+                 "bot.aliases", ConfigChangeImpact::Restart);
     addIfChanged(diff, current.bot.groupChatEnabled, candidate.bot.groupChatEnabled,
                  "bot.group_chat_enabled", ConfigChangeImpact::Dynamic);
 

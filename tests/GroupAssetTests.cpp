@@ -386,3 +386,89 @@ TEST(GroupContextImageTest, ObserveMarksStickerAndAppendsFaceSummaries)
     ASSERT_TRUE(photoAsset.has_value());
     EXPECT_EQ(records[2].text, "[image asset_id=" + photoAsset->asset_id + " source=inbound]");
 }
+
+// ---------- 点名：bot.aliases + ASCII 不区分大小写；空正文标签（2026-10-30） ----------
+
+TEST(BotIdentityTest, MentionsBotNameMatchesNameAndAliases)
+{
+    BotIdentity bot;
+    bot.name = "Klein";
+    bot.aliases = {"", "克莱茵", "Kc"};
+
+    EXPECT_TRUE(mentionsBotName(bot, "Klein 在吗"));
+    EXPECT_TRUE(mentionsBotName(bot, "klein在吗")) << "ASCII 不区分大小写";
+    EXPECT_TRUE(mentionsBotName(bot, "问问KLEIN"));
+    EXPECT_TRUE(mentionsBotName(bot, "克莱茵，看一下这张图片")) << "别名命中";
+    EXPECT_TRUE(mentionsBotName(bot, "kc 你好")) << "别名同样不区分 ASCII 大小写";
+    EXPECT_FALSE(mentionsBotName(bot, "凯琳")) << "非 ASCII 精确匹配";
+    EXPECT_FALSE(mentionsBotName(bot, "克莱")) << "别名是被查找的子串，不是反过来";
+    EXPECT_FALSE(mentionsBotName(bot, "今天天气不错")) << "空别名不得匹配任何文本";
+    EXPECT_FALSE(mentionsBotName(bot, ""));
+
+    BotIdentity nameless;
+    nameless.name.clear();
+    EXPECT_FALSE(mentionsBotName(nameless, "随便说点什么")) << "空名字不匹配";
+    nameless.aliases = {"克莱茵"};
+    EXPECT_TRUE(mentionsBotName(nameless, "克莱茵在吗"));
+}
+
+TEST(GroupContextMentionTest, ObserveDetectsAliasesAndLabelsEmptyMessages)
+{
+    TemporaryDirectory directory;
+    const std::string dbPath = directory.path() + "/ctx.db";
+    GroupContextStore store(dbPath);
+    NoopApiChannel api;
+    GroupListService state(directory.path() + "/state.db", api);
+    state.setFeatureEnabled(true);
+    state.setMonitored(88, true);
+    BotIdentity bot;
+    bot.id = 10086;
+    bot.name = "Klein";
+    bot.aliases = {"克莱茵"};
+    GroupContextService service(&state, bot, &store, nullptr);
+
+    InboundMessage base;
+    base.post_type = "message";
+    base.message_type = "group";
+    base.group_id = 88;
+    base.user_id = 7;
+    base.nickname = "小白";
+    base.message_timestamp = 1000;
+
+    InboundMessage alias = base;
+    alias.message_id = 8001;
+    alias.plain_text = "克莱茵，看一下";
+    service.observe(alias);
+
+    InboundMessage upper = base;
+    upper.message_id = 8002;
+    upper.plain_text = "KLEIN 在吗";
+    service.observe(upper);
+
+    InboundMessage other = base;
+    other.message_id = 8003;
+    other.plain_text = "凯琳";
+    service.observe(other);
+
+    // 裸 @：没有任何正文段
+    InboundMessage bareAt = base;
+    bareAt.message_id = 8004;
+    bareAt.mentioned_ids = {bot.id};
+    service.observe(bareAt);
+
+    // 无正文、无 @、无图、无标签（例如未识别的段类型）
+    InboundMessage empty = base;
+    empty.message_id = 8005;
+    service.observe(empty);
+
+    const auto records = store.snapshot(88);
+    ASSERT_EQ(records.size(), 5U);
+    EXPECT_TRUE(records[0].mentionsBot) << "别名点名";
+    EXPECT_EQ(records[0].text, "克莱茵，看一下");
+    EXPECT_TRUE(records[1].mentionsBot) << "大写名字点名";
+    EXPECT_FALSE(records[2].mentionsBot);
+    EXPECT_EQ(records[3].text, "[@Klein]");
+    EXPECT_TRUE(records[3].mentionsBot);
+    EXPECT_EQ(records[4].text, "[非文本消息]");
+    EXPECT_FALSE(records[4].mentionsBot);
+}

@@ -78,7 +78,7 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
 {
     RuntimeSettings result;
     result.schemaVersion = schema.schemaVersion;
-    result.bot = {schema.bot.id, schema.bot.managerId, schema.bot.name};
+    result.bot = {schema.bot.id, schema.bot.managerId, schema.bot.name, schema.bot.aliases};
     result.chat = {
         schema.chat.defaultModel,
         schema.chat.temperature,

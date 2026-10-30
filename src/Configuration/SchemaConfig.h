@@ -12,6 +12,8 @@ struct BotSchema
     std::uint64_t id = 0;
     std::uint64_t managerId = 0;
     std::string name = "Klein";
+    // 她也会答应的别名（群友常用叫法，如 "克莱茵"）；已去空串、去重
+    std::vector<std::string> aliases;
     bool groupChatEnabled = true;
 };
 

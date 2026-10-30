@@ -44,7 +44,7 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
     // （用户定规 2026-09-15：开关与监控群集是运行时状态，由数据库独占管理）
     nlohmann::json document = nlohmann::json::parse(R"({
         "schema_version": 1,
-        "bot": {"id": 123456789, "manager_id": 0, "name": "Klein", "group_chat_enabled": true},
+        "bot": {"id": 123456789, "manager_id": 0, "name": "Klein", "aliases": [], "group_chat_enabled": true},
         "chat": {
             "default_model": "your-chat-model",
             "temperature": 1.0,

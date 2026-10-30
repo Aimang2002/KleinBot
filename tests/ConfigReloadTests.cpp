@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -423,4 +424,86 @@ TEST(PushConfigDiffTest, ClassifiesAllPushKeysAsRestart)
     for (const char *path : {"push.enabled", "push.bind", "push.port", "push.access_token",
                              "push.allowed_groups", "push.allowed_users", "push.max_per_hour"})
         EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Restart)) << path;
+}
+
+// bot.aliases（2026-10-30）：她也会答应的名字；缺省空、空串告警丢弃、去重、Restart 级
+TEST(ConfigLoaderBotTest, AliasesDefaultToEmptyWhenMissing)
+{
+    ConfigLoader loader;
+    const ConfigLoadResult loaded = loader.loadText(validConfig);
+    ASSERT_TRUE(loaded.canStart());
+    ASSERT_NE(loaded.config, nullptr);
+    EXPECT_TRUE(loaded.config->bot.aliases.empty());
+}
+
+TEST(ConfigLoaderBotTest, ParsesAliasesDropsEmptyAndDuplicatesAndClassifiesRestart)
+{
+    ConfigLoader loader;
+    const ConfigLoadResult loaded = loader.loadText(R"({
+        "schema_version": 1,
+        "bot": {"id": 10001, "manager_id": 10002, "name": "Klein",
+                "aliases": ["克莱茵", "", "klein", "克莱茵", 42]},
+        "chat": {"default_model": "test-model"},
+        "models": {"registry_path": "ModelsName.json"},
+        "communication": {
+            "protocol": {"type": "onebot"},
+            "active_transport": "local",
+            "transports": {
+                "local": {
+                    "type": "reverse_websocket",
+                    "bind": "127.0.0.1",
+                    "port": 8600
+                }
+            }
+        }
+    })");
+    ASSERT_TRUE(loaded.canStart());
+    ASSERT_NE(loaded.config, nullptr);
+    const std::vector<std::string> expected{"克莱茵", "klein"};
+    EXPECT_EQ(loaded.config->bot.aliases, expected);
+
+    std::size_t aliasWarnings = 0;
+    for (const ConfigDiagnostic &diagnostic : loaded.diagnostics)
+    {
+        if (diagnostic.path == "bot.aliases")
+        {
+            EXPECT_EQ(diagnostic.severity, ConfigSeverity::Warning) << diagnostic.message;
+            ++aliasWarnings;
+        }
+    }
+    EXPECT_EQ(aliasWarnings, 2U) << "空串与非字符串元素各一条告警，重复项静默去重";
+
+    SchemaConfig candidate = *loaded.config;
+    candidate.bot.aliases = {"克莱茵"};
+    const ConfigDiff diff = compareConfig(*loaded.config, candidate);
+    EXPECT_EQ(diff.size(), 1U);
+    EXPECT_TRUE(containsChange(diff, "bot.aliases", ConfigChangeImpact::Restart));
+}
+
+TEST(ConfigLoaderBotTest, NonArrayAliasesFallBackToEmptyWithDiagnostic)
+{
+    ConfigLoader loader;
+    const ConfigLoadResult loaded = loader.loadText(R"({
+        "schema_version": 1,
+        "bot": {"id": 10001, "name": "Klein", "aliases": "克莱茵"},
+        "chat": {"default_model": "test-model"},
+        "models": {"registry_path": "ModelsName.json"},
+        "communication": {
+            "protocol": {"type": "onebot"},
+            "active_transport": "local",
+            "transports": {
+                "local": {"type": "reverse_websocket", "bind": "127.0.0.1", "port": 8600}
+            }
+        }
+    })");
+    ASSERT_TRUE(loaded.canStart());
+    ASSERT_NE(loaded.config, nullptr);
+    EXPECT_TRUE(loaded.config->bot.aliases.empty());
+    bool found = false;
+    for (const ConfigDiagnostic &diagnostic : loaded.diagnostics)
+    {
+        if (diagnostic.path == "bot.aliases" && diagnostic.severity == ConfigSeverity::Warning)
+            found = true;
+    }
+    EXPECT_TRUE(found);
 }

@@ -229,6 +229,47 @@ TEST_F(PanelServerFixture, PostSentinelRoundtripWritesFileAndReloadsStore)
     EXPECT_EQ(store->current()->schema->bot.name, "Alice");
 }
 
+// bot.aliases 数组经面板 GET→POST 往返原样落盘、进快照，分级为 Restart
+TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsArrayAndClassifiesRestart)
+{
+    httplib::Client client("127.0.0.1", port);
+    {
+        const auto fetched = client.Get("/api/config", authHeaders());
+        ASSERT_TRUE(fetched != nullptr);
+        ASSERT_EQ(fetched->status, 200);
+
+        nlohmann::json candidate = nlohmann::json::parse(fetched->body);
+        candidate["bot"]["aliases"] = nlohmann::json::array({"克莱茵", "klein"});
+        const auto posted = client.Post("/api/config", authHeaders(),
+                                        candidate.dump(), "application/json");
+        ASSERT_TRUE(posted != nullptr);
+        ASSERT_EQ(posted->status, 200);
+
+        const nlohmann::json body = nlohmann::json::parse(posted->body);
+        EXPECT_TRUE(body["reloadSuccess"].get<bool>());
+        bool foundAliases = false;
+        for (const auto &change : body["diff"])
+        {
+            if (change["path"] == "bot.aliases")
+                foundAliases = true;
+        }
+        EXPECT_TRUE(foundAliases);
+        EXPECT_EQ(body["counts"]["restart"], 1);
+    }
+
+    const nlohmann::json written = nlohmann::json::parse(readFile());
+    EXPECT_EQ(written["bot"]["aliases"], nlohmann::json::array({"克莱茵", "klein"}));
+    const std::vector<std::string> expected{"克莱茵", "klein"};
+    EXPECT_EQ(store->current()->schema->bot.aliases, expected);
+
+    // 再取一次：数组形态原样回给面板（不被掩码或压扁）
+    const auto again = client.Get("/api/config", authHeaders());
+    ASSERT_TRUE(again != nullptr);
+    ASSERT_EQ(again->status, 200);
+    EXPECT_EQ(nlohmann::json::parse(again->body)["bot"]["aliases"],
+              nlohmann::json::array({"克莱茵", "klein"}));
+}
+
 TEST_F(PanelServerFixture, PostInvalidConfigReturns422AndKeepsFile)
 {
     const std::string before = readFile();

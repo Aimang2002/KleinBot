@@ -209,10 +209,9 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
             }
             else if (type == "mface")
             {
-                // 商城表情：只取文字摘要（如 "[狗头]"），不下载
+                // 商城表情：只取文字摘要（如 "[狗头]"），不下载；没有名字的也要留个标签
                 const std::string summary = stringField(segment["data"], "summary", "");
-                if (!summary.empty())
-                    message.face_summaries.push_back(summary);
+                message.face_summaries.push_back(summary.empty() ? "[商城表情]" : summary);
             }
             else if (type == "face")
             {
@@ -291,6 +290,29 @@ std::optional<InboundMessage> OneBotEventDecoder::decode(const std::string &payl
                     "），回应将降级为仅@不引用");
     }
     message.message_timestamp = int64Field(document, "time", 0);
+    // 诊断（2026-10-30）：整条消息解析后什么都没留下（无文字、无图片 url、无表情摘要、
+    // 无附件标签）时，记下各段的类型与字段名——真机见过 @ 带附件却只剩 "[图片]" 的消息，
+    // 要靠这条告警才知道是什么段
+    if (postType == "message" && message.plain_text.empty() && message.message_data_url.empty() &&
+        message.face_summaries.empty() && message.attachment_labels.empty() &&
+        document.contains("message") && document["message"].is_array() &&
+        !document["message"].empty())
+    {
+        std::string shape;
+        for (const auto &segment : document["message"])
+        {
+            const std::string type = stringField(segment, "type", "?");
+            if (type == "at" || type == "reply")
+                continue;
+            std::string keys;
+            if (segment.contains("data") && segment["data"].is_object())
+                for (auto it = segment["data"].begin(); it != segment["data"].end(); ++it)
+                    keys += (keys.empty() ? "" : ",") + it.key();
+            shape += (shape.empty() ? "" : " ") + type + "{" + keys + "}";
+        }
+        if (!shape.empty())
+            LOG_WARNING("入站消息没有可识别内容，段形态：" + shape);
+    }
     return message;
 }
 

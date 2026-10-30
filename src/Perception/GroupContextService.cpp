@@ -89,17 +89,17 @@ void GroupContextService::observe(const InboundMessage &message)
                           (message.image_is_sticker ? " sticker" : "") + "]";
         record.text = record.text.empty() ? placeholder : (record.text + " " + placeholder);
     }
-    if (record.text.empty())
-        record.text = "[图片]";
-    record.timestamp = message.message_timestamp > 0 ? message.message_timestamp
-                                                     : std::time(nullptr);
     const bool atMentioned =
         std::find(message.mentioned_ids.begin(), message.mentioned_ids.end(), bot.id) !=
         message.mentioned_ids.end();
-    record.mentionsBot =
-        atMentioned ||
-        (!bot.name.empty() && !message.plain_text.empty() &&
-         message.plain_text.find(bot.name) != std::string::npos);
+    // 什么正文都没留下：裸 @ 记成 "[@名字]"，其余记成 "[非文本消息]"
+    //（此前一律记成 "[图片]"，裸 @ 也被当成发了张图）
+    if (record.text.empty())
+        record.text = atMentioned ? ("[@" + bot.name + "]") : std::string("[非文本消息]");
+    record.timestamp = message.message_timestamp > 0 ? message.message_timestamp
+                                                     : std::time(nullptr);
+    // 点名 = @ 她，或正文含 bot.name / 任一 bot.aliases（ASCII 不区分大小写）
+    record.mentionsBot = atMentioned || mentionsBotName(bot, message.plain_text);
     record.messageId = !message.message_id_raw.empty()
                            ? message.message_id_raw
                            : std::to_string(message.message_id);

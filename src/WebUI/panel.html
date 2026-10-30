@@ -1623,7 +1623,7 @@
     };
     const KEY_LABELS = {
       enabled: "启用", id: "QQ 号", manager_id: "管理员 QQ",
-      name: "名称", group_chat_enabled: "启用群聊", default_model: "默认模型",
+      name: "名称", aliases: "别名", group_chat_enabled: "启用群聊", default_model: "默认模型",
       temperature: "温度 temperature", top_p: "Top P", frequency_penalty: "频率惩罚",
       presence_penalty: "存在惩罚", max_message_tokens: "单条消息最大 token",
       worker_threads: "工作线程数", message_survival_seconds: "消息存活（秒）",
@@ -1654,7 +1654,7 @@
 
     // 字段说明：悬停显示。按“完整路径 → 通用键名”两级查找，传输 Profile 的动态路径靠兜底层覆盖
     const SECTION_HINTS = {
-      bot: "机器人的身份信息：QQ 号、管理员与昵称。",
+      bot: "机器人的身份信息：QQ 号、管理员、昵称与别名。",
       features: "机器人对外行为的开关，保存时写回 bot 分组。",
       chat: "消息处理参数：单条消息 token 上限、工作线程数与消息存活时间。",
       models: "对话模型的默认模型、轻量模型与采样参数，画图/视觉的专用端点（轻量模型未配置时回退默认模型）；模型本体在“模型供应商”页管理。",
@@ -1693,6 +1693,7 @@
       "bot.id": "机器人的 QQ 号，用于识别 @ 消息与发送消息（改动需重启）。",
       "bot.manager_id": "管理员 QQ，可执行 #刷新配置文件 等管理命令；0 表示不设置。",
       "bot.name": "机器人昵称，用于人格提示词（改动需重启）。",
+      "bot.aliases": "她在群里也会答应的名字，如 克莱茵；JSON 字符串数组，例 [\"克莱茵\"]，英文不区分大小写，空串会被丢弃（改动需重启）。",
       "bot.group_chat_enabled": "是否响应群聊消息，关闭后仅私聊可用（保存即生效）。",
       "chat.default_model": "默认对话模型：从模型注册表下拉选择（模型在「模型供应商」页维护）；需重启生效。",
       "chat.temperature": "采样温度 0~2：越高回答越随机，常用 0.7~1.0。",
@@ -1764,7 +1765,7 @@
     const CHAT_MODEL_FIELDS = ["default_model", "temperature", "top_p",
       "frequency_penalty", "presence_penalty"];
     const SECTION_KEY_ORDER = {
-      bot: ["id", "manager_id", "name"],
+      bot: ["id", "manager_id", "name", "aliases"],
       chat: ["max_message_tokens", "worker_threads", "message_survival_seconds"],
       models: ["drawing", "vision", "worker"],
       drawing: ["model", "endpoint", "api_key", "api_standard"],

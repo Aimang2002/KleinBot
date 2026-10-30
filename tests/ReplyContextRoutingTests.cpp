@@ -273,6 +273,7 @@ TEST(OneBotEventDecoderStickerTest, ParsesStickerImageMfaceAndFaceSegments)
             {"type": "text", "data": {"text": "哈哈"}},
             {"type": "image", "data": {"url": "http://img/s.gif", "sub_type": 1, "summary": "[动画表情]"}},
             {"type": "mface", "data": {"emoji_id": "abc", "summary": "[狗头]"}},
+            {"type": "mface", "data": {"emoji_id": "def"}},
             {"type": "face", "data": {"id": "14"}},
             {"type": "face", "data": {"id": 178}}
         ],
@@ -284,10 +285,11 @@ TEST(OneBotEventDecoderStickerTest, ParsesStickerImageMfaceAndFaceSegments)
     EXPECT_EQ(sticker->message_data_url, "http://img/s.gif");
     EXPECT_TRUE(sticker->image_is_sticker);
     EXPECT_EQ(sticker->image_summary, "[动画表情]");
-    ASSERT_EQ(sticker->face_summaries.size(), 3U);
+    ASSERT_EQ(sticker->face_summaries.size(), 4U);
     EXPECT_EQ(sticker->face_summaries[0], "[狗头]");
-    EXPECT_EQ(sticker->face_summaries[1], "face:14");
-    EXPECT_EQ(sticker->face_summaries[2], "face:178");
+    EXPECT_EQ(sticker->face_summaries[1], "[商城表情]") << "没名字的商城表情也要留标签";
+    EXPECT_EQ(sticker->face_summaries[2], "face:14");
+    EXPECT_EQ(sticker->face_summaries[3], "face:178");
 
     // LLOneBot 键名是驼峰 subType（2026-10-30 源码核对 + 线上实测）：非零即表情包形态
     //（7=贴图、13=热搜图）；此前只读 NapCat 形态的 sub_type，线上贴纸标记从未生效
