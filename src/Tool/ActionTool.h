@@ -17,6 +17,10 @@ public:
         return action.descriptor().parameters_schema.dump();
     }
     bool requiresAdmin() const override { return action.descriptor().requires_admin; }
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &context) const override
+    {
+        return action.usageGuidance(scene, context);
+    }
 
     ToolResult execute(const std::string &args, const ToolContext &context) override
     {

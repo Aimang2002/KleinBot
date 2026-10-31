@@ -2,6 +2,7 @@
 #include "EngagementService.h"
 #include "GlanceService.h"
 #include "../Asset/ImageAssetStore.h"
+#include "../Asset/ImagePlaceholder.h"
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
 #include "../utils/Utils.hpp"
@@ -85,8 +86,8 @@ void GroupContextService::observe(const InboundMessage &message)
             asset = sharedAssets->importFromUrl(message.group_id, message.message_data_url,
                                                 message.message_id);
         if (asset)
-            placeholder = "[image asset_id=" + asset->asset_id + " source=inbound" +
-                          (message.image_is_sticker ? " sticker" : "") + "]";
+            placeholder = formatImagePlaceholder(asset->asset_id, "inbound",
+                                                 message.image_is_sticker);
         record.text = record.text.empty() ? placeholder : (record.text + " " + placeholder);
     }
     const bool atMentioned =
@@ -147,7 +148,7 @@ void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMe
         if (sharedAssets != nullptr && image->source == ImageMessage::Source::LocalPath)
         {
             if (const auto asset = sharedAssets->findByLocalPath(groupId, image->data))
-                record.text = "[image asset_id=" + asset->asset_id + " source=" + asset->source + "]";
+                record.text = formatImagePlaceholder(asset->asset_id, asset->source);
         }
     }
     else if (std::holds_alternative<VoiceMessage>(outbound))

@@ -24,6 +24,17 @@ public:
         return value;
     }
 
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &) const override
+    {
+        return guidanceText(scene);
+    }
+
+    // 规则文本（静态：不依赖 UserSessionService，金样测试直接取用）
+    static std::string guidanceText(GuidanceScene scene)
+    {
+        return scene == GuidanceScene::Conversation ? "当用户要求开启或关闭语音时调用 set_voice_mode。" : "";
+    }
+
     ActionResult execute(const nlohmann::json &arguments, const ActionContext &context) override
     {
         const bool enabled = arguments.value("enabled", false);

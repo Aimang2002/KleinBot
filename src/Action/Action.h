@@ -2,6 +2,7 @@
 #define ACTION_H
 
 #include "../Port/OutboundMessage.h"
+#include "../Port/UsageGuidance.h"
 #include "../../Library/nlohmann/json.hpp"
 #include <cstdint>
 #include <string>
@@ -38,6 +39,8 @@ public:
     virtual const ActionDescriptor &descriptor() const = 0;
     virtual ActionResult execute(const nlohmann::json &arguments,
                                  const ActionContext &context) = 0;
+    // 暴露为工具时的使用规则（经 ActionTool::usageGuidance 转出，语义同 Tool::usageGuidance）
+    virtual std::string usageGuidance(GuidanceScene, const GuidanceContext &) const { return {}; }
 };
 
 #endif // ACTION_H

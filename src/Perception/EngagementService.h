@@ -17,6 +17,8 @@
  * leave_topic（离场，可带最后一句）。定案前可走至多 3 趟工具轮（recall_context
  * 召回 + setTools 开放的注册表工具，如 inspect_image / generate_image /
  * klein_web_search），结果回灌后再定案；工具产出的出站消息（图）当场投递并入群缓冲。
+ * 工具轮走 Application/ToolLoop（与一对一对话共用同一实现），开放工具的使用规则
+ * 由工具自带、经 Application/ToolGuidance 组装（GroupTurn 场景）。
  * 轮次触发：点名/引用回复她（立即）、追问窗口（她开口后 120s 内群友接话 + 静默，
  * 每次开口至多 2 轮）、lull（攒 5 条 + 静默 + 节流 + 每小时帽）——都只是资源预算，
  * 每轮说不说由她决定。
@@ -148,7 +150,7 @@ public:
         this->decisionRecorder = recorder;
     }
     // 会话轮可用的注册表工具（如 inspect_image / generate_image / send_image /
-    // klein_web_search / klein_web_fetch；开放联网工具时契约追加"只为弄懂话题"注）：
+    // klein_web_search / klein_web_fetch；契约追加开放工具自带的 GroupTurn 使用规则）：
     // tools 由组合根持有、须比本服务活得久；allowedNames 当场过滤——未注册或
     // requiresAdmin() 的名字丢弃并告警（L3 护栏：管理员工具永不开放给会话轮）。
     // 工具的出站消息直接投递到群并经 OutboundRecorder 入库。不调用 = 无注册表

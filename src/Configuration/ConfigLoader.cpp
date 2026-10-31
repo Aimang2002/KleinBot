@@ -309,8 +309,9 @@ ModelEndpointSchema decodeModelEndpoint(Decoder &decoder, const json &parent,
                                     !result.apiStandard.empty();
     if (!anyFieldConfigured)
         return result;
-    // 注册表解析形态（2026-09-19，仅 models.worker）：只填 model，端点与密钥由
-    // 注册表条目提供，运行时按名字解析；显式全配的旧形态仍直连
+    // 注册表解析形态（2026-09-19 models.worker；2026-10-31 起 models.vision/drawing 同样允许）：
+    // 只填 model，端点与密钥由注册表条目提供，运行时经 ModelEndpointResolver 按名字解析；
+    // 显式全配的旧形态仍直连
     const bool registryForm = allowRegistryForm && !result.model.empty() &&
                               result.endpoint.empty() && result.apiStandard.empty();
     if (!registryForm && !result.configured())
@@ -689,8 +690,10 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         // registry_path 与 stable_diffusion 均已废弃（前者路径钉死为 kModelRegistryPath，
         // 后者由 models.drawing 取代）：保留在白名单里让老配置静默加载，不弹“未知字段”警告
         decoder.unknownFields(*models, {"registry_path", "drawing", "vision", "worker", "stable_diffusion"}, "models");
-        config.models.drawing = decodeModelEndpoint(decoder, *models, "drawing", "models.drawing");
-        config.models.vision = decodeModelEndpoint(decoder, *models, "vision", "models.vision");
+        config.models.drawing =
+            decodeModelEndpoint(decoder, *models, "drawing", "models.drawing", true);
+        config.models.vision =
+            decodeModelEndpoint(decoder, *models, "vision", "models.vision", true);
         config.models.worker =
             decodeModelEndpoint(decoder, *models, "worker", "models.worker", true);
     }

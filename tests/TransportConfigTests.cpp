@@ -207,6 +207,43 @@ TEST(ConfigLoaderTest, WorkerExplicitEndpointFormRemainsDirect)
     EXPECT_EQ(result.config->models.worker.endpoint, "https://example.invalid");
 }
 
+// 视觉/生图模型同样允许注册表形态（2026-10-31，ModelEndpointResolver）：只填注册名，
+// 端点与密钥在调用时从注册表解析，不报"模型配置不完整"
+TEST(ConfigLoaderTest, VisionAndDrawingModelOnlyRegistryFormLoadsWithoutDiagnostics)
+{
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["models"]["vision"] = {{"model", "vision-model"}};
+    document["models"]["drawing"] = {{"model", "drawing-model"}};
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    EXPECT_TRUE(result.canStart());
+    EXPECT_FALSE(hasDiagnostic(result, ConfigSeverity::FeatureDisabled, "models.vision"));
+    EXPECT_FALSE(hasDiagnostic(result, ConfigSeverity::FeatureDisabled, "models.drawing"));
+    ASSERT_NE(result.config, nullptr);
+    EXPECT_EQ(result.config->models.vision.model, "vision-model");
+    EXPECT_TRUE(result.config->models.vision.endpoint.empty());
+    EXPECT_EQ(result.config->models.drawing.model, "drawing-model");
+    EXPECT_TRUE(result.config->models.drawing.endpoint.empty());
+}
+
+TEST(ConfigLoaderTest, VisionPartialEndpointFormIsStillIncomplete)
+{
+    // 不是"只填名字"的半截全配形态仍按不完整处理（与 worker 一致）
+    nlohmann::json document = nlohmann::json::parse(validConfig);
+    document["models"]["vision"] = {
+        {"model", "vision-model"},
+        {"api_standard", "OpenAI"}
+    };
+
+    ConfigLoader loader;
+    const ConfigLoadResult result = loader.loadDocument(document);
+
+    EXPECT_TRUE(result.canStart());
+    EXPECT_TRUE(hasDiagnostic(result, ConfigSeverity::FeatureDisabled, "models.vision"));
+}
+
 TEST(ConfigLoaderTest, DecodesHttpEventSignatureSecret)
 {
     nlohmann::json document = nlohmann::json::parse(validConfig);

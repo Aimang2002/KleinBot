@@ -10,6 +10,7 @@
 #include "../Port/LLMPort.h"
 #include "../Log/Log.h"
 #include "DockOptions.h"
+#include "ModelEndpointResolver.h"
 #include <atomic>
 #include <string>
 #include <memory>
@@ -68,6 +69,23 @@ public:
         }
         response = LLM->second->request_image(model, model_name, prompt);
         return response;
+    }
+
+    // 专用端点（models.vision/drawing/worker，已经 resolveEndpoint 解析）的便捷重载：
+    // 端点→ChatModel 的字段映射只在 toChatModel 一处
+    ChatResponse RequestChat(const ModelEndpointOptions &endpoint, const ChatRequest &request)
+    {
+        return RequestChat(toChatModel(endpoint), endpoint.model, request);
+    }
+
+    VisionResponse RequestVision(const ModelEndpointOptions &endpoint, const std::string &prompt, const std::string &base64)
+    {
+        return RequestVision(toChatModel(endpoint), endpoint.model, prompt, base64);
+    }
+
+    ImageResponse RequestDraw(const ModelEndpointOptions &endpoint, const std::string &prompt)
+    {
+        return RequestDraw(toChatModel(endpoint), endpoint.model, prompt);
     }
 
     // 析构函数

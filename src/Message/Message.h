@@ -14,6 +14,7 @@
 #include "../Action/Action.h"
 #include "MessageOptions.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
+#include "../ModelApiCaller/ModelEndpointResolver.h"
 #include <iostream>
 #include <random>
 #include <memory>
@@ -32,10 +33,11 @@ public:
     // typingIndicator 可空：注入时私聊 LLM 路径触发"正在输入"（T5），测试可传 nullptr
     // perception 可空：注入时白名单群被 @ 的回复带上话题背景注记（T7），关闭时内部 no-op
     // groupContext 可空：注入时白名单群启用内容级上下文装配与收敛契约（T7b）
+    // visionModel：视觉端点来源，每次调用时取一次（models.vision 可只填注册名）
     explicit Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                      MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                      CommandRegistry &registry, Voice &voice, MessageOptions options,
-                     ModelEndpointOptions visionModel, bool &globalVoice,
+                     EndpointProvider visionModel, bool &globalVoice,
                      class TypingIndicator *typingIndicator = nullptr,
                      class PerceptionChannel *perception = nullptr,
                      class GroupContextService *groupContext = nullptr,
@@ -140,7 +142,7 @@ private:
 	CommandRegistry &registry;
     Voice &voice;
     MessageOptions options;
-    ModelEndpointOptions visionModel;
+    EndpointProvider visionModel;
     class TypingIndicator *typingIndicator = nullptr; // 可空：未注入则无输入状态提示
     class PerceptionChannel *perception = nullptr;    // 可空：未注入则无话题注记
     class GroupContextService *groupContext = nullptr; // 可空：未注入则无内容级群上下文

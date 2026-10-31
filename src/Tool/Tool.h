@@ -5,6 +5,7 @@
 #include <vector>
 #include "ToolContext.h"
 #include "../Port/OutboundMessage.h"
+#include "../Port/UsageGuidance.h"
 
 struct ToolResult
 {
@@ -39,6 +40,11 @@ public:
     virtual std::string parametersSchema() const = 0;
 
     virtual bool requiresAdmin() const { return false; }
+
+    // 工具自带的使用规则（何时该用我、用完怎么做），由 Application/ToolGuidance 的
+    // composeToolGuidance 按场景、按固定顺序拼进 system prompt；没有规则返回空串。
+    // 文本必须稳定（只随 context 里的日期等运行时锚点变化）：它位于前缀缓存最前端
+    virtual std::string usageGuidance(GuidanceScene, const GuidanceContext &) const { return {}; }
 
     // 执行工具。文本回灌模型，出站消息交给消息适配器发送。
     virtual ToolResult execute(const std::string &args, const ToolContext &ctx) = 0;

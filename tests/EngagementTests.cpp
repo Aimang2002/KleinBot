@@ -8,6 +8,8 @@
 #include "Perception/GroupListService.h"
 #include "Network/OneBotApiChannel.h"
 #include "Port/OutboundDelivery.h"
+#include "Action/WebToolGuidance.h"
+#include "Tool/ImageToolGuidance.h"
 #include "Tool/Tool.h"
 #include "Tool/ToolRegistry.h"
 
@@ -825,6 +827,11 @@ public:
     {
         return R"({"type":"object","properties":{"asset_id":{"type":"string"},"question":{"type":"string"}},"required":["question"]})";
     }
+    // 使用规则由工具自带（ADR-022）：替身给出与 InspectImageTool 相同的规则
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &) const override
+    {
+        return imageToolsUsageGuidance(scene);
+    }
     ToolResult execute(const std::string &args, const ToolContext &ctx) override
     {
         receivedArgs.push_back(args);
@@ -861,6 +868,11 @@ public:
     std::string parametersSchema() const override
     {
         return R"({"type":"object","properties":{"prompt":{"type":"string"}},"required":["prompt"]})";
+    }
+    // 使用规则由工具自带（ADR-022）：替身给出与 GenerateImageTool 相同的规则
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &) const override
+    {
+        return imageToolsUsageGuidance(scene);
     }
     ToolResult execute(const std::string &args, const ToolContext &ctx) override
     {
@@ -1185,6 +1197,11 @@ public:
     std::string parametersSchema() const override
     {
         return R"({"type":"object","properties":{"query":{"type":"string"}},"required":["query"]})";
+    }
+    // 使用规则由工具自带（ADR-022）：替身给出与 WebSearchAction 相同的规则
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &context) const override
+    {
+        return webSearchUsageGuidance(scene, context);
     }
     ToolResult execute(const std::string &args, const ToolContext &ctx) override
     {

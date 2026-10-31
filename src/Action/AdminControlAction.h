@@ -26,6 +26,13 @@ public:
         return value;
     }
 
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &) const override
+    {
+        return scene == GuidanceScene::Conversation
+                   ? "管理员控制操作只能调用 admin_control，系统会在工具执行前校验管理员身份。"
+                   : "";
+    }
+
     ActionResult execute(const nlohmann::json &arguments, const ActionContext &) override
     {
         const std::string action = arguments.value("action", "");

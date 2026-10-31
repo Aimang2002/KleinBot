@@ -2,18 +2,25 @@
 #define INSPECT_IMAGE_TOOL_H
 
 #include "Tool.h"
+#include "ImageToolGuidance.h"
 #include "ImageToolHelpers.h"
 #include "ToolArgumentParser.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
+#include "../ModelApiCaller/ModelEndpointResolver.h"
 #include "../ModelApiCaller/Dock.hpp"
 
 class InspectImageTool : public Tool
 {
 public:
-    // sharedAssets 可空：群资产库（ADR-019），群聊时优先于个人库解析
-    InspectImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model,
+    // sharedAssets 可空：群资产库（ADR-019），群聊时优先于个人库解析。
+    // model 每次调用时取一次（组合根给注册表解析的 provider，热重载即时生效）
+    InspectImageTool(Dock &dock, ImageAssetStore &assetStore, EndpointProvider model,
                      const ImageAssetStore *sharedAssets = nullptr)
         : dock(dock), assetStore(assetStore), sharedAssets(sharedAssets), model(std::move(model)) {}
+    // 固定端点（测试/旧调用方）
+    InspectImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model,
+                     const ImageAssetStore *sharedAssets = nullptr)
+        : InspectImageTool(dock, assetStore, fixedEndpoint(std::move(model)), sharedAssets) {}
 
     std::string name() const override { return "inspect_image"; }
 
@@ -27,11 +34,19 @@ public:
         return R"({"type":"object","properties":{"asset_id":{"type":"string","description":"历史图片资源ID；若不确定可省略"},"source":{"type":"string","enum":["inbound","generated"],"description":"没有asset_id时按来源选择最近图片"},"question":{"type":"string","description":"希望检查的问题"}},"required":["question"]})";
     }
 
+    // 图片三工具共用一段规则（composeToolGuidance 去重）
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &) const override
+    {
+        return imageToolsUsageGuidance(scene);
+    }
+
     ToolResult execute(const std::string &args, const ToolContext &ctx) override
     {
         try
         {
-            const std::string readiness = modelEndpointReadinessText(model, "视觉", "models.vision");
+            // 就绪检查跑在解析后的端点上：注册表形态（只填 model）不会被误报"未配置"
+            const ModelEndpointOptions endpoint = currentEndpoint(model);
+            const std::string readiness = modelEndpointReadinessText(endpoint, "视觉", "models.vision");
             if (!readiness.empty())
                 return {readiness, {}, {}};
 
@@ -46,11 +61,7 @@ public:
             if (base64.empty())
                 return {"错误：图片文件不可读。", {}, {}};
 
-            ChatModel requestModel;
-            requestModel.endpoint = model.endpoint;
-            requestModel.api_key = model.apiKey;
-            requestModel.api_standard = model.apiStandard;
-            const VisionResponse response = dock.RequestVision(requestModel, model.model, question, base64);
+            const VisionResponse response = dock.RequestVision(endpoint, question, base64);
             if (response.cancelled)
                 return {{}, {}, {}, false, true};
             if (response.code != 200)
@@ -74,7 +85,7 @@ private:
     Dock &dock;
     ImageAssetStore &assetStore;
     const ImageAssetStore *sharedAssets;
-    ModelEndpointOptions model;
+    EndpointProvider model;
 };
 
 #endif // INSPECT_IMAGE_TOOL_H

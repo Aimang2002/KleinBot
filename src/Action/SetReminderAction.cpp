@@ -23,6 +23,19 @@ std::string repeatLabel(const std::string &repeat)
 }
 }
 
+std::string SetReminderAction::usageGuidance(GuidanceScene scene, const GuidanceContext &) const
+{
+    if (scene != GuidanceScene::Conversation)
+        return {};
+    return "当用户要求在指定时间提醒他、记住定时事项或到点通知时，调用 set_reminder："
+           "time 使用本地时区 ISO 格式（YYYY-MM-DDTHH:MM），相对时间（明天、下周三）"
+           "先换算成具体日期，拿不准当前日期时先调用 get_time；"
+           "“每天”“每周”的需求设置对应的 repeat 字段。"
+           "用户询问已有提醒时调用 list_reminders，要求取消时先查询编号再调用 cancel_reminder。"
+           "设置成功后必须用自然语言向用户复述触发时间和重复规则。"
+           "闲聊或语义模糊的内容不要注册提醒，先向用户确认时间。";
+}
+
 const ActionDescriptor &SetReminderAction::descriptor() const
 {
     static const ActionDescriptor value{

@@ -21,6 +21,11 @@ public:
         return value;
     }
 
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &) const override
+    {
+        return scene == GuidanceScene::Conversation ? "当用户询问当前模型时调用 get_current_model；" : "";
+    }
+
     ActionResult execute(const nlohmann::json &, const ActionContext &context) override
     {
         return {"当前模型：" + getter(context.user_id), {}, {}, true};

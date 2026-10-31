@@ -82,6 +82,7 @@
 #include "Tool/InspectImageTool.h"
 #include "Tool/SendImageTool.h"
 #include "ModelApiCaller/Voice/Voice.h"
+#include "ModelApiCaller/ModelEndpointResolver.h"
 #include "Persistence/ConversationStore.h"
 #include "Asset/ImageAssetStore.h"
 #include "Memory/MemoryService.h"
@@ -481,12 +482,18 @@ int main(int argc, char **argv)
 		tools.registerTool(std::make_unique<ActionTool>(*webFetchAction));
 		LOG_INFO("网页抓取工具已启用");
 	}
+	// 专用模型端点（ModelEndpointResolver）：每次调用时按注册表解析——models.vision/
+	// drawing/worker 只填注册名即可，注册表热重载即时生效；全配形态原样直连。
+	// 生图/看图工具、#生成图片、Message、瞥视与话题会话杂务共用这三个来源
+	const EndpointProvider visionEndpoint = registryEndpoint(settings.models.vision, models);
+	const EndpointProvider drawingEndpoint = registryEndpoint(settings.models.drawing, models);
+	const EndpointProvider workerEndpoint = registryEndpoint(settings.models.worker, models);
 	tools.registerTool(std::make_unique<GetTimeTool>());
 	tools.registerTool(std::make_unique<ActionTool>(getCurrentModelAction));
 	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
-	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore, settings.models.drawing,
+	tools.registerTool(std::make_unique<GenerateImageTool>(dock, imageAssetStore, drawingEndpoint,
 														   &groupImageAssets));
-	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore, settings.models.vision,
+	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore, visionEndpoint,
 														  &groupImageAssets));
 	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore, &groupImageAssets));
 	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
@@ -548,7 +555,7 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<ModelListCommand>(models));
 	commandRegistry.registryCommand(std::make_unique<SearchSongsCommand>());
 	commandRegistry.registryCommand(std::make_unique<QueryModelCommand>(getCurrentModelAction));
-	commandRegistry.registryCommand(std::make_unique<GeneratePictureCommand>(dock, settings.models.drawing));
+	commandRegistry.registryCommand(std::make_unique<GeneratePictureCommand>(dock, drawingEndpoint));
 	commandRegistry.registryCommand(std::make_unique<ResetChatCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<ResetContextCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<SetSoulCommand>(userSession));
@@ -587,24 +594,21 @@ int main(int argc, char **argv)
 		{ return chatService.buildOnce(systemPrompt, userPrompt); });
 	groupContextService.setSharedAssets(&groupImageAssets);
 	// 群聊瞥视（R1.1，ADR-020）：群图异步瞥视成一行派生描述写回群缓冲占位符，
-	// 零行为变化（只丰富文本、不触发回应）。视觉复用 models.vision：未就绪时不设
-	// seam，start() 报"视觉模型未配置"并保持 no-op；观察通道关闭时 store 为空同理
+	// 零行为变化（只丰富文本、不触发回应）。视觉复用 models.vision：启动时按解析后的
+	// 端点判定就绪（注册表形态只填名字也算），未就绪时不设 seam，start() 报"视觉模型
+	// 未配置"并保持 no-op；观察通道关闭时 store 为空同理
 	GlanceService glanceService(groupContextStore.get(), &groupImageAssets, settings.glance);
-	if (modelEndpointReadinessText(settings.models.vision, "视觉", "models.vision").empty())
+	if (modelEndpointReadinessText(visionEndpoint(), "视觉", "models.vision").empty())
 	{
 		glanceService.setVision(
-			[&dock, &groupImageAssets, vision = settings.models.vision](
+			[&dock, &groupImageAssets, visionEndpoint](
 				const ImageAsset &asset, const std::string &hint) -> std::string
 			{
 				const std::string base64 = groupImageAssets.readBase64(asset);
 				if (base64.empty())
 					return {};
-				ChatModel requestModel;
-				requestModel.endpoint = vision.endpoint;
-				requestModel.api_key = vision.apiKey;
-				requestModel.api_standard = vision.apiStandard;
 				const VisionResponse response = dock.RequestVision(
-					requestModel, vision.model, GlanceService::visionPrompt(hint), base64);
+					visionEndpoint(), GlanceService::visionPrompt(hint), base64);
 				if (response.cancelled)
 					return {};
 				if (response.code != 200)
@@ -636,23 +640,13 @@ int main(int argc, char **argv)
 			{ return chatService.requestInCharacter(managerId, systemNote, history, toolSchemas); });
 	}
 	engagementService.setWorker(
-		[&chatService, &models, baseWorker = settings.models.worker](const std::string &systemPrompt,
-														const std::string &userPrompt)
+		[&chatService, workerEndpoint](const std::string &systemPrompt,
+									   const std::string &userPrompt)
 		{
 			// 杂务模型注册表解析（2026-09-19）：models.worker 只填 model 时，每次调用
-			// 按名字经注册表解析端点与密钥（注册表热重载即时生效）；显式配置了 endpoint
-			// 的旧形态仍直连。名字未注册时保持空端点，由 buildOnceWith 回退默认对话模型
-			ModelEndpointOptions worker = baseWorker;
-			if (worker.endpoint.empty() && !worker.model.empty())
-			{
-				if (const std::optional<ChatModel> found = models.find(worker.model))
-				{
-					worker.endpoint = found->endpoint;
-					worker.apiKey = found->api_key;
-					worker.apiStandard = found->api_standard;
-				}
-			}
-			return chatService.buildOnceWith(worker, systemPrompt, userPrompt);
+			// 按名字经注册表解析端点与密钥（workerEndpoint，热重载即时生效）；显式配置了
+			// endpoint 的旧形态仍直连。名字未注册时保持空端点，由 buildOnceWith 回退默认对话模型
+			return chatService.buildOnceWith(workerEndpoint(), systemPrompt, userPrompt);
 		});
 	// 会话轮可用的注册表工具：群友发图时她能经 inspect_image 看图本身，
 	// 而不止占位符里的瞥视一句话（2026-10-30 真机缺陷）；点名让她画图/重发图时
@@ -675,7 +669,7 @@ int main(int argc, char **argv)
 			return 0;
 		});
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
-		commandRegistry, voice, settings.message, settings.models.vision,
+		commandRegistry, voice, settings.message, visionEndpoint,
 		globalVoice, &typingIndicator, &perceptionChannel, &groupContextService,
 		decisionRecorder.get(), &groupImageAssets);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：

@@ -4,6 +4,7 @@
 #include "../utils/TextSplit.h"
 #include "../utils/UniqueId.h"
 #include "../Asset/ImageAssetStore.h"
+#include "../Asset/ImagePlaceholder.h"
 #include "../Application/ReplyContextRouting.h"
 #include "../Application/TypingIndicator.h"
 #include "../Perception/PerceptionChannel.h"
@@ -21,7 +22,7 @@ std::mt19937 mt_rand(1000);
 Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                  MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                  CommandRegistry &registry, Voice &voice, MessageOptions options,
-                 ModelEndpointOptions visionModel, bool &globalVoice,
+                 EndpointProvider visionModel, bool &globalVoice,
                  TypingIndicator *typingIndicator, PerceptionChannel *perception,
                  GroupContextService *groupContext,
                  affect::DecisionRecorder *decisionRecorder,
@@ -106,7 +107,7 @@ void Message::handleMessage(const InboundMessage &current_data)
 			{
 				if (!conversationText.empty())
 					conversationText += "\n";
-				conversationText += "[image asset_id=" + asset->asset_id + " source=inbound]";
+				conversationText += formatImagePlaceholder(asset->asset_id, "inbound");
 				const std::string base64 = this->imageAssetStore.readBase64(*asset);
 				currentImage = ChatImageContent{
 					asset->asset_id,
@@ -485,13 +486,7 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 	std::string base64 = this->dataToBase64(input);
 
 
-	ChatModel model;
-	model.endpoint = visionModel.endpoint;
-	model.api_key = visionModel.apiKey;
-	model.api_standard = visionModel.apiStandard;
-	const std::string &modelName = visionModel.model;
-
-	auto response = this->dock.RequestVision(model, modelName, conversation, base64);
+	auto response = this->dock.RequestVision(currentEndpoint(visionModel), conversation, base64);
 	std::string answer = response.content;
 	std::cout << "OpenAI response: " << answer << std::endl;
 	if (response.code != 200)

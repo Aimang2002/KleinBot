@@ -18,8 +18,10 @@ add_executable(kleinbot_tests
     OpenAIImageParseTests.cpp
     GroupContextTests.cpp
     GroupListTests.cpp
+    ImagePlaceholderTests.cpp
     MemoryRecallTests.cpp
     ModelCatalogTests.cpp
+    ModelEndpointResolverTests.cpp
     ModelReadinessTests.cpp
     ModelRegistryTests.cpp
     MultimodalRoutingTests.cpp
@@ -34,6 +36,8 @@ add_executable(kleinbot_tests
     StorageIntegrationTests.cpp
     TaskSchedulerTests.cpp
     TextSplitTests.cpp
+    ToolGuidanceTests.cpp
+    ToolLoopTests.cpp
     TransportConfigTests.cpp
     TypingIndicatorTests.cpp
     VersionInfoTests.cpp

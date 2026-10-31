@@ -2,6 +2,7 @@
 #define WEB_FETCH_ACTION_H
 
 #include "Action.h"
+#include "WebToolGuidance.h"
 #include "../WebFetch/WebFetchOptions.h"
 #include <atomic>
 #include <chrono>
@@ -32,6 +33,10 @@ public:
     const ActionDescriptor &descriptor() const override;
     ActionResult execute(const nlohmann::json &arguments,
                          const ActionContext &context) override;
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &) const override
+    {
+        return webFetchUsageGuidance(scene);
+    }
 
 private:
     struct FetchedPage

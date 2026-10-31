@@ -1,6 +1,7 @@
 #include "GlanceService.h"
 #include "GroupContextStore.h"
 #include "../Asset/ImageAssetStore.h"
+#include "../Asset/ImagePlaceholder.h"
 #include "../Log/Log.h"
 #include "../utils/Utils.hpp"
 
@@ -297,22 +298,6 @@ std::string GlanceService::sanitizeCaption(const std::string &raw)
 std::string GlanceService::attachCaption(const std::string &text, const std::string &assetId,
                                          const std::string &caption)
 {
-    if (assetId.empty() || caption.empty())
-        return {};
-    const std::string marker = "[image asset_id=" + assetId;
-    const std::size_t begin = text.find(marker);
-    if (begin == std::string::npos)
-        return {};
-    const std::size_t after = begin + marker.size();
-    // 必须是完整 id（防止 gimg_1 命中 gimg_12）
-    if (after >= text.size() || (text[after] != ' ' && text[after] != ']'))
-        return {};
-    const std::size_t close = text.find(']', after);
-    if (close == std::string::npos)
-        return {};
-    // 已有描述（重复写回）不再追加
-    const std::size_t existing = text.find(" | ", after);
-    if (existing != std::string::npos && existing < close)
-        return {};
-    return text.substr(0, close) + " | " + caption + text.substr(close);
+    // 占位符格式的唯一解析点在 Asset/ImagePlaceholder.h
+    return attachImageCaption(text, assetId, caption);
 }

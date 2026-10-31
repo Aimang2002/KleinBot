@@ -2,6 +2,7 @@
 #define WEB_SEARCH_ACTION_H
 
 #include "Action.h"
+#include "WebToolGuidance.h"
 #include "../WebSearch/SearchProvider.h"
 #include "../WebSearch/WebSearchOptions.h"
 
@@ -13,6 +14,10 @@ public:
     const ActionDescriptor &descriptor() const override;
     ActionResult execute(const nlohmann::json &arguments,
                          const ActionContext &context) override;
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &context) const override
+    {
+        return webSearchUsageGuidance(scene, context);
+    }
 
 private:
     SearchProvider &provider;

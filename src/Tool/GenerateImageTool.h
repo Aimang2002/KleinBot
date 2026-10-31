@@ -2,19 +2,27 @@
 #define GENERATE_IMAGE_TOOL_H
 
 #include "Tool.h"
+#include "ImageToolGuidance.h"
 #include "ToolArgumentParser.h"
 #include "../Asset/ImageAssetStore.h"
+#include "../Asset/ImagePlaceholder.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
+#include "../ModelApiCaller/ModelEndpointResolver.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../../Library/nlohmann/json.hpp"
 
 class GenerateImageTool : public Tool
 {
 public:
-    // sharedAssets 可空：群资产库（ADR-019），群聊时生成结果存群库（24h），不进个人库
-    GenerateImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model,
+    // sharedAssets 可空：群资产库（ADR-019），群聊时生成结果存群库（24h），不进个人库。
+    // model 每次调用时取一次（组合根给注册表解析的 provider，热重载即时生效）
+    GenerateImageTool(Dock &dock, ImageAssetStore &assetStore, EndpointProvider model,
                       ImageAssetStore *sharedAssets = nullptr)
         : dock(dock), assetStore(assetStore), sharedAssets(sharedAssets), model(std::move(model)) {}
+    // 固定端点（测试/旧调用方）
+    GenerateImageTool(Dock &dock, ImageAssetStore &assetStore, ModelEndpointOptions model,
+                      ImageAssetStore *sharedAssets = nullptr)
+        : GenerateImageTool(dock, assetStore, fixedEndpoint(std::move(model)), sharedAssets) {}
 
     std::string name() const override { return "generate_image"; }
 
@@ -28,11 +36,19 @@ public:
         return R"({"type":"object","properties":{"prompt":{"type":"string","description":"图片生成提示词"}},"required":["prompt"]})";
     }
 
+    // 图片三工具共用一段规则（composeToolGuidance 去重）
+    std::string usageGuidance(GuidanceScene scene, const GuidanceContext &) const override
+    {
+        return imageToolsUsageGuidance(scene);
+    }
+
     ToolResult execute(const std::string &args, const ToolContext &ctx) override
     {
         try
         {
-            const std::string readiness = modelEndpointReadinessText(model, "生图", "models.drawing");
+            // 就绪检查跑在解析后的端点上：注册表形态（只填 model）不会被误报"未配置"
+            const ModelEndpointOptions endpoint = currentEndpoint(model);
+            const std::string readiness = modelEndpointReadinessText(endpoint, "生图", "models.drawing");
             if (!readiness.empty())
                 return {readiness, {}, {}};
 
@@ -41,11 +57,7 @@ public:
             if (prompt.empty())
                 return {"错误：图片提示词不能为空。", {}, {}};
 
-            ChatModel requestModel;
-            requestModel.endpoint = model.endpoint;
-            requestModel.api_key = model.apiKey;
-            requestModel.api_standard = model.apiStandard;
-            const ImageResponse response = dock.RequestDraw(requestModel, model.model, prompt);
+            const ImageResponse response = dock.RequestDraw(endpoint, prompt);
             if (response.cancelled)
                 return {{}, {}, {}, false, true};
             if (response.code >= 400 ||
@@ -72,7 +84,7 @@ public:
             if (!asset)
                 return {"错误：图片已生成，但保存失败。", {}, {}};
 
-            const std::string placeholder = "[image asset_id=" + asset->asset_id + " source=generated]";
+            const std::string placeholder = formatImagePlaceholder(asset->asset_id, "generated");
             return {"图片已生成，可以继续询问它的内容，或要求重新发送。",
                     {ImageMessage{ImageMessage::Source::LocalPath, asset->local_path}}, placeholder,
                     true, false, true};
@@ -87,7 +99,7 @@ private:
     Dock &dock;
     ImageAssetStore &assetStore;
     ImageAssetStore *sharedAssets;
-    ModelEndpointOptions model;
+    EndpointProvider model;
 };
 
 #endif // GENERATE_IMAGE_TOOL_H

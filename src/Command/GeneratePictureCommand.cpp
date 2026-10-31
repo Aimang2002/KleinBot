@@ -22,11 +22,7 @@ CommandResult GeneratePictureCommand::execute(const CommandContext &ctx)
         return {TextMessage{"提示词为空！"}};
     }
 
-    ChatModel requestModel;
-    requestModel.endpoint = model.endpoint;
-    requestModel.api_key = model.apiKey;
-    requestModel.api_standard = model.apiStandard;
-    auto response = dock.RequestDraw(requestModel, model.model, prompt);
+    auto response = dock.RequestDraw(currentEndpoint(model), prompt);
 
     if (response.code >= 400)
     {

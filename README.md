@@ -291,6 +291,7 @@ export KLEIN_WEBUI_TOKEN="自定一个强令牌"
 
 - `Capabilities.vision` 可选，默认 `false`。开启后当前消息中的图片会直接作为多模态内容发给该模型；未声明视觉能力的模型继续走独立视觉模型和 `inspect_image` 工具。若接口以明确 4xx 声明只接受文本，本次会自动降级到工具路径；超时、鉴权和服务不可用不触发降级。
 - 兼容 OpenAI API 规范的本地推理服务或第三方中转网关，均可通过 `OpenAI` APIStandard 接入。
+- 专用模型 `models.vision`（看图、群聊瞥视）、`models.drawing`（生图）与 `models.worker` 一样可以只填 `model`：名字在注册表里时，端点、密钥与 API 标准由注册表条目提供（注册表保存后即时生效）；显式填写 `endpoint`/`api_standard` 的完整形态仍直连。
 
 | API 标准 | 支持 | 说明 |
 | --- | :---: | --- |
