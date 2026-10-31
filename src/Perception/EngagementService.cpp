@@ -16,7 +16,6 @@
 namespace
 {
 // 状态机常量（真机再调的初值，零旋钮）
-constexpr std::size_t kJudgeWindowMessages = 6;   // judge 迷你窗口：触发句+前后文
 constexpr std::size_t kTurnMaterialMessages = 30; // 轮次材料的原文窗口条数
 constexpr std::size_t kTailMessages = 3;          // 压缩时保底保留的原文尾巴条数
 constexpr std::size_t kTokenBudget = 3000;        // 材料总预算（token 启发式）
@@ -35,9 +34,10 @@ constexpr int kNewMessagesForTurn = 5;            // lull 轮次的新消息门�
 constexpr std::int64_t kTurnCooldown = 75;        // 跨轮次节流（2026-09-18 真机反馈：20s 太勤）
 constexpr std::size_t kLullHourlyCap = 8;         // lull 轮次每小时上限（点名/入场轮不受限）
 constexpr int kMoodUpdateEveryTurns = 3;          // 每隔 N 个发言轮经 worker 更新情绪基调
-constexpr std::int64_t kJudgeMinInterval = 60;    // judge 每群最小间隔
-constexpr std::size_t kJudgeHourlyCap = 6;        // judge 每群每小时上限
-constexpr std::int64_t kJudgeFuseWindow = 60 * 60;
+// 提名字激活预算（资源护栏，不是行为规则：叫没叫她由她本人在入场轮判断）
+constexpr std::int64_t kNameActivationMinInterval = 60; // 提名字激活：每群最小间隔
+constexpr std::size_t kNameActivationHourlyCap = 6;     // 提名字激活：每群每小时上限
+constexpr std::int64_t kNameActivationWindow = 60 * 60; // 每小时上限的滑动窗口
 constexpr std::int64_t kLullFuseWindow = 60 * 60;   // lull 每小时帽的滑动窗口
 constexpr std::int64_t kRetentionSeconds = 2 * 60 * 60; // 结束后保留期
 
@@ -110,11 +110,15 @@ const char *const kImageToolNote =
     "不确定是哪张就省略 asset_id，系统会取最近一张。"
     "generate_image 会直接把图发到群里，send_image 可以重发群里 24 小时内的图，调用成功后不必再描述那张图。";
 
+// 提名字入场轮（无 @ 的点名）：叫没叫她由她本人读现场判断，不再经杂务模型
+// 判定器（2026-10-31 真机：判定器回"介入输出 YES"被前缀判断误读成 NO，没人回她）。
+// runTurn 在其后追加"提到你的那句是：「…」"
 const char *const kEntryAsk =
-    "\n\n以上是这个群话题的现场记录。你刚决定介入这个对话：先把现场读完——"
-    "他们在聊什么、聊到哪一步、现在是什么情绪——然后找到你最想接的那句话，"
-    "用它本来该有的方式插一句进去；读完发现接不上或不适合开口，"
-    "就 leave_topic，这同样是自然的选择。";
+    "\n\n以上是群聊现场。有人提到了你的名字，但没有 @ 你：先把现场读完——"
+    "他们在聊什么、这句话是冲谁说的——再根据上下文判断，对方是在叫你、问你，"
+    "还是只是在聊起你、或者顺嘴用到了这个词。"
+    "是在叫你，就像平时一样用 group_say 自然地回应；"
+    "只是顺口提到、或者你没什么想接的，就 leave_topic，沉默同样是自然的选择。";
 
 const char *const kFollowUpAsk =
     "\n\n以上是你在跟的话题的最新进展。像潜水的人一样先看再动："
@@ -138,31 +142,6 @@ const char *const kLeaveSchema =
 
 const char *const kRecallSchema =
     R"({"type":"function","function":{"name":"recall_context","description":"在更早的群聊记录里按关键词检索相关消息。当前材料不足以掌握话题时才用。","parameters":{"type":"object","properties":{"keywords":{"type":"array","items":{"type":"string"},"description":"检索关键词，2-4 个"}},"required":["keywords"]}}})";
-
-// 判定器 system：角色名来自组合根注入的 BotIdentity，不硬编码进代码
-//（用户定规 2026-09-18：嵌入 prompt 不得与 soul.md 产生隐性耦合）
-std::string judgeSystemFor(const BotIdentity &bot)
-{
-    const std::string &botName = bot.name;
-    // 别名（bot.aliases）也算点名：一并告诉判定器，免得它因字面不符判 NO
-    std::string names = "「" + botName + "」";
-    bool hasAlias = false;
-    for (const std::string &alias : bot.aliases)
-    {
-        if (alias.empty())
-            continue;
-        names += "或「" + alias + "」";
-        hasAlias = true;
-    }
-    if (hasAlias)
-        names += "（都是对 " + botName + " 的称呼）";
-    return "你是判定器。QQ群聊机器人 " + botName + " 监控了一段群聊记录，"
-           "最后一条消息提到了" + names + "这个名字但没有 @ 他。"
-           "判断 " + botName + " 是否应该介入这段对话。"
-           "只输出一行：介入输出 YES；不介入输出 NO 加冒号和一句话理由。"
-           "倾向：明显在对 " + botName + " 说话、提问或呼唤 → YES；"
-           "只是在聊别的话题时碰巧含这个词、玩梗、或刷屏 → NO。";
-}
 
 const char *const kCompressSystem =
     "你是群聊记录压缩器。给你一段已有摘要（可能为空）和一段新的群聊原文，"
@@ -252,7 +231,7 @@ EngagementService::EngagementService(BotIdentity bot, GroupContextStore *store,
 void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool atMentioned)
 {
     const std::int64_t now = record.timestamp;
-    std::lock_guard<std::mutex> lock(mutex);
+    std::unique_lock<std::mutex> lock(mutex);
 
     // 冷启动基线喂食：所有入站消息都计数（与会话状态无关）
     ColdState &cold = colds[record.groupId];
@@ -281,20 +260,18 @@ void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool at
     auto it = sessions.find(record.groupId);
     if (it == sessions.end() || it->second.state != EngagementState::Active)
     {
-        // 无存活会话：提名字无 @ 是软激活信号，合流提交判定
-        if (!atMentioned && record.mentionsBot && !record.isSelf &&
-            pendingJudge[record.groupId] != true && submitJudge)
+        // 无存活会话：提名字无 @ 直接开会话进入场轮——是不是在叫她由她本人
+        // 读现场判断（入场轮可 leave_topic 沉默）。激活预算只是资源护栏
+        if (!atMentioned && record.mentionsBot && !record.isSelf && submitTurn &&
+            allowNameActivationLocked(record.groupId, now))
         {
-            pendingJudge[record.groupId] = true;
-            if (allowJudgeLocked(record.groupId, now))
-            {
-                LOG_INFO("话题介入判定提交：群 " + std::to_string(record.groupId));
-                submitJudge(record.groupId);
-            }
-            else
-            {
-                pendingJudge[record.groupId] = false;
-            }
+            createSessionLocked(record.groupId, record.text, now, "提名字");
+            sessions[record.groupId].entryPending = true;
+            LOG_INFO("提名字激活会话：群 " + std::to_string(record.groupId) +
+                     "，提交入场轮");
+            // 与 pump 一致：锁外提交（submitTurn 只入队，不在本线程执行轮次）
+            lock.unlock();
+            submitTurn(record.groupId);
         }
         return;
     }
@@ -492,69 +469,6 @@ void EngagementService::persistColdLocked(std::uint64_t groupId)
     auto cooldown = coldCooldownUntil.find(groupId);
     row.cooldownUntil = cooldown != coldCooldownUntil.end() ? cooldown->second : 0;
     store->saveEngagementCold(groupId, row);
-}
-
-void EngagementService::runJudge(std::uint64_t groupId)
-{
-    if (worker == nullptr)
-    {
-        std::lock_guard<std::mutex> lock(mutex);
-        pendingJudge[groupId] = false;
-        return;
-    }
-    std::vector<GroupMessageRecord> window;
-    {
-        std::lock_guard<std::mutex> lock(mutex);
-        pendingJudge[groupId] = false;
-        auto it = sessions.find(groupId);
-        if (it != sessions.end() && it->second.state == EngagementState::Active)
-            return; // 判定提交路上会话已被 @/其他路径开启
-        if (store == nullptr)
-            return;
-        const auto records = store->snapshot(groupId);
-        if (records.empty())
-            return;
-        window.assign(records.end() - std::min(records.size(), kJudgeWindowMessages),
-                      records.end());
-    }
-
-    std::string material;
-    for (std::size_t index = 0; index < window.size(); ++index)
-    {
-        const GroupMessageRecord &record = window[index];
-        material += "[" + formatClock(record.timestamp) + "] " +
-                    (record.isSelf ? bot.name + "（你）" : record.nickname) + ": " +
-                    record.text;
-        if (index + 1 == window.size())
-            material += "　← 这句提到了你";
-        material += "\n";
-    }
-    const std::string verdict = worker(judgeSystemFor(bot), material);
-    if (verdict.empty())
-    {
-        LOG_WARNING("话题介入判定失败（杂务模型无返回）：群 " + std::to_string(groupId));
-        return;
-    }
-    const std::string trimmed = utils::trim(verdict);
-    if (trimmed.rfind("YES", 0) != 0)
-    {
-        LOG_INFO("话题介入判定 NO：群 " + std::to_string(groupId) + "（" + trimmed + "）");
-        return;
-    }
-
-    std::int64_t now = 0;
-    {
-        std::lock_guard<std::mutex> lock(mutex);
-        // 判定期间会话可能已被 @ 路径开启：已在跟则不再重复激活
-        auto it = sessions.find(groupId);
-        if (it != sessions.end() && it->second.state == EngagementState::Active)
-            return;
-        now = clock();
-        createSessionLocked(groupId, window.back().text, now, "提名字");
-        sessions[groupId].entryPending = true;
-    }
-    if (submitTurn != nullptr)
-        submitTurn(groupId);
 }
 
 EngagementService::PreparedContext EngagementService::prepareContext(
@@ -774,6 +688,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     std::int64_t compressedUpToTs = 0;
     bool recallAvailable = false;
     std::string moodLine;
+    std::string topicLine; // 提名字入场轮：提到她的那句（激活时的触发句）
     TurnKind kind = TurnKind::FollowUp;
     std::int64_t startTs = 0;
     {
@@ -798,6 +713,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
         compressedUpToTs = session.compressedUpToTs;
         recallAvailable = session.recallUsed < kRecallBudget;
         moodLine = session.moodLine;
+        topicLine = session.topicLine;
         records = store->snapshot(groupId);
         if (records.empty())
             return;
@@ -826,9 +742,9 @@ void EngagementService::runTurn(std::uint64_t groupId)
     // 当前材料里出现过的消息（召回时排除）
     const std::vector<std::int64_t> shownSeqs = context.shownSeqs;
 
-    const char *ask = kFollowUpAsk;
+    std::string ask = kFollowUpAsk;
     if (kind == TurnKind::Entry)
-        ask = kEntryAsk;
+        ask = std::string(kEntryAsk) + "\n提到你的那句是：「" + topicLine + "」";
     else if (kind == TurnKind::ColdEntry)
         ask = kColdEntryAsk;
     else if (kind == TurnKind::Address)
@@ -1056,10 +972,15 @@ void EngagementService::runTurn(std::uint64_t groupId)
             break;
         case EngagementTurn::Kind::Pass:
         default:
-            if (kind == TurnKind::ColdEntry)
+            if (kind == TurnKind::ColdEntry || kind == TurnKind::Entry)
             {
-                // 冷启动自决沉默：等于决定不加入，直接收场（不是 pass 计数）
-                endSessionLocked(session, now, "冷启动自决：暂不介入", false);
+                // 入场轮沉默 = 她决定不加入，直接收场（不是 pass 计数）：冷启动是没人叫她，
+                // 提名字是她读完现场判断"不是在叫我/不想接"（2026-10-31，判定器去掉后
+                // 顺口提到也会开会话，沉默若不收场她会被后续轮次反复追问）
+                endSessionLocked(session, now,
+                                 kind == TurnKind::ColdEntry ? "冷启动自决：暂不介入"
+                                                             : "提名字自决：不接",
+                                 false);
                 break;
             }
             session.consecutivePasses += 1;
@@ -1271,14 +1192,14 @@ bool EngagementService::replyToSelf(const GroupMessageRecord &record) const
     return false;
 }
 
-bool EngagementService::allowJudgeLocked(std::uint64_t groupId, std::int64_t now)
+bool EngagementService::allowNameActivationLocked(std::uint64_t groupId, std::int64_t now)
 {
-    auto &history = judgeHistory[groupId];
-    if (!history.empty() && now - history.back() < kJudgeMinInterval)
+    auto &history = nameActivationHistory[groupId];
+    if (!history.empty() && now - history.back() < kNameActivationMinInterval)
         return false;
-    while (!history.empty() && now - history.front() >= kJudgeFuseWindow)
+    while (!history.empty() && now - history.front() >= kNameActivationWindow)
         history.pop_front();
-    if (history.size() >= kJudgeHourlyCap)
+    if (history.size() >= kNameActivationHourlyCap)
         return false;
     history.push_back(now);
     return true;

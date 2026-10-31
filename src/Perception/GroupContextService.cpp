@@ -122,7 +122,7 @@ void GroupContextService::observe(const InboundMessage &message)
         glance->enqueue(std::move(job));
     }
 
-    // 话题会话喂食：活动/点名/软激活信号都由 EngagementService 决策
+    // 话题会话喂食：活动/点名/提名字激活都由 EngagementService 决策
     if (engagement != nullptr)
         engagement->onGroupMessage(record, atMentioned);
 }

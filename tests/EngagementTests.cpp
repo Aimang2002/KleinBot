@@ -112,7 +112,6 @@ struct Harness
     std::unique_ptr<EngagementService> service;
     std::int64_t now = 1'000'000;
     std::vector<std::uint64_t> submittedTurns;
-    std::vector<std::uint64_t> submittedJudges;
     std::vector<ChatResponse> turnResponses; // 依次弹出；空则默认 pass
     std::vector<std::string> agentContracts; // 主 Agent 每次请求的 system 注记
     std::vector<std::vector<ChatMessage>> agentHistories;
@@ -127,7 +126,6 @@ struct Harness
               bot, store.get(), sender.get(), [this] { return now; }))
     {
         service->setSubmitTurn([this](std::uint64_t group) { submittedTurns.push_back(group); });
-        service->setSubmitJudge([this](std::uint64_t group) { submittedJudges.push_back(group); });
         service->setMainAgent(
             [this](const std::string &contract, const std::vector<ChatMessage> &history,
                    const std::vector<std::string> &schemas)
@@ -436,66 +434,90 @@ TEST(EngagementSessionTest, AtMentionWhileActiveIsActivityNotAddress)
     EXPECT_EQ(session->newMessagesSinceTurn, 1);
 }
 
-TEST(EngagementSessionTest, JudgeFuseLimitsRate)
+TEST(EngagementSessionTest, NameActivationFuseLimitsRate)
 {
     Harness harness;
-    harness.service->setWorker([](const std::string &, const std::string &)
-                               { return std::string("NO：理由"); });
-    // 最小间隔：60s 内的连续提及只提交一次（runJudge 清合流标记模拟 lane 执行）
+    const std::int64_t firstActivation = harness.now;
+    // 最小间隔：首个提名字开会话；她离场后 60s 内再提名字被激活预算拦下
     harness.feed(8823, "Klein 在吗", harness.now, true);
-    ASSERT_EQ(harness.submittedJudges.size(), 1U);
-    harness.service->runJudge(8823);
-    harness.feed(8823, "Klein 呢", harness.now + 10, true);
-    EXPECT_EQ(harness.submittedJudges.size(), 1U) << "60s 内被最小间隔拦下";
-    harness.service->runJudge(8823);
+    ASSERT_EQ(harness.submittedTurns.size(), 1U);
+    harness.turnResponses.push_back(leaveResponse("只是顺口提到"));
+    harness.service->runTurn(8823);
+    ASSERT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
+
+    harness.now += 10;
+    harness.feed(8823, "Klein 呢", harness.now, true);
+    EXPECT_EQ(harness.submittedTurns.size(), 1U) << "60s 内被最小间隔拦下";
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended)
+        << "被拦下不开新会话";
+
+    // 每小时上限：间隔 61s 反复提名字、每次她都离场，小时内至多 6 次激活
+    for (int round = 1; round < 6; ++round)
+    {
+        harness.now += 61;
+        harness.feed(8823, "Klein 第" + std::to_string(round) + "次", harness.now, true);
+        ASSERT_EQ(harness.submittedTurns.size(), static_cast<std::size_t>(round + 1));
+        ASSERT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Active);
+        harness.turnResponses.push_back(leaveResponse("没在叫我"));
+        harness.service->runTurn(8823);
+        ASSERT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
+    }
     harness.now += 61;
-    harness.feed(8823, "Klein 帮我看看", harness.now, true);
-    EXPECT_EQ(harness.submittedJudges.size(), 2U);
+    harness.feed(8823, "Klein 第七次", harness.now, true);
+    EXPECT_EQ(harness.submittedTurns.size(), 6U) << "小时内第 7 次被每小时上限拦下";
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
+
+    // 滑动窗口滑过首次激活：恢复放行
+    harness.now = firstActivation + 60 * 60;
+    harness.feed(8823, "Klein 回来了吗", harness.now, true);
+    EXPECT_EQ(harness.submittedTurns.size(), 7U);
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Active);
 }
 
-TEST(EngagementSessionTest, JudgeYesActivatesSessionWithEntryTurn)
+TEST(EngagementSessionTest, NameMentionActivatesSessionAndSubmitsEntryTurn)
 {
+    // 2026-10-31 真机：别名点名"克莱茵在吗"经判定器误读被吞。现在提名字直接开会话
+    // 进入场轮，由她本人读现场判断，不经杂务模型
     Harness harness;
-    harness.service->setWorker([](const std::string &, const std::string &)
-                               { return "YES"; });
-    harness.feed(8823, "Klein 昨天那个问题解决了", harness.now, true);
-    ASSERT_EQ(harness.submittedJudges.size(), 1U);
-    harness.service->runJudge(8823);
+    harness.feed(8823, "原神深渊怎么打", harness.now);
+    harness.feed(8823, "克莱茵在吗", harness.now + 1, true);
 
     auto session = harness.service->sessionOf(8823);
     ASSERT_TRUE(session.has_value());
     EXPECT_EQ(session->state, EngagementState::Active);
     EXPECT_TRUE(session->entryPending) << "入场轮待执行";
-    EXPECT_TRUE(harness.submittedTurns.back() == 8823U);
+    EXPECT_EQ(session->topicLine, "克莱茵在吗");
+    ASSERT_EQ(harness.submittedTurns.size(), 1U);
+    EXPECT_EQ(harness.submittedTurns.front(), 8823U);
+    EXPECT_TRUE(harness.workerSystems.empty()) << "激活不调杂务模型";
 
-    // 入场轮：主模型三选一，选了说话
-    harness.turnResponses.push_back(sayResponse("解决了吗？怎么弄的"));
+    // 入场轮：请求里告诉她提到她的是哪一句；她选了说话
+    harness.turnResponses.push_back(sayResponse("在的，怎么了"));
     harness.service->runTurn(8823);
-    ASSERT_FALSE(harness.sender->texts.empty());
-    EXPECT_EQ(harness.sender->texts.back(), "解决了吗？怎么弄的");
+    ASSERT_EQ(harness.agentHistories.size(), 1U);
+    const std::string &ask = harness.agentHistories.front().back().content;
+    EXPECT_NE(ask.find("提到你的那句是：「克莱茵在吗」"), std::string::npos);
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(harness.sender->texts.front(), "在的，怎么了");
     EXPECT_FALSE(harness.service->sessionOf(8823)->entryPending) << "入场轮执行后标记清除";
-}
-
-TEST(EngagementSessionTest, JudgeNoLeavesGroupAlone)
-{
-    Harness harness;
-    harness.service->setWorker([](const std::string &, const std::string &)
-                               { return "NO：只是在聊游戏恰巧含这个词"; });
-    harness.feed(8823, "Klein 这个英雄真弱", harness.now, true);
-    ASSERT_EQ(harness.submittedJudges.size(), 1U);
-    harness.service->runJudge(8823);
-    EXPECT_FALSE(harness.service->sessionOf(8823).has_value());
+    EXPECT_TRUE(harness.workerSystems.empty());
 }
 
 TEST(EngagementSessionTest, ActiveSessionMergesMentionsInsteadOfReactivation)
 {
     Harness harness;
     harness.service->onAtActivated(8823, "话题");
-    const std::size_t judgesBefore = harness.submittedJudges.size();
-    // 会话存活期间提名字：并入会话（点名触发轮次），不再走 judge
-    harness.feed(8823, "Klein 你怎么看", harness.now + 5, true);
-    EXPECT_EQ(harness.submittedJudges.size(), judgesBefore);
-    EXPECT_TRUE(harness.service->sessionOf(8823)->addressPending);
+    const std::int64_t startBefore = harness.service->sessionOf(8823)->startTs;
+    const std::size_t turnsBefore = harness.submittedTurns.size();
+    // 会话存活期间提名字：并入会话（点名触发轮次），不重新激活、不出入场轮
+    harness.now += 5;
+    harness.feed(8823, "Klein 你怎么看", harness.now, true);
+    EXPECT_EQ(harness.submittedTurns.size(), turnsBefore + 1);
+    auto session = harness.service->sessionOf(8823);
+    ASSERT_TRUE(session.has_value());
+    EXPECT_TRUE(session->addressPending);
+    EXPECT_FALSE(session->entryPending);
+    EXPECT_EQ(session->startTs, startBefore);
 }
 
 TEST(EngagementSessionTest, SelfActivityResetsPassCounterAndBeat)
@@ -1021,7 +1043,7 @@ InboundMessage inboundChat(std::uint64_t group, std::uint64_t user, const std::s
 }
 } // namespace
 
-TEST(EngagementIntegrationTest, ObserveFeedsEngagementAndJudgeActivates)
+TEST(EngagementIntegrationTest, ObserveFeedsEngagementAndNameMentionActivates)
 {
     TemporaryDirectory temporaryDirectory;
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
@@ -1037,22 +1059,29 @@ TEST(EngagementIntegrationTest, ObserveFeedsEngagementAndJudgeActivates)
     GroupContextService contextService(&state, bot, &store, &sender);
     EngagementService engagement(bot, &store, &sender, [] { return std::int64_t(1000); });
     contextService.setEngagement(&engagement);
-    engagement.setWorker([](const std::string &, const std::string &)
-                         { return std::string("YES"); });
+    int workerCalls = 0;
+    engagement.setWorker([&workerCalls](const std::string &, const std::string &)
+                         {
+                             ++workerCalls;
+                             return std::string();
+                         });
     std::vector<std::uint64_t> turns;
     engagement.setSubmitTurn([&](std::uint64_t group) { turns.push_back(group); });
 
-    // 群里聊出语境，有人提名字无 @：observe 喂 observe→judge 提交 →
-    // lane 内 runJudge 判 YES → 清旧建新 + 入场轮提交
+    // 群里聊出语境，有人提名字无 @：observe 喂 onGroupMessage → 直接开会话 +
+    // 入场轮提交（叫没叫她由她本人在入场轮判断，不经杂务模型）
     contextService.observe(inboundChat(8823, 10, "原神深渊十二层怎么打", 1000));
     contextService.observe(inboundChat(8823, 20, "深渊阵容带钟离稳一点", 1001));
+    EXPECT_FALSE(engagement.sessionOf(8823).has_value()) << "没提名字不开会话";
     contextService.observe(inboundChat(8823, 30, "Klein 你深渊用的什么阵容", 1002));
-    engagement.runJudge(8823); // 模拟群 lane 执行 judge 任务
     ASSERT_EQ(turns.size(), 1U);
     ASSERT_TRUE(engagement.sessionOf(8823).has_value());
+    EXPECT_EQ(engagement.sessionOf(8823)->state, EngagementState::Active);
     EXPECT_TRUE(engagement.sessionOf(8823)->entryPending);
+    EXPECT_EQ(engagement.sessionOf(8823)->topicLine, "Klein 你深渊用的什么阵容");
+    EXPECT_EQ(workerCalls, 0);
 
-    // 会话存活期间再提名字：并入会话（点名触发轮次），不再走 judge
+    // 会话存活期间再提名字：并入会话（点名触发轮次），不重新激活
     contextService.observe(inboundChat(8823, 40, "Klein 说得对", 1003));
     EXPECT_EQ(turns.size(), 2U) << "第二次是点名轮次，不是重新激活";
     EXPECT_TRUE(engagement.sessionOf(8823)->addressPending);
@@ -1373,4 +1402,54 @@ TEST(EngagementDecisionRecordTest, RecordsSpeakAndPassWithSharedContract)
         }
     }
     EXPECT_TRUE(foundSilence);
+}
+
+// 提名字入场轮由她本人决定：沉默/离场都不发言，并留下 engagement_turn 决策记录
+//（日后据此看"她选择了沉默"）。入场轮沉默沿用 Entry 语义：计一拍 pass，会话不收场
+TEST(EngagementDecisionRecordTest, NameMentionEntryPassStaysQuietAndRecordsNoReply)
+{
+    Harness harness;
+    affect::DecisionStore store(harness.directory.path() + "/affect.db");
+    ASSERT_TRUE(store.isOpen());
+    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    harness.service->setDecisionRecorder(&recorder);
+
+    // 只是在聊她，不是叫她：入场轮选沉默
+    harness.feed(8823, "昨天克莱茵那个梗笑死我了", harness.now, true);
+    ASSERT_EQ(harness.submittedTurns.size(), 1U);
+    harness.turnResponses.push_back(passResponse());
+    harness.service->runTurn(8823);
+
+    EXPECT_TRUE(harness.sender->texts.empty()) << "她选择沉默，不发言";
+    auto session = harness.service->sessionOf(8823);
+    ASSERT_TRUE(session.has_value());
+    EXPECT_EQ(session->state, EngagementState::Ended) << "入场轮沉默 = 不加入，直接收场";
+    EXPECT_FALSE(session->entryPending);
+    auto decisions = store.recentDecisions(10);
+    ASSERT_EQ(decisions.size(), 1U);
+    EXPECT_EQ(decisions.front().source, "engagement_turn");
+    EXPECT_EQ(decisions.front().plan.action, "no_reply");
+    EXPECT_EQ(store.executionCount(decisions.front().decisionId), 1U);
+
+    // 另一个群：入场轮选 leave_topic（无最后一句）→ 不发言、会话结束
+    harness.now += 5;
+    harness.feed(8824, "克莱茵这个名字挺好听", harness.now, true);
+    ASSERT_EQ(harness.submittedTurns.size(), 2U);
+    harness.turnResponses.push_back(leaveResponse("只是在聊我，不是叫我"));
+    harness.service->runTurn(8824);
+
+    EXPECT_TRUE(harness.sender->texts.empty());
+    EXPECT_EQ(harness.service->sessionOf(8824)->state, EngagementState::Ended);
+    decisions = store.recentDecisions(10);
+    ASSERT_EQ(decisions.size(), 2U);
+    bool foundLeave = false;
+    for (const auto &decision : decisions)
+    {
+        if (decision.plan.action == "leave_topic")
+        {
+            foundLeave = true;
+            EXPECT_EQ(decision.source, "engagement_turn");
+        }
+    }
+    EXPECT_TRUE(foundLeave);
 }

@@ -6,9 +6,10 @@
  * 生命周期——激活 → 轮次循环 → 结束保留 2h → 清扫/被新会话覆盖。
  *
  * 激活两条路：@ 是硬激活（必须回答走既有回复路径，这里只开会话）；
- * 提名字无 @ 是软激活——worker 模型 judge 看迷你窗口判定是否介入
- * （保险丝：每群 60s 最小间隔 + 每小时上限），判定通过才开会话并出
- * 入场轮。会话存活期间，新的点名/提及一律并入本会话，不再重复激活；
+ * 提名字无 @ 直接开会话并出入场轮——是不是在叫她由她本人（人格主模型）
+ * 读现场判断，可 leave_topic 沉默；不再经杂务模型判定器（2026-10-31）。
+ * 激活预算（每群 60s 最小间隔 + 每小时上限）只是资源护栏。
+ * 会话存活期间，新的点名/提及一律并入本会话，不再重复激活；
  * 其中 @ 只算活动（回答由 Message 的 @ 路径给出），提名字/引用回复她才触发会话轮。
  *
  * 轮次循环：主 Agent（人格 system + 公共上下文材料 + 动作工具表）每轮
@@ -19,12 +20,12 @@
  * 硬后盖不依赖模型自觉：轮次上限、
  * 会话时长、群内不活跃时长任一触顶强制结束。
  *
- * 结束不是删除：会话（含话题行）保留 2 小时，期间 judge 材料可引用
- * "上次话题"；保留期内同群新激活 = 清旧建新（旧上下文让位），2h 无
- * 续接由 pump 清扫。进程重启即失（短时状态，群内容库才是持久层）。
+ * 结束不是删除：会话（含话题行）保留 2 小时；保留期内同群新激活 =
+ * 清旧建新（旧上下文让位），2h 无续接由 pump 清扫。进程重启即失
+ * （短时状态，群内容库才是持久层）。
  *
  * 线程模型：onGroupMessage/onAtActivated/onSelfActivity 在 worker 线程，
- * pump 在 pollingThread，runTurn/runJudge 经 submit seam 在群 lane worker
+ * pump 在 pollingThread，runTurn 经 submit seam 在群 lane worker
  * 执行——内部 mutex 统一保护，模型调用一律在锁外。
  */
 #include "../Application/BotIdentity.h"
@@ -75,7 +76,7 @@ struct EngagementSession
     std::string digest;              // 已压缩部分的滚动摘要
     std::int64_t compressedUpToTs = 0; // 摘要覆盖到的时刻（之后为原文窗口）
     bool addressPending = false;     // 被点名/被回复，待回应（优先触发）
-    bool entryPending = false;       // 软激活后的入场轮待执行（@ 激活无入场轮）
+    bool entryPending = false;       // 提名字激活后的入场轮待执行（@ 激活无入场轮）
     bool coldPending = false;        // 冷启动入场轮待执行（热度尖峰自决）
     bool coldInitiated = false;      // 本会话由冷启动开启（结束冷却更久）
     std::string endReason;
@@ -103,8 +104,8 @@ public:
     using MainAgent = std::function<ChatResponse(const std::string &systemNote,
                                                  const std::vector<ChatMessage> &history,
                                                  const std::vector<std::string> &toolSchemas)>;
-    // 杂务模型 seam（组合根适配 ChatService::buildOnceWith——激活 judge、
-    // 上下文压缩等后台苦力任务；空/失败返回空串）
+    // 杂务模型 seam（组合根适配 ChatService::buildOnceWith——上下文压缩、
+    // 情绪基调等后台苦力任务；空/失败返回空串）
     using Worker = std::function<std::string(const std::string &systemPrompt,
                                              const std::string &userPrompt)>;
     // 任务提交 seam（组合根适配 KeyedTaskScheduler::submit，按群占 lane；
@@ -127,7 +128,6 @@ public:
     void setMainAgent(MainAgent mainAgent) { this->mainAgent = std::move(mainAgent); }
     void setWorker(Worker worker) { this->worker = std::move(worker); }
     void setSubmitTurn(Submit submitTurn) { this->submitTurn = std::move(submitTurn); }
-    void setSubmitJudge(Submit submitJudge) { this->submitJudge = std::move(submitJudge); }
     void setMemberProvider(MemberProvider memberProvider)
     {
         this->memberProvider = std::move(memberProvider);
@@ -149,7 +149,7 @@ public:
     void setTools(const ToolRegistry *tools, std::vector<std::string> allowedNames);
 
     // worker 线程：监控群新消息（record 已入库）。会话存活期喂活动/点名；
-    // 无存活会话时提名字无 @ 是软激活信号（judge 保险丝后提交判定）
+    // 无存活会话时提名字无 @ 直接开会话并提交入场轮（激活预算内）
     void onGroupMessage(const GroupMessageRecord &record, bool atMentioned);
 
     // @ 硬激活（Message 群 @ 路径调用）：清旧建新开会话；回答本身走既有
@@ -161,9 +161,6 @@ public:
 
     // pollingThread 每 3s：硬后盖（消息量/不活跃）+ 保留期清扫 + lull 轮次触发
     void pump(std::int64_t now);
-
-    // 群 lane worker 内执行：软激活判定（judge YES → 清旧建新 + 入场轮）
-    void runJudge(std::uint64_t groupId);
 
     // 群 lane worker 内执行：一轮跟进（装配材料 → 主 Agent → 动作分发）
     void runTurn(std::uint64_t groupId);
@@ -202,7 +199,8 @@ private:
     void recordEngagementSpeech(std::uint64_t groupId, const std::string &text,
                                 std::int64_t now, const std::string &correlationId = {});
     bool replyToSelf(const GroupMessageRecord &record) const;
-    bool allowJudgeLocked(std::uint64_t groupId, std::int64_t now);
+    // 提名字激活预算（资源护栏）：每群 60s 最小间隔 + 每小时上限；放行即记账
+    bool allowNameActivationLocked(std::uint64_t groupId, std::int64_t now);
     // 材料装配：原文窗口（超长保头截断）+ 预算内直灌；超预算把最旧一段经
     // worker 合并进滚动摘要，只留原文尾巴。worker 调用在锁外由调用方保证
     PreparedContext prepareContext(const std::vector<GroupMessageRecord> &records,
@@ -238,12 +236,10 @@ private:
     std::map<std::uint64_t, EngagementSession> sessions;
     std::map<std::uint64_t, ColdState> colds;
     std::map<std::uint64_t, std::int64_t> coldCooldownUntil; // 冷启动禁入截止
-    std::map<std::uint64_t, bool> pendingJudge;  // judge 提交合流（防重复提交）
-    std::map<std::uint64_t, std::deque<std::int64_t>> judgeHistory; // 保险丝记录
+    std::map<std::uint64_t, std::deque<std::int64_t>> nameActivationHistory; // 激活预算记账
     MainAgent mainAgent;
     Worker worker;
     Submit submitTurn;
-    Submit submitJudge;
     MemberProvider memberProvider;
     OutboundRecorder outboundRecorder;
     affect::DecisionRecorder *decisionRecorder = nullptr;

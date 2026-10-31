@@ -621,7 +621,7 @@ int main(int argc, char **argv)
 	}
 	groupContextService.setGlance(&glanceService);
 	// 话题会话（意志层 v2）：每群至多一个存活会话，激活→轮次→保留 2h；
-	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=judge/压缩），未配管理员
+	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=压缩/情绪基调），未配管理员
 	// 则无主模型、跟进自动停摆（与主动发言同一底线）
 	EngagementService engagementService(settings.bot, groupContextStore.get(), &messageSender);
 	engagementService.setDecisionRecorder(decisionRecorder.get());
@@ -698,7 +698,7 @@ int main(int argc, char **argv)
 				LOG_ERROR("消息处理任务发生未知异常");
 			}
 		});
-	// 话题会话任务提交（意志层 v2）：judge/轮次都进群 lane（高位标志避免与
+	// 话题会话任务提交（意志层 v2）：会话轮进群 lane（高位标志避免与
 	// user_id 撞车），同群串行、跨群并行，模型调用不阻塞 worker/polling 线程
 	{
 		constexpr std::uint64_t kGroupLaneFlag = 0x8000'0000'0000'0000ULL;
@@ -707,11 +707,6 @@ int main(int argc, char **argv)
 			{ messageWorkers.submit(groupId | kGroupLaneFlag,
 				[&engagementService, groupId]()
 				{ engagementService.runTurn(groupId); }); });
-		engagementService.setSubmitJudge([&messageWorkers, &engagementService](
-											 std::uint64_t groupId)
-			{ messageWorkers.submit(groupId | kGroupLaneFlag,
-				[&engagementService, groupId]()
-				{ engagementService.runJudge(groupId); }); });
 	}
 	LOG_INFO("消息执行器线程：初始 " +
 		std::to_string(settings.messageExecution.initialWorkerThreads) +
