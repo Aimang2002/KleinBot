@@ -2,6 +2,7 @@
 #define GET_CURRENT_MODEL_ACTION_H
 
 #include "Action.h"
+#include "../Port/ToolNames.h"
 #include <functional>
 
 class GetCurrentModelAction : public Action
@@ -13,7 +14,7 @@ public:
     const ActionDescriptor &descriptor() const override
     {
         static const ActionDescriptor value{
-            "get_current_model",
+            KleinGetCurrentModelToolName,
             "查询当前用户正在使用的聊天模型。用户询问当前模型、正在使用哪个模型时调用。",
             {{"type", "object"}, {"properties", nlohmann::json::object()}},
             true,

@@ -122,9 +122,10 @@ public:
     // 群人数查询 seam（组合根适配 GroupListService 镜像；冷启动阈值的人数
     // 地板/先验用；查不到返回 0）。测试注入常量
     using MemberProvider = std::function<long(std::uint64_t groupId)>;
-    // 工具出站入库 seam（组合根适配 GroupContextService::recordOutbound）：会话轮
-    // 工具产出的出站消息（generate_image/send_image 的图）投递时同步记进群缓冲，
-    // 占位符与 @ 路径一致；可空 = 只投递不入库
+    // 她的出站入库 seam（组合根适配 GroupContextService::recordOutbound）：会话轮里她
+    // 发出的一切——group_say 的话、离场最后一句、工具产出的图——都经它记进群缓冲，与
+    // @ 路径共用同一条入库实现（占位符、回执关联键、会话活动）。先入库后投递（R0.2）。
+    // 可空 = 只投递不入库
     using OutboundRecorder = std::function<void(std::uint64_t groupId,
                                                 const OutboundMessage &message,
                                                 const std::string &correlationId)>;
@@ -201,12 +202,11 @@ private:
                           std::string reason, bool forced);
     // correlationId：回执关联键（R0.2）；投递与自消息入库共用同一个，回执到达后
     // 执行记录推进 sent/failed/unknown、自消息补上真实 message_id
-    void deliverText(std::uint64_t groupId, const std::string &text,
-                     const std::string &correlationId = {});
     void deliverMessage(std::uint64_t groupId, const OutboundMessage &message,
                         const std::string &correlationId = {});
-    void recordEngagementSpeech(std::uint64_t groupId, const std::string &text,
-                                std::int64_t now, const std::string &correlationId = {});
+    // 她的一条出站：先经 OutboundRecorder 入群缓冲，再投递（会话轮唯一出站路径）
+    void emitOutbound(std::uint64_t groupId, const OutboundMessage &message,
+                      const std::string &correlationId = {});
     bool replyToSelf(const GroupMessageRecord &record) const;
     // 提名字激活预算（资源护栏）：每群 60s 最小间隔 + 每小时上限；放行即记账
     bool allowNameActivationLocked(std::uint64_t groupId, std::int64_t now);

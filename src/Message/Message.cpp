@@ -12,6 +12,7 @@
 #include "../Affect/DecisionRecord.h"
 #include "../Affect/DecisionRecorder.h"
 #include "Message.h"
+#include "../Application/NonTextLabels.h"
 #include <algorithm>
 #include <iomanip>
 #include <thread>
@@ -119,20 +120,18 @@ void Message::handleMessage(const InboundMessage &current_data)
 		// 群聊纯@（无文字无图片）：空 user 消息会让模型答非所问
 		// （"没有收到你的消息内容"之类），换成明确的情境占位，
 		// 让人格自然接住这次点名
+		// 带了视频/文件/卡片等无正文段：把标签给模型，而不是谎称"没有附带任何文字"
+		// （渲染与群缓冲共用 Application/NonTextLabels.h；@ 路径历来不读表情摘要）
+		const std::vector<std::string> labels = nonTextLabels(current_data, /*includeFaces=*/false);
 		if (conversationText.empty())
 		{
-			// 带了视频/文件/卡片等无正文段：把标签给模型，而不是谎称"没有附带任何文字"
-			std::string labels;
-			for (const std::string &label : current_data.attachment_labels)
-				labels += (labels.empty() ? "" : " ") + label;
 			conversationText = labels.empty()
 				? "（对方只是@了你，没有附带任何文字）"
-				: "（对方@了你，没有文字，附带了：" + labels + "）";
+				: "（对方@了你，没有文字，附带了：" + joinLabels(labels) + "）";
 		}
-		else if (!current_data.attachment_labels.empty())
+		else
 		{
-			for (const std::string &label : current_data.attachment_labels)
-				conversationText += " " + label;
+			appendLabels(conversationText, labels);
 		}
 
 		// 群上下文注入（T7b）：内容层优先——按触发句相关性选择的原文块/摘要

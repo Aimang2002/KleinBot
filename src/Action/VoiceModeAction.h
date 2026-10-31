@@ -2,6 +2,7 @@
 #define VOICE_MODE_ACTION_H
 
 #include "Action.h"
+#include "../Port/ToolNames.h"
 #include "../UserSession/UserSessionService.h"
 
 class VoiceModeAction : public Action
@@ -13,7 +14,7 @@ public:
     const ActionDescriptor &descriptor() const override
     {
         static const ActionDescriptor value{
-            "set_voice_mode",
+            KleinSetVoiceModeToolName,
             "开启或关闭当前用户的语音回复。用户说开启语音、打开语音、关闭语音时调用。",
             {
                 {"type", "object"},

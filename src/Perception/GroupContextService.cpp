@@ -1,4 +1,5 @@
 #include "GroupContextService.h"
+#include "../Application/NonTextLabels.h"
 #include "EngagementService.h"
 #include "GlanceService.h"
 #include "../Asset/ImageAssetStore.h"
@@ -54,26 +55,9 @@ void GroupContextService::observe(const InboundMessage &message)
     record.userId = message.user_id;
     record.nickname = message.card.empty() ? message.nickname : message.card;
     record.text = message.plain_text;
-    // 零成本表情（R1.1）：mface/face 段只有文字摘要，直接拼进缓冲文本，不下载不瞥视。
-    // mface 的 summary 常自带方括号（"[狗头]"），去掉外层再包成 [表情 狗头]
-    for (const std::string &face : message.face_summaries)
-    {
-        std::string label = face;
-        if (label.size() >= 2 && label.front() == '[' && label.back() == ']')
-            label = label.substr(1, label.size() - 2);
-        if (label.empty())
-            continue;
-        const std::string token = "[表情 " + label + "]";
-        record.text = record.text.empty() ? token : (record.text + " " + token);
-    }
-    // 无正文段的文字标签（视频/语音/文件/卡片/合并转发）：原样拼进缓冲，她至少知道
-    // 群里发了个什么；此前这类消息整条退化成裸 "[图片]"
-    for (const std::string &label : message.attachment_labels)
-    {
-        if (label.empty())
-            continue;
-        record.text = record.text.empty() ? label : (record.text + " " + label);
-    }
+    // 零成本表情（R1.1）与无正文段标签（视频/语音/文件/卡片/合并转发）：拼进缓冲文本，
+    // 不下载不瞥视；渲染与 @ 路径共用 Application/NonTextLabels.h
+    appendLabels(record.text, nonTextLabels(message, /*includeFaces=*/true));
     std::optional<ImageAsset> asset;
     if (!message.message_data_url.empty())
     {

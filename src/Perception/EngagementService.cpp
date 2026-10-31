@@ -3,7 +3,7 @@
 #include "../Affect/DecisionRecorder.h"
 #include "../Application/ToolGuidance.h"
 #include "../Application/ToolLoop.h"
-#include "../Application/WebSearchRouting.h" // currentLocalDateIso（群主动轮工具说明的日期上下文）
+#include "../utils/LocalDate.h"
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
 #include "../Tool/ToolArgumentParser.h"
@@ -859,9 +859,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
         {
             const OutboundMessage &message = messages[index];
             const std::string correlationId = index == 0 ? utils::uniqueId("dlv") : std::string();
-            if (outboundRecorder)
-                outboundRecorder(groupId, message, correlationId);
-            deliverMessage(groupId, message, correlationId);
+            emitOutbound(groupId, message, correlationId);
         }
         LOG_INFO("会话轮工具 " + toolName + " 投递出站消息 " + std::to_string(messages.size()) +
                  " 条：群 " + std::to_string(groupId));
@@ -1003,8 +1001,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
         // 关联键 = execution_id；无记录器时也要一个键，自消息 message_id 回填靠它
         const std::string correlationId =
             executionId.empty() ? utils::uniqueId("dlv") : executionId;
-        deliverText(groupId, turn.text, correlationId);
-        recordEngagementSpeech(groupId, turn.text, now, correlationId);
+        emitOutbound(groupId, TextMessage{utils::trim(turn.text)}, correlationId);
     }
 
     // 情绪基调更新（worker 调用在锁外；每 N 个发言轮一次，失败保留旧基调）——
@@ -1117,14 +1114,6 @@ void EngagementService::endSessionLocked(EngagementSession &session, std::int64_
              std::to_string(session.groupId) + "，原因：" + reason + "，保留 2 小时");
 }
 
-void EngagementService::deliverText(std::uint64_t groupId, const std::string &text,
-                                    const std::string &correlationId)
-{
-    if (sender == nullptr || utils::trim(text).empty())
-        return;
-    deliverMessage(groupId, TextMessage{utils::trim(text)}, correlationId);
-}
-
 void EngagementService::deliverMessage(std::uint64_t groupId, const OutboundMessage &message,
                                        const std::string &correlationId)
 {
@@ -1137,21 +1126,13 @@ void EngagementService::deliverMessage(std::uint64_t groupId, const OutboundMess
     sender->deliver(std::move(delivery));
 }
 
-void EngagementService::recordEngagementSpeech(std::uint64_t groupId, const std::string &text,
-                                               std::int64_t now,
-                                               const std::string &correlationId)
+void EngagementService::emitOutbound(std::uint64_t groupId, const OutboundMessage &message,
+                                     const std::string &correlationId)
 {
-    if (store == nullptr)
-        return;
-    GroupMessageRecord record;
-    record.groupId = groupId;
-    record.userId = bot.id;
-    record.nickname = bot.name;
-    record.text = text;
-    record.timestamp = now;
-    record.isSelf = true;
-    record.correlationId = correlationId;
-    store->append(record);
+    // 先入库后投递：回执可能很快回来，自消息行必须先在（R0.2）
+    if (outboundRecorder)
+        outboundRecorder(groupId, message, correlationId);
+    deliverMessage(groupId, message, correlationId);
 }
 
 bool EngagementService::replyToSelf(const GroupMessageRecord &record) const

@@ -1,8 +1,6 @@
 #include "ToolGuidance.h"
-#include "ReminderToolNames.h"
-#include "WebSearchRouting.h"
+#include "../Port/ToolNames.h"
 #include "../Tool/ToolRegistry.h"
-#include "../WebFetch/WebFetchOptions.h"
 
 #include <algorithm>
 
@@ -27,18 +25,18 @@ const std::vector<GuidanceSection> &layoutFor(GuidanceScene scene)
 {
     static const std::vector<GuidanceSection> conversation = {
         {{}, "\n\n", ""},
-        {{"inspect_image", "send_image", "generate_image"}, "", ""},
-        {{"recall_conversation"}, "", ""},
-        {{"get_current_model"}, "", ""},
-        {{"set_voice_mode"}, "", ""},
-        {{"admin_control"}, "", ""},
+        {{KleinInspectImageToolName, KleinSendImageToolName, KleinGenerateImageToolName}, "", ""},
+        {{KleinRecallConversationToolName}, "", ""},
+        {{KleinGetCurrentModelToolName}, "", ""},
+        {{KleinSetVoiceModeToolName}, "", ""},
+        {{KleinAdminControlToolName}, "", ""},
         {{}, "不要把重置对话、重置上下文、设置人格或还原人格转换为工具调用。", ""},
         {{KleinWebSearchToolName}, "", ""},
         {{KleinWebFetchToolName}, "", ""},
         {{KleinSetReminderToolName, KleinListRemindersToolName, KleinCancelReminderToolName}, "", ""},
     };
     static const std::vector<GuidanceSection> groupTurn = {
-        {{"inspect_image", "generate_image", "send_image"}, "", ""},
+        {{KleinInspectImageToolName, KleinGenerateImageToolName, KleinSendImageToolName}, "", ""},
         {{KleinWebSearchToolName, KleinWebFetchToolName}, "\n\n[系统注] ", kWebToolsGroupTurnNote},
     };
     return scene == GuidanceScene::Conversation ? conversation : groupTurn;

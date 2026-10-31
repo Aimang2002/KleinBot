@@ -2,6 +2,7 @@
 #define RECALL_CONVERSATION_TOOL_H
 
 #include "Tool.h"
+#include "../Port/ToolNames.h"
 #include "ToolArgumentParser.h"
 #include "../Memory/MemoryService.h"
 #include "../../Library/nlohmann/json.hpp"
@@ -14,7 +15,7 @@ class RecallConversationTool : public Tool
 public:
     explicit RecallConversationTool(MemoryService &memoryService) : memoryService(memoryService) {}
 
-    std::string name() const override { return "recall_conversation"; }
+    std::string name() const override { return KleinRecallConversationToolName; }
 
     std::string description() const override
     {

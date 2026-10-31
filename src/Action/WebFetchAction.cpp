@@ -1,4 +1,5 @@
 #include "WebFetchAction.h"
+#include "../Port/ToolNames.h"
 #include "../Network/CurlRequestControl.h"
 #include "../WebFetch/HtmlTextExtractor.h"
 #include <algorithm>

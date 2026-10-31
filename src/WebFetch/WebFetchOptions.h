@@ -4,9 +4,6 @@
 #include <cstddef>
 #include <string>
 
-// 与 klein_web_search 同前缀，避免第三方网关抢占保留名 web_fetch
-inline constexpr const char *KleinWebFetchToolName = "klein_web_fetch";
-
 struct WebFetchOptions
 {
     bool enabled = false;

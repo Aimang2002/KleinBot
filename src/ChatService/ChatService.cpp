@@ -3,7 +3,7 @@
 #include "../Application/RecallContextInjection.h"
 #include "../Application/ToolGuidance.h"
 #include "../Application/ToolLoop.h"
-#include "../Application/WebSearchRouting.h"
+#include "../utils/LocalDate.h"
 #include "../Memory/MemoryService.h"
 #include "../Tool/ToolContext.h"
 #include "../utils/Utils.hpp"

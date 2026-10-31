@@ -2,6 +2,7 @@
 #define ADMIN_CONTROL_ACTION_H
 
 #include "Action.h"
+#include "../Port/ToolNames.h"
 #include "../ComputerStatus/ComputerStatus.h"
 #include <functional>
 
@@ -16,7 +17,7 @@ public:
     const ActionDescriptor &descriptor() const override
     {
         static const ActionDescriptor value{
-            "admin_control",
+            KleinAdminControlToolName,
             "执行管理员控制操作。仅管理员可以调用。支持配置刷新、全局语音和服务器网络查询。",
             {{"type", "object"},
              {"properties", {{"action", {{"type", "string"}, {"enum", {"refresh_config", "activate_global_voice", "freeze_global_voice", "get_inet4", "get_inet6", "get_public_ip"}}}}}},

@@ -128,6 +128,24 @@ struct Harness
               bot, store.get(), sender.get(), [this] { return now; }))
     {
         service->setSubmitTurn([this](std::uint64_t group) { submittedTurns.push_back(group); });
+        // 与组合根一致：她的出站经 recorder 入群缓冲并算会话活动（GroupContextService::
+        // recordOutbound 的最小等价物；集成测试走真实实现）
+        service->setOutboundRecorder(
+            [this, bot](std::uint64_t group, const OutboundMessage &message,
+                        const std::string &correlationId)
+            {
+                GroupMessageRecord self;
+                self.groupId = group;
+                self.userId = bot.id;
+                self.nickname = bot.name;
+                const auto *text = std::get_if<TextMessage>(&message);
+                self.text = text != nullptr ? text->content : std::string("[图片]");
+                self.timestamp = now;
+                self.isSelf = true;
+                self.correlationId = correlationId;
+                store->append(self);
+                service->onSelfActivity(group, now);
+            });
         service->setMainAgent(
             [this](const std::string &contract, const std::vector<ChatMessage> &history,
                    const std::vector<std::string> &schemas)
@@ -1145,8 +1163,9 @@ TEST(EngagementToolTest, TurnDeliversToolOutboundImageAndRecordsPlaceholder)
     EXPECT_EQ(target->group_id, "8823");
     EXPECT_FALSE(imageDelivery.correlation_id.empty());
 
-    // 入库 seam 拿到同一张图与同一个关联键（占位符由 GroupContextService 生成）
-    ASSERT_EQ(recorded.size(), 1U);
+    // 入库 seam 拿到同一张图与同一个关联键（占位符由 GroupContextService 生成），
+    // 随后她的那句话也经同一个 seam 入库（会话轮唯一出站路径）
+    ASSERT_EQ(recorded.size(), 2U);
     EXPECT_EQ(recorded.front().groupId, 8823U);
     const auto *recordedImage = std::get_if<ImageMessage>(&recorded.front().message);
     ASSERT_NE(recordedImage, nullptr);
@@ -1162,6 +1181,10 @@ TEST(EngagementToolTest, TurnDeliversToolOutboundImageAndRecordsPlaceholder)
     EXPECT_EQ(second[2].content, "图片已生成，可以继续询问它的内容，或要求重新发送。");
 
     EXPECT_TRUE(std::holds_alternative<TextMessage>(harness.sender->deliveries[1].message));
+    const auto *recordedText = std::get_if<TextMessage>(&recorded[1].message);
+    ASSERT_NE(recordedText, nullptr);
+    EXPECT_EQ(recordedText->content, "画好了");
+    EXPECT_EQ(recorded[1].correlationId, harness.sender->deliveries[1].correlation_id);
     ASSERT_EQ(harness.sender->texts.size(), 1U);
     EXPECT_EQ(harness.sender->texts.front(), "画好了");
     EXPECT_EQ(harness.service->sessionOf(8823)->turnCount, 1);

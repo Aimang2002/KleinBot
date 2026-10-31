@@ -2,6 +2,7 @@
 #define GENERATE_IMAGE_TOOL_H
 
 #include "Tool.h"
+#include "../Port/ToolNames.h"
 #include "ImageToolGuidance.h"
 #include "ToolArgumentParser.h"
 #include "../Asset/ImageAssetStore.h"
@@ -23,7 +24,7 @@ public:
                       ImageAssetStore *sharedAssets = nullptr)
         : GenerateImageTool(dock, assetStore, fixedEndpoint(std::move(model)), sharedAssets) {}
 
-    std::string name() const override { return "generate_image"; }
+    std::string name() const override { return KleinGenerateImageToolName; }
 
     std::string description() const override
     {

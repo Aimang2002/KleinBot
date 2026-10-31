@@ -2,6 +2,7 @@
 #define SEND_IMAGE_TOOL_H
 
 #include "Tool.h"
+#include "../Port/ToolNames.h"
 #include "ImageToolGuidance.h"
 #include "ImageToolHelpers.h"
 #include "ToolArgumentParser.h"
@@ -13,7 +14,7 @@ public:
     explicit SendImageTool(ImageAssetStore &assetStore, const ImageAssetStore *sharedAssets = nullptr)
         : assetStore(assetStore), sharedAssets(sharedAssets) {}
 
-    std::string name() const override { return "send_image"; }
+    std::string name() const override { return KleinSendImageToolName; }
 
     std::string description() const override
     {

@@ -1,5 +1,5 @@
 #include "CancelReminderAction.h"
-#include "../Application/ReminderToolNames.h"
+#include "../Port/ToolNames.h"
 
 const ActionDescriptor &CancelReminderAction::descriptor() const
 {

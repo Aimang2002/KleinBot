@@ -7,7 +7,7 @@
 #include <csignal>
 #include "JsonParse/JsonParse.h"
 #include "Application/EventRouter.h"
-#include "Application/WebSearchRouting.h"
+#include "Port/ToolNames.h"
 #include "Bootstrap/ConfigSnapshotStore.h"
 #include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
@@ -653,7 +653,7 @@ int main(int argc, char **argv)
 	// generate_image/send_image 的图当场发到群里（生图存群库）。看不懂的人名/梗/事件
 	// 可经 klein_web_search/klein_web_fetch 查（2026-10-31：先看懂再开口）；联网未配置时
 	// 未注册，setTools 丢弃并告警。管理员工具由 setTools 过滤
-	engagementService.setTools(&tools, {"inspect_image", "generate_image", "send_image",
+	engagementService.setTools(&tools, {KleinInspectImageToolName, KleinGenerateImageToolName, KleinSendImageToolName,
 		KleinWebSearchToolName, KleinWebFetchToolName});
 	// 工具出站图入群缓冲：占位符与 @ 路径（Message::dispatch）一致
 	engagementService.setOutboundRecorder(

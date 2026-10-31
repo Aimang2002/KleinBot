@@ -2,6 +2,7 @@
 #define INSPECT_IMAGE_TOOL_H
 
 #include "Tool.h"
+#include "../Port/ToolNames.h"
 #include "ImageToolGuidance.h"
 #include "ImageToolHelpers.h"
 #include "ToolArgumentParser.h"
@@ -21,7 +22,7 @@ public:
                      const ImageAssetStore *sharedAssets = nullptr)
         : InspectImageTool(dock, assetStore, fixedEndpoint(std::move(model)), sharedAssets) {}
 
-    std::string name() const override { return "inspect_image"; }
+    std::string name() const override { return KleinInspectImageToolName; }
 
     std::string description() const override
     {
