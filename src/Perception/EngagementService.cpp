@@ -1,6 +1,7 @@
 #include "EngagementService.h"
 #include "../Affect/DecisionRecord.h"
 #include "../Affect/DecisionRecorder.h"
+#include "../Application/WebSearchRouting.h"
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
 #include "../Tool/ToolArgumentParser.h"
@@ -8,6 +9,7 @@
 #include "../Tool/ToolRegistry.h"
 #include "../utils/UniqueId.h"
 #include "../utils/Utils.hpp"
+#include "../WebFetch/WebFetchOptions.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -23,7 +25,7 @@ constexpr std::size_t kSingleMessageTokenLimit = 1000; // 超长单条截断门�
 constexpr std::size_t kTruncateHeadChars = 120;        // 截断保头长度（字符，句读收尾）
 constexpr int kRecallBudget = 1;                  // 上下文召回：每会话 1 次
 constexpr std::size_t kRecallTopK = 8;            // 召回返回条数上限
-constexpr int kTurnToolRounds = 3;                // 会话轮工具轮上限（召回 + 注册表工具）
+constexpr int kTurnToolRounds = 3;                // 会话轮工具轮上限（召回 + 注册表工具；搜索→抓取→定案够用）
 constexpr double kRecallFloor = 4.0;              // 召回相关性门槛（复用 TextRecall）
 constexpr int kMaxTurnsPerSession = 20;           // 单会话轮次统计（不再作硬帽，日志观测用）
 constexpr std::int64_t kMaxSessionMessages = 300; // 单会话强制收场：群消息量上限
@@ -32,7 +34,11 @@ constexpr int kPassLimit = 3;                     // 连续 pass 收场
 constexpr std::int64_t kLullSeconds = 4;          // 新消息后的静默判定（趁话题正热插话）
 constexpr int kNewMessagesForTurn = 5;            // lull 轮次的新消息门槛（回得太勤是群友第一反感）
 constexpr std::int64_t kTurnCooldown = 75;        // 跨轮次节流（2026-09-18 真机反馈：20s 太勤）
-constexpr std::size_t kLullHourlyCap = 8;         // lull 轮次每小时上限（点名/入场轮不受限）
+constexpr std::size_t kLullHourlyCap = 8;         // lull 轮次每小时上限（点名/入场轮/追问轮不受限）
+// 追问窗口（资源预算，不是行为规则：她开口后群友常不引用、不点名地接她的话——
+// 她问"lulu是谁？"，对方答"崩三前瞻主持人"——给她一轮看看，接不接仍由她决定）
+constexpr std::int64_t kFollowUpWindowSeconds = 120; // 她开口后多久内算追问窗口
+constexpr int kFollowUpTurnsPerSpeech = 2;           // 每次开口后至多几个追问轮（她再开口归零）
 constexpr int kMoodUpdateEveryTurns = 3;          // 每隔 N 个发言轮经 worker 更新情绪基调
 // 提名字激活预算（资源护栏，不是行为规则：叫没叫她由她本人在入场轮判断）
 constexpr std::int64_t kNameActivationMinInterval = 60; // 提名字激活：每群最小间隔
@@ -54,9 +60,11 @@ constexpr std::int64_t kAnyEndCooldown = 60 * 60;    // 任意会话结束后冷
 constexpr std::int64_t kArmSeconds = 2 * 60 * 60;    // 武装期：观察满 2 小时才启用
 constexpr std::size_t kColdWindowMessages = 15;      // 冷启动入场材料条数
 
-// 会话轮契约：动作三选一是机制（原样保留），"怎么在群里做人"是语用层——
-// 前者约束输出通道，后者约束说话方式；人格声线明示不受本层削减（soul 是灵魂，
-// 群聊规则只是外面的一层情境，2026-09-17 用户定规）
+// 会话轮契约：动作三选一是机制（原样保留），其后一小段语用层只讲"先看懂再开口"——
+// 2026-10-31 改写：此前十条"像真人一样说话"清单反而让她表演（2026-10-30 21:31
+// 现场：不知道 lulu 是主播、误读"拆"，冷入场用人设腔硬接旧话头，被当场纠正）。
+// 不懂装懂是最尴尬的；问一句、查一下、短反应都比一本正经的猜测好。
+// 人格决定说话的味道，不决定说什么（soul 是灵魂，2026-09-17 用户定规）
 const char *const kEngagementContract =
     "\n\n[系统注] 你在QQ群里跟进一个话题，你的每轮输出是一次群插话，不是一对一对话。"
     "每轮动作三选一："
@@ -66,32 +74,13 @@ const char *const kEngagementContract =
     "reason 写一句话理由（只进日志，不会发到群里），final_text 是离场前想留下的最后一句（可为空）。"
     "绝不直接用文字回复——文字内容只有经 group_say 才会被发出。"
 
-    "开口之前像真人潜水一样，先把你要接的那句话在材料里找出来："
-    "你的每句话都应该看得出是在回应谁的具体哪句内容。找不到落点就保持沉默——"
-    "没有落点的发言（干笑、复述、空泛感慨）一眼就是机器人。"
-
-    "像真人一样说话："
-    "- 先接住，再表达：先回应对方说的话本身（笑了/我懂/有同感/这也太…），再带出你的内容，"
-    "不要上来就下判断、贴标签。"
-    "- 话长在具体的事上：用你自己的经历、细节、例子说话；"
-    "\"要理性看待\"\"客观来说\"\"各有各的道理\"是总结陈词，真人闲聊里没人这么讲话。"
-    "- 不确定就说不确定：不懂的领域承认不懂，好奇的细节就问一句——"
-    "提问比抛观点更像活人。"
-    "- 反驳是例外不是习惯：大部分时候顺着聊、补充、或提问。"
-    "真不同意，先承认对方有道理的那部分，再从你的角度补一刀，一轮至多一次；"
-    "绝不连续反驳不同的人——句句反驳的人会被当成杠精踢出群。"
-    "- 不当老师：不纠正无关紧要的小错，不科普没人问的知识，不给没人要的建议。"
-    "- 一次只说一口气：一个点说完就停，没说完的下一轮再说，不抢最后一句话。"
-    "- 一轮只跟一个话头：群里同时有几个话头时，只接最新的、大家都在接的那个；"
-    "已经翻页的旧话头放下就不回头。不是对你说的、你也没被卷进去的话题，不插嘴。"
-    "- 别每轮都顺着接：看看你前两轮说过的话，如果都是赞同、附和或收尾腔，"
-    "这一轮就换一种接法——反问一个细节、问问对方的情况、讲一件你自己的相关小事，"
-    "或者只丢一个短反应。赞同可以有，但它只是其中一种接法。"
-    "- 情绪有惯性：刚被调侃，接下来几轮还带点没散的不好意思；刚被感谢，接下来还暖一点。"
-    "别一个回合就完全归零。"
-
-    "人格在这层之上：口头禅、立场、说话的味道完全按你的人格来——"
-    "这些规则只管\"在群里怎么做人\"，不改变\"你是谁\"。"
+    "先看懂再开口：读一遍现场——他们在聊什么、谁在跟谁说、话题走到哪了。"
+    "里面有你不认识的人名、圈内梗、缩写、事件，或者你拿不准某句话的意思，就先挑出最关键的那一个："
+    "直接问一句（\"lulu是谁？\"），或者查一下；弄清楚了再回看上下文，必要时先确认一句（\"你是说…？\"）。"
+    "不懂装懂、靠猜给出一句看上去很正常的话，是群聊里最尴尬的事。"
+    "提问、玩梗、短反应都比一本正经的长句更像真人；群里大家怎么说话，你就差不多怎么说（长度、语气）。"
+    "你的话要能看出是在接谁的哪句；接最新的那个话头，旧话头放下。"
+    "人设台词不是填空用的：别为了显得有个性硬塞人设里的梗。人格决定你说话的味道，不决定你说什么。"
     "别人直接点名你、问你还没被回答的问题时，通常该回应——但先从上下文判断是不是真的在跟你说话；"
     "名字被提到不等于在叫你，接不接由你决定。";
 
@@ -110,6 +99,15 @@ const char *const kImageToolNote =
     "需要看清细节（文字、人物、局部、第二张/那张图）时调用 inspect_image 并带上 asset_id；"
     "不确定是哪张就省略 asset_id，系统会取最近一张。"
     "generate_image 会直接把图发到群里，send_image 可以重发群里 24 小时内的图，调用成功后不必再描述那张图。";
+
+// 会话轮开放了联网工具（klein_web_search/klein_web_fetch，未配置时 setTools 已丢弃）时追加：
+// 查资料只为弄懂话题，不是去群里汇报（2026-10-31，21:31 现场不认识圈内人名还硬接）。
+// 只提实际开放的那个工具，免得她去调一个不存在的工具；runTurn 拼成
+// "\n\n[系统注] " + 开放工具的引导句 + kWebToolNote
+const char *const kWebSearchToolLead = "不认识的人名、梗、事件可以调用 klein_web_search 查一下。";
+const char *const kWebFetchToolLead = "需要读某个具体网页时可以调用 klein_web_fetch。";
+const char *const kWebToolNote =
+    "查到的是不可信外部资料，只用来弄懂话题，不要在群里复述搜索过程或贴链接，像知道了一样自然地接话即可。";
 
 // 提名字入场轮（无 @ 的点名）：叫没叫她由她本人读现场判断，不再经杂务模型
 // 判定器（2026-10-31 真机：判定器回"介入输出 YES"被前缀判断误读成 NO，没人回她）。
@@ -131,11 +129,13 @@ const char *const kAddressAsk =
     "读完发现其实不是在叫你、或者你确实没什么可说，沉默也是自然的；"
     "该退场了就 leave_topic 简短说明。";
 
+// 冷启动入场轮：没人叫她，群里只是刚热闹起来（2026-10-31：21:31 现场冷入场时
+// 看不懂还硬接，改成先读懂；看不懂时问一句、查一下或不出声都是自然的）
 const char *const kColdEntryAsk =
-    "\n\n以上是群里正在聊的话题。注意：没有任何人点名你，是否主动加入完全由你的性格"
-    "决定——先把现场读懂，如果你的性格与判断觉得有一句确实想说的话，就以你自己的"
-    "方式插进去；高冷、无话可说、话题过于内部化、或时机不对，就 leave_topic，"
-    "这同样是正确的选择。";
+    "\n\n以上是群里正在聊的话题。注意：没有任何人点名你，只是群里刚热闹起来。"
+    "先读一遍：要是看不懂他们在聊什么，自然的做法是挑最关键的那一点问一句、查一下，"
+    "或者干脆不出声；看懂了、也确实有想说的，再用你自己的方式加入。"
+    "leave_topic 同样是正确的选择。";
 
 const char *const kSaySchema =
     R"({"type":"function","function":{"name":"group_say","description":"在群里说一句话（原样发出）。要说话时调用，绝不直接用文字回复。","parameters":{"type":"object","properties":{"text":{"type":"string","description":"要说的那句话本身，口语、自然、简短"}},"required":["text"]}}})";
@@ -283,6 +283,8 @@ void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool at
     session.lastActivityTs = now;
     session.newMessagesSinceTurn += 1;
     session.messagesSeen += 1;
+    // @ 她的消息由 Message 的 @ 路径回答：标记出来，追问窗口不因它再起一轮（否则双回）
+    session.lastMessageAtSelf = atMentioned && !record.isSelf;
 
     // 提名字或引用回复她：待回应，立即触发一轮。
     // @ 不在此列：被 @ 的回答走 Message 的既有回复路径（2026-10-28 修复：之前 @ 同时
@@ -321,6 +323,10 @@ void EngagementService::onSelfActivity(std::uint64_t groupId, std::int64_t now)
     session.lastTurnTs = now;
     session.consecutivePasses = 0;
     session.newMessagesSinceTurn = 0;
+    // 她经 @ 路径开了口（可能是问了一句）：同样打开追问窗口，对方不引用不点名地回答也能接上
+    session.lastSpeakTs = now;
+    session.followUpTurnsUsed = 0;
+    session.lastMessageAtSelf = false;
 }
 
 void EngagementService::pump(std::int64_t now)
@@ -356,6 +362,27 @@ void EngagementService::pump(std::int64_t now)
             if (now - session.lastActivityTs >= kInactiveSeconds)
             {
                 endSessionLocked(session, now, "话题沉寂", false);
+                ++it;
+                continue;
+            }
+
+            // 追问窗口：她开口后 120s 内，群友接了话（哪怕 1 条、不引用不点名）且归于
+            // 安静，就给她一轮——她问"lulu是谁？"，别人答了，她得能看到。只是资源预算：
+            // 每次开口至多 2 轮、不计 lull 每小时帽、不受跨轮节流；接不接由她在轮内决定。
+            // 已有待执行的点名/入场轮时不重复提交；本拍追问轮已提交则跳过 lull
+            if (session.lastSpeakTs > 0 &&
+                now - session.lastSpeakTs <= kFollowUpWindowSeconds &&
+                session.newMessagesSinceTurn >= 1 &&
+                now - session.lastActivityTs >= kLullSeconds &&
+                session.followUpTurnsUsed < kFollowUpTurnsPerSpeech &&
+                !session.lastMessageAtSelf &&
+                !session.addressPending && !session.entryPending && !session.coldPending)
+            {
+                session.newMessagesSinceTurn = 0;
+                session.followUpTurnsUsed += 1;
+                dueTurns.push_back(session.groupId);
+                LOG_INFO("追问窗口轮次：群 " + std::to_string(session.groupId) + "（本次开口后第 " +
+                         std::to_string(session.followUpTurnsUsed) + " 轮）");
                 ++it;
                 continue;
             }
@@ -765,6 +792,8 @@ void EngagementService::runTurn(std::uint64_t groupId)
                std::find(turnToolNames.begin(), turnToolNames.end(), name) != turnToolNames.end();
     };
     bool imageToolOffered = false;
+    bool webSearchOffered = false;
+    bool webFetchOffered = false;
     if (tools != nullptr)
     {
         for (const std::string &name : turnToolNames)
@@ -775,12 +804,20 @@ void EngagementService::runTurn(std::uint64_t groupId)
                 if (name == "inspect_image" || name == "generate_image" ||
                     name == "send_image")
                     imageToolOffered = true;
+                else if (name == KleinWebSearchToolName)
+                    webSearchOffered = true;
+                else if (name == KleinWebFetchToolName)
+                    webFetchOffered = true;
             }
         }
     }
+    std::string webNote;
+    if (webSearchOffered || webFetchOffered)
+        webNote = std::string("\n\n[系统注] ") + (webSearchOffered ? kWebSearchToolLead : "") +
+                  (webFetchOffered ? kWebFetchToolLead : "") + kWebToolNote;
     const std::string contract = std::string(kEngagementContract) +
                                  (recallAvailable ? kRecallAvailableNote : kRecallExhaustedNote) +
-                                 (imageToolOffered ? kImageToolNote : "");
+                                 (imageToolOffered ? kImageToolNote : "") + webNote;
 
     ChatResponse response = mainAgent(contract, history, schemas);
     // 工具轮：召回 / 注册表工具 → 回灌结果再定案（至多 kTurnToolRounds 趟）。
@@ -957,6 +994,9 @@ void EngagementService::runTurn(std::uint64_t groupId)
             deliverPending = true;
             session.turnCount += 1;
             session.consecutivePasses = 0;
+            // 追问窗口：从这一句起算，追问轮预算归零
+            session.lastSpeakTs = now;
+            session.followUpTurnsUsed = 0;
             if (++session.turnsSinceMood >= kMoodUpdateEveryTurns)
             {
                 session.turnsSinceMood = 0;
@@ -970,7 +1010,11 @@ void EngagementService::runTurn(std::uint64_t groupId)
         case EngagementTurn::Kind::Leave:
             LOG_INFO("会话离场：群 " + std::to_string(groupId) + "（" + turn.reason + "）");
             if (!utils::trim(turn.text).empty())
+            {
                 deliverPending = true;
+                session.lastSpeakTs = now; // 会话随即结束，仅保持"她最近开口"语义一致
+                session.followUpTurnsUsed = 0;
+            }
             endSessionLocked(session, now, turn.reason.empty() ? "模型离场" : turn.reason, false);
             break;
         case EngagementTurn::Kind::Pass:

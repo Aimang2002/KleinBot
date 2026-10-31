@@ -15,8 +15,11 @@
  * 轮次循环：主 Agent（人格 system + 公共上下文材料 + 动作工具表）每轮
  * 三选一——group_say（说话）/ 不调用工具且无文字（pass，连续 3 拍收场）/
  * leave_topic（离场，可带最后一句）。定案前可走至多 3 趟工具轮（recall_context
- * 召回 + setTools 开放的注册表工具，如 inspect_image / generate_image），结果回灌后
- * 再定案；工具产出的出站消息（图）当场投递并入群缓冲。
+ * 召回 + setTools 开放的注册表工具，如 inspect_image / generate_image /
+ * klein_web_search），结果回灌后再定案；工具产出的出站消息（图）当场投递并入群缓冲。
+ * 轮次触发：点名/引用回复她（立即）、追问窗口（她开口后 120s 内群友接话 + 静默，
+ * 每次开口至多 2 轮）、lull（攒 5 条 + 静默 + 节流 + 每小时帽）——都只是资源预算，
+ * 每轮说不说由她决定。
  * 硬后盖不依赖模型自觉：轮次上限、
  * 会话时长、群内不活跃时长任一触顶强制结束。
  *
@@ -64,13 +67,16 @@ struct EngagementSession
     std::int64_t startTs = 0;
     std::int64_t lastActivityTs = 0; // 群内最近新消息（不活跃收场的基准）
     std::int64_t lastTurnTs = 0;     // 她最近一轮（节流基准）
+    std::int64_t lastSpeakTs = 0;    // 她最近一次在会话轮开口（group_say / 离场最后一句；追问窗口基准）
+    int followUpTurnsUsed = 0;       // 本次开口后已用的追问轮数（她再开口归零）
+    bool lastMessageAtSelf = false;  // 最新一条群消息 @ 了她：归 @ 路径回答，追问窗口不接（防双回）
     std::int64_t endTs = 0;          // Ended 生效时刻（保留期起算）
     int turnCount = 0;
     int consecutivePasses = 0;
     int newMessagesSinceTurn = 0;    // lull 轮次触发的新消息门槛
     int messagesSeen = 0;            // 会话存活期间经过的群消息量（强制收场上限）
     int recallUsed = 0;              // 上下文召回预算（每会话 1 次）
-    std::deque<std::int64_t> recentTurnTs; // lull 轮次时刻（每小时帽；点名/入场轮不计）
+    std::deque<std::int64_t> recentTurnTs; // lull 轮次时刻（每小时帽；点名/入场/追问轮不计）
     std::string moodLine;                  // 当前情绪基调一句话（每 N 个发言轮经 worker 更新）
     int turnsSinceMood = 0;                // 距上次情绪基调更新的发言轮数
     std::string digest;              // 已压缩部分的滚动摘要
@@ -141,7 +147,8 @@ public:
     {
         this->decisionRecorder = recorder;
     }
-    // 会话轮可用的注册表工具（如 inspect_image / generate_image / send_image）：
+    // 会话轮可用的注册表工具（如 inspect_image / generate_image / send_image /
+    // klein_web_search / klein_web_fetch；开放联网工具时契约追加"只为弄懂话题"注）：
     // tools 由组合根持有、须比本服务活得久；allowedNames 当场过滤——未注册或
     // requiresAdmin() 的名字丢弃并告警（L3 护栏：管理员工具永不开放给会话轮）。
     // 工具的出站消息直接投递到群并经 OutboundRecorder 入库。不调用 = 无注册表
@@ -159,7 +166,7 @@ public:
     // 她经正常路径发言（@ 回复等）：算一轮会话活动
     void onSelfActivity(std::uint64_t groupId, std::int64_t now);
 
-    // pollingThread 每 3s：硬后盖（消息量/不活跃）+ 保留期清扫 + lull 轮次触发
+    // pollingThread 每 3s：硬后盖（消息量/不活跃）+ 保留期清扫 + 追问窗口/lull 轮次触发
     void pump(std::int64_t now);
 
     // 群 lane worker 内执行：一轮跟进（装配材料 → 主 Agent → 动作分发）

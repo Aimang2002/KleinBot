@@ -388,6 +388,142 @@ TEST(EngagementSessionTest, LullTurnsHourlyCapStopsChattyFollowUps)
     EXPECT_EQ(harness.submittedTurns.size(), 8U) << "每小时帽拦截第 9 个 lull 轮";
 }
 
+// 追问窗口不接 @ 她的消息（@ 路径会回答，否则双回）；她经 @ 路径开口后同样打开窗口
+TEST(EngagementSessionTest, FollowUpWindowSkipsAtMessagesAndOpensAfterAtReply)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "在吗");
+    harness.service->onSelfActivity(8823, harness.now); // 她经 @ 路径回了一句（问了个问题）
+    harness.submittedTurns.clear();
+
+    // 对方不引用不点名地回答 → 追问窗口给她一轮
+    harness.now += 10;
+    harness.feed(8823, "崩三前瞻主持人", harness.now);
+    harness.now += 5;
+    harness.service->pump(harness.now);
+    ASSERT_EQ(harness.submittedTurns.size(), 1U);
+
+    // 接着有人 @ 她：归 @ 路径，追问窗口不再起轮
+    harness.now += 5;
+    harness.feed(8823, "@Klein 懂了吗", harness.now, true, true);
+    harness.now += 5;
+    harness.service->pump(harness.now);
+    EXPECT_EQ(harness.submittedTurns.size(), 1U) << "@ 消息不触发追问轮，防双回";
+
+    // 之后一条普通消息又可以触发（仍在窗口与每次开口 2 轮的预算内）
+    harness.now += 5;
+    harness.feed(8823, "就那个lulu", harness.now);
+    harness.now += 5;
+    harness.service->pump(harness.now);
+    EXPECT_EQ(harness.submittedTurns.size(), 2U);
+}
+
+TEST(EngagementSessionTest, FollowUpWindowTriggersTurnAfterHerSpeech)
+{
+    // 2026-10-30 21:31 现场的反面：她问"lulu是谁？"，群友不引用、不点名地答一句——
+    // 此前要攒满 5 条 + 75s 节流才轮得到她。追问窗口里 1 条新消息 + 4s 静默就给她一轮
+    //（资源预算；接不接仍由她在轮内决定）
+    Harness harness;
+    harness.service->onAtActivated(8823, "崩三前瞻");
+    harness.feed(8823, "主持人lulu", harness.now);
+    harness.turnResponses.push_back(sayResponse("lulu是谁？"));
+    harness.service->runTurn(8823);
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(harness.service->sessionOf(8823)->lastSpeakTs, harness.now);
+    EXPECT_EQ(harness.service->sessionOf(8823)->followUpTurnsUsed, 0);
+    ASSERT_TRUE(harness.submittedTurns.empty());
+
+    // 群友答了一句（没引用、没提名字）：还没静默不提交，静默 4s 后一个追问轮
+    harness.now += 3;
+    harness.feed(8823, "崩三前瞻主持人", harness.now);
+    harness.now += 2;
+    harness.service->pump(harness.now);
+    EXPECT_TRUE(harness.submittedTurns.empty()) << "还在说，没到静默";
+    harness.now += 3;
+    harness.service->pump(harness.now);
+    ASSERT_EQ(harness.submittedTurns.size(), 1U) << "1 条新消息就够（lull 路径要 5 条 + 75s）";
+    EXPECT_EQ(harness.submittedTurns.back(), 8823U);
+    EXPECT_EQ(harness.service->sessionOf(8823)->followUpTurnsUsed, 1);
+    harness.service->pump(harness.now + 3);
+    EXPECT_EQ(harness.submittedTurns.size(), 1U) << "同一批消息不重复提交";
+    harness.service->runTurn(8823); // 默认 pass：她选择先不说
+    EXPECT_EQ(harness.service->sessionOf(8823)->consecutivePasses, 1) << "沉默的追问轮照常计 pass";
+
+    // 又一条：第二个追问轮
+    harness.now += 1;
+    harness.feed(8823, "就是那个小尬剧的主持", harness.now);
+    harness.now += 5;
+    harness.service->pump(harness.now);
+    ASSERT_EQ(harness.submittedTurns.size(), 2U);
+    EXPECT_EQ(harness.service->sessionOf(8823)->followUpTurnsUsed, 2);
+    harness.service->runTurn(8823); // pass
+
+    // 第三条：本次开口的追问预算（2 轮）用完
+    harness.now += 1;
+    harness.feed(8823, "她去崩铁了", harness.now);
+    harness.now += 5;
+    harness.service->pump(harness.now);
+    EXPECT_EQ(harness.submittedTurns.size(), 2U) << "每次开口至多 2 个追问轮";
+
+    // 她再开口（被点名后回应）：追问预算归零
+    harness.now += 1;
+    harness.feed(8823, "Klein 懂了没", harness.now, true);
+    ASSERT_EQ(harness.submittedTurns.size(), 3U) << "点名路径照常立即提交";
+    harness.turnResponses.push_back(sayResponse("你是说崩三前瞻主持人去崩铁了？"));
+    harness.service->runTurn(8823);
+    EXPECT_EQ(harness.service->sessionOf(8823)->followUpTurnsUsed, 0);
+    EXPECT_EQ(harness.service->sessionOf(8823)->lastSpeakTs, harness.now);
+    const std::int64_t spokeAt = harness.now;
+
+    harness.now += 2;
+    harness.feed(8823, "对", harness.now);
+    harness.now += 5;
+    harness.service->pump(harness.now);
+    ASSERT_EQ(harness.submittedTurns.size(), 4U) << "再开口后追问窗口重开";
+    harness.service->runTurn(8823); // pass
+
+    // 窗口过期（开口后 >120s）：1 条新消息不再触发
+    harness.now = spokeAt + 116;
+    harness.feed(8823, "lulu人挺好的", harness.now);
+    harness.now = spokeAt + 121;
+    harness.service->pump(harness.now);
+    EXPECT_EQ(harness.submittedTurns.size(), 4U) << "窗口外回到 lull 路径（要 5 条）";
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Active);
+}
+
+TEST(EngagementSessionTest, FollowUpDoesNotConsumeLullHourlyCap)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(sayResponse("这是啥？"));
+    harness.service->runTurn(8823);
+    const std::int64_t spokeAt = harness.now;
+
+    // 窗口内同时满足 lull（5 条、节流已过、静默）与追问：只提交一轮（追问），
+    // 不进 lull 每小时帽
+    for (int i = 0; i < 5; ++i)
+        harness.feed(8823, "群友" + std::to_string(i), spokeAt + 80 + i);
+    harness.now = spokeAt + 90;
+    harness.service->pump(harness.now);
+    ASSERT_EQ(harness.submittedTurns.size(), 1U) << "追问已提交则本拍跳过 lull";
+    auto session = harness.service->sessionOf(8823);
+    ASSERT_TRUE(session.has_value());
+    EXPECT_EQ(session->followUpTurnsUsed, 1);
+    EXPECT_TRUE(session->recentTurnTs.empty()) << "追问轮不计 lull 每小时帽";
+    harness.service->runTurn(8823); // pass
+
+    // 窗口外：lull 照常工作并记入每小时帽
+    for (int i = 0; i < 5; ++i)
+        harness.feed(8823, "后来" + std::to_string(i), spokeAt + 200 + i);
+    harness.now = spokeAt + 210;
+    harness.service->pump(harness.now);
+    ASSERT_EQ(harness.submittedTurns.size(), 2U);
+    session = harness.service->sessionOf(8823);
+    EXPECT_EQ(session->recentTurnTs.size(), 1U);
+    EXPECT_EQ(session->followUpTurnsUsed, 1) << "lull 轮不动追问预算";
+}
+
 TEST(EngagementContextTest, MoodLineUpdatesEveryThreeSpeaksAndFeedsMaterial)
 {
     Harness harness;
@@ -647,6 +783,33 @@ TEST(EngagementContextTest, RecallNoteReflectsBudgetInContract)
     harness.turnResponses.push_back(sayResponse("第一轮"));
     harness.service->runTurn(8823);
     EXPECT_NE(harness.agentContracts.front().find("还有 1 次上下文召回"), std::string::npos);
+}
+
+TEST(EngagementContextTest, ContractPutsComprehensionFirst)
+{
+    // 2026-10-31：契约语用层改写为"先看懂再开口"，旧的"像真人一样说话"表演清单删除
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.service->runTurn(8823);
+    ASSERT_EQ(harness.agentContracts.size(), 1U);
+    const std::string &contract = harness.agentContracts.front();
+
+    EXPECT_NE(contract.find("调用 group_say"), std::string::npos) << "动作协议保留";
+    EXPECT_NE(contract.find("leave_topic"), std::string::npos);
+    const std::size_t comprehension = contract.find("先看懂再开口");
+    ASSERT_NE(comprehension, std::string::npos);
+    EXPECT_GT(comprehension, contract.find("绝不直接用文字回复")) << "排在动作协议之后";
+    EXPECT_NE(contract.find("lulu是谁"), std::string::npos);
+    EXPECT_NE(contract.find("不懂装懂"), std::string::npos);
+    EXPECT_NE(contract.find("人格决定你说话的味道，不决定你说什么"), std::string::npos);
+    EXPECT_NE(contract.find("名字被提到不等于在叫你"), std::string::npos);
+
+    EXPECT_EQ(contract.find("不当老师"), std::string::npos);
+    EXPECT_EQ(contract.find("反驳是例外"), std::string::npos);
+    EXPECT_EQ(contract.find("像真人一样说话"), std::string::npos);
+    EXPECT_EQ(contract.find("情绪有惯性"), std::string::npos);
+    EXPECT_EQ(contract.find("klein_web_search"), std::string::npos) << "没开放搜索时不提搜索工具";
 }
 
 // ===== 会话轮注册表工具（inspect_image）=====
@@ -1011,6 +1174,83 @@ TEST(EngagementToolTest, ImageToolNoteMentionsGenerateWhenOffered)
     EXPECT_TRUE(schemasMention(harness.agentSchemas.front(), "generate_image"));
 }
 
+namespace
+{
+// 联网搜索替身：名字与 KleinWebSearchToolName 一致
+class FakeWebSearchTool : public Tool
+{
+public:
+    std::string name() const override { return "klein_web_search"; }
+    std::string description() const override { return "联网搜索。"; }
+    std::string parametersSchema() const override
+    {
+        return R"({"type":"object","properties":{"query":{"type":"string"}},"required":["query"]})";
+    }
+    ToolResult execute(const std::string &args, const ToolContext &ctx) override
+    {
+        receivedArgs.push_back(args);
+        receivedContexts.push_back(ctx);
+        return ToolResult{"搜索结果：lulu 是崩坏3前瞻直播的主持人", {}, {}};
+    }
+
+    std::vector<std::string> receivedArgs;
+    std::vector<ToolContext> receivedContexts;
+};
+} // namespace
+
+TEST(EngagementToolTest, WebSearchOfferedAndNoteAppendedWhenRegistered)
+{
+    // 2026-10-31：看不懂的人名/梗可以在会话轮里查（未配置联网时 setTools 丢弃，不提）
+    ToolRegistry registry;
+    auto search = std::make_unique<FakeWebSearchTool>();
+    FakeWebSearchTool *searchTool = search.get();
+    registry.registerTool(std::move(search));
+
+    Harness harness;
+    harness.service->setTools(&registry, {"klein_web_search", "klein_web_fetch"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "主持人lulu", harness.now);
+    ChatResponse searchCall;
+    searchCall.code = 200;
+    searchCall.finish_reason = "tool_calls";
+    searchCall.tool_calls.push_back({"ws-1", "klein_web_search", R"({"query":"lulu 崩坏3 主持人"})"});
+    harness.turnResponses.push_back(searchCall);
+    harness.turnResponses.push_back(sayResponse("哦是前瞻那个主持啊"));
+    harness.service->runTurn(8823);
+
+    ASSERT_FALSE(harness.agentSchemas.empty());
+    EXPECT_TRUE(schemasMention(harness.agentSchemas.front(), "klein_web_search"));
+    EXPECT_FALSE(schemasMention(harness.agentSchemas.front(), "klein_web_fetch")) << "未注册的丢弃";
+    const std::string &contract = harness.agentContracts.front();
+    EXPECT_NE(contract.find("不可信外部资料"), std::string::npos);
+    EXPECT_NE(contract.find("klein_web_search"), std::string::npos);
+    EXPECT_EQ(contract.find("klein_web_fetch"), std::string::npos) << "只提实际开放的工具";
+    EXPECT_EQ(contract.find("瞥了一眼"), std::string::npos) << "没开放图片工具不追加看图注";
+
+    // 搜索结果走既有工具轮回灌（群作用域、无个人语境），随后定案说话
+    ASSERT_EQ(searchTool->receivedContexts.size(), 1U);
+    EXPECT_EQ(searchTool->receivedContexts.front().shared_scope_id, 8823U);
+    EXPECT_EQ(searchTool->receivedContexts.front().user_id, 0U);
+    ASSERT_EQ(harness.agentHistories.size(), 2U);
+    ASSERT_EQ(harness.agentHistories[1].size(), 3U);
+    EXPECT_EQ(harness.agentHistories[1][2].tool_call_id, "ws-1");
+    EXPECT_EQ(harness.agentHistories[1][2].content, "搜索结果：lulu 是崩坏3前瞻直播的主持人");
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(harness.sender->texts.front(), "哦是前瞻那个主持啊");
+
+    // 未注册联网工具：不给 schema、不追加注
+    ToolRegistry empty;
+    Harness plain;
+    plain.service->setTools(&empty, {"klein_web_search", "klein_web_fetch"});
+    plain.service->onAtActivated(8823, "话题");
+    plain.feed(8823, "主持人lulu", plain.now);
+    plain.service->runTurn(8823);
+    ASSERT_EQ(plain.agentSchemas.size(), 1U);
+    EXPECT_FALSE(schemasMention(plain.agentSchemas.front(), "klein_web_search"));
+    EXPECT_EQ(plain.agentContracts.front().find("不可信外部资料"), std::string::npos);
+    EXPECT_EQ(plain.agentContracts.front().find("klein_web_search"), std::string::npos);
+}
+
 // ===== 集成：GroupContextService.observe → EngagementService 全链路 =====
 
 namespace
@@ -1183,6 +1423,9 @@ TEST(EngagementColdTest, ArmedAfterTwoHoursThenSpikeTriggersColdEntry)
     EXPECT_FALSE(harness.sender->texts.empty()) << "冷入场发言";
     EXPECT_NE(harness.agentHistories.back().front().content.find("没有任何人点名你"), std::string::npos)
         << "冷入场应使用人格自决 ask";
+    EXPECT_NE(harness.agentHistories.back().front().content.find("看不懂他们在聊什么"),
+              std::string::npos)
+        << "冷入场 ask：先读懂，看不懂就问/查/不出声（2026-10-31）";
 }
 
 TEST(EngagementColdTest, BaselineLearnsAndRaisesThreshold)
