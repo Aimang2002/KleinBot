@@ -7,7 +7,6 @@
 #include "../Asset/ImageAssetStore.h"
 #include "../Asset/ImagePlaceholder.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
-#include "../ModelApiCaller/ModelEndpointResolver.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../../Library/nlohmann/json.hpp"
 

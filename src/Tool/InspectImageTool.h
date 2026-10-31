@@ -6,7 +6,6 @@
 #include "ImageToolHelpers.h"
 #include "ToolArgumentParser.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
-#include "../ModelApiCaller/ModelEndpointResolver.h"
 #include "../ModelApiCaller/Dock.hpp"
 
 class InspectImageTool : public Tool

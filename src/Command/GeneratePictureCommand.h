@@ -8,7 +8,6 @@
 #include "Command.h"
 #include "../ModelApiCaller/Dock.hpp"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
-#include "../ModelApiCaller/ModelEndpointResolver.h"
 
 class GeneratePictureCommand : public Command
 {

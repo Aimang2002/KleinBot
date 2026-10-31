@@ -1,7 +1,9 @@
 #ifndef MODEL_ENDPOINT_OPTIONS_H
 #define MODEL_ENDPOINT_OPTIONS_H
 
+#include <functional>
 #include <string>
+#include <utility>
 
 struct ModelEndpointOptions
 {
@@ -30,6 +32,22 @@ inline std::string modelEndpointReadinessText(const ModelEndpointOptions &endpoi
                " 的密钥未填写或环境变量缺失），接口会拒绝调用。请向用户说明暂时无法使用该功能，"
                "需要管理员补全密钥后才能启用。";
     return {};
+}
+
+// 调用期端点来源（ADR-022）：组合根构造（见 ModelEndpointResolver.h 的 registryEndpoint），
+// 使用方（工具 / 命令 / Message）只依赖这个类型，不依赖注册表
+using EndpointProvider = std::function<ModelEndpointOptions()>;
+
+// 固定端点（测试与不需要注册表解析的场景）
+inline EndpointProvider fixedEndpoint(ModelEndpointOptions options)
+{
+    return [options = std::move(options)]() { return options; };
+}
+
+// 空 provider 视为未配置
+inline ModelEndpointOptions currentEndpoint(const EndpointProvider &provider)
+{
+    return provider ? provider() : ModelEndpointOptions{};
 }
 
 #endif

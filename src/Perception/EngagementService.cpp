@@ -3,7 +3,7 @@
 #include "../Affect/DecisionRecorder.h"
 #include "../Application/ToolGuidance.h"
 #include "../Application/ToolLoop.h"
-#include "../Application/WebSearchRouting.h"
+#include "../Application/WebSearchRouting.h" // currentLocalDateIso（群主动轮工具说明的日期上下文）
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
 #include "../Tool/ToolArgumentParser.h"

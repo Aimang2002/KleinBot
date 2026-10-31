@@ -10,7 +10,7 @@
 #include "../Port/LLMPort.h"
 #include "../Log/Log.h"
 #include "DockOptions.h"
-#include "ModelEndpointResolver.h"
+#include "EndpointChatModel.h"
 #include <atomic>
 #include <string>
 #include <memory>

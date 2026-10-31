@@ -14,7 +14,6 @@
 #include "../Action/Action.h"
 #include "MessageOptions.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
-#include "../ModelApiCaller/ModelEndpointResolver.h"
 #include <iostream>
 #include <random>
 #include <memory>

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "ModelApiCaller/ModelEndpointOptions.h"
+#include "ModelApiCaller/EndpointChatModel.h"
 #include "ModelApiCaller/ModelEndpointResolver.h"
 #include "ModelRegistry/ModelRegistry.h"
 
