@@ -86,6 +86,12 @@ if(Python3_Interpreter_FOUND)
             ${CMAKE_CURRENT_SOURCE_DIR}/architecture_dependency_test.py
             --source-root ${PROJECT_SOURCE_DIR}/src
     )
+    add_test(
+        NAME AffectEvalExportPython
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/affect_eval_export_test.py
+            --script ${PROJECT_SOURCE_DIR}/scripts/affect_eval/export.py
+    )
 else()
     message(WARNING "Python3 not found; Python contract tests will not be registered")
 endif()
