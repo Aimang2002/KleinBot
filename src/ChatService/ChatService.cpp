@@ -1,8 +1,10 @@
 #include "ChatService.h"
 #include "../Application/CurrentImageRouting.h"
 #include "../Application/RecallContextInjection.h"
+#include "../Application/ReplyConstraints.h"
 #include "../Application/ToolGuidance.h"
 #include "../Application/ToolLoop.h"
+#include "../Application/ToolPolicyFilter.h"
 #include "../utils/LocalDate.h"
 #include "../Memory/MemoryService.h"
 #include "../Tool/ToolContext.h"
@@ -12,7 +14,8 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
                              std::optional<ChatImageContent> currentImage,
                              const std::string &situationNote,
                              const std::string &requestContext,
-                             uint64_t sharedScopeId)
+                             uint64_t sharedScopeId,
+                             const ReplyConstraints *constraints)
 {
     ChatReply resultReply;
     // 1. 增量追加用户这句（内存 + SQLite 同步落盘）：上下文对所有用户开放。
@@ -37,15 +40,34 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
     // 单轮情境注记紧跟服务契约：行为约束归 system，先于后续工具规则注入
     if (!situationNote.empty())
         bundle.request.system_prompt += situationNote;
+    // 计划的分寸注记（R1.c）紧跟情境注记；无约束时不改动
+    if (constraints != nullptr)
+        bundle.request.system_prompt += planNote(*constraints);
 
     const CurrentImageRoute imageRoute = routeCurrentImage(
         bundle.request, bundle.model, bundle.model_name, std::move(currentImage));
 
     // 3. 塞入可用工具。使用规则由各工具自带（Tool::usageGuidance），经 composeToolGuidance
     // 按固定顺序组装：生产工具集下与此前手写的规则文本逐字节一致（system 前缀缓存稳定）
-    bundle.request.tools = this->tools.allSchemas();
+    // 计划收窄（R1.c）：工具表、使用规则与下方工具循环的开放名单用同一份过滤结果
+    //（规则不提没开放的工具，免得诱导调用后被拒、白耗一趟工具轮）
+    std::vector<std::string> offeredToolNames;
+    if (constraints != nullptr)
+    {
+        offeredToolNames = filterToolNames(this->tools.names(), constraints->toolPolicy,
+                                           constraints->allowedTools);
+        bundle.request.tools.clear();
+        for (const std::string &name : offeredToolNames)
+            if (const std::optional<std::string> schema = this->tools.schemaFor(name))
+                bundle.request.tools.push_back(*schema);
+    }
+    else
+    {
+        bundle.request.tools = this->tools.allSchemas();
+    }
     bundle.request.system_prompt += composeToolGuidance(
-        this->tools, this->tools.names(), GuidanceScene::Conversation, {currentLocalDateIso()});
+        this->tools, constraints != nullptr ? offeredToolNames : this->tools.names(),
+        GuidanceScene::Conversation, {currentLocalDateIso()});
     if (imageRoute == CurrentImageRoute::NativeMultimodal)
     {
         // 每轮互斥的路由指令必须注入消息尾部而不是 system：
@@ -94,6 +116,12 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
     { return this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request); };
     hooks.permitted = [this, user_id](const Tool &tool)
     { return !tool.requiresAdmin() || user_id == managerId; };
+    if (constraints != nullptr)
+        hooks.offered = [&offeredToolNames](const std::string &name)
+        {
+            return std::find(offeredToolNames.begin(), offeredToolNames.end(), name) !=
+                   offeredToolNames.end();
+        };
     hooks.onRoundLimit = [this, &bundle](std::vector<ChatMessage> &history)
     {
         // 到达轮次上限不丢弃证据：让模型基于已有结果收尾作答

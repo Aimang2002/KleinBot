@@ -4,8 +4,10 @@
 #include "../Affect/DecisionRecorder.h"
 #include "../Affect/JudgePolicy.h"
 #include "../Affect/SituationCard.h"
+#include "../Application/ReplyConstraints.h"
 #include "../Application/ToolGuidance.h"
 #include "../Application/ToolLoop.h"
+#include "../Application/ToolPolicyFilter.h"
 #include "../utils/LocalDate.h"
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
@@ -813,7 +815,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
         tools != nullptr ? composeToolGuidance(*tools, offeredToolNames, GuidanceScene::GroupTurn,
                                                {currentLocalDateIso()})
                          : std::string();
-    const std::string contract = std::string(kEngagementContract) +
+    std::string contract = std::string(kEngagementContract) +
                                  (recallAvailable ? kRecallAvailableNote : kRecallExhaustedNote) +
                                  toolGuidance;
 
@@ -849,6 +851,39 @@ void EngagementService::runTurn(std::uint64_t groupId)
         card.availableTools.insert(card.availableTools.end(), offeredToolNames.begin(),
                                    offeredToolNames.end());
         planned = policy->decide(card, context.material);
+    }
+
+    // R1.c 生效（enforce=true）：no_reply 只在 judge 能说"不"的轮次（lull / 冷启动，
+    // JudgePolicy::allowedActions 唯一定义）兑现为不调主模型——有人叫她的轮次即使拿到
+    // no_reply 也照常请求（enforce 侧第二道守卫）。其余计划给分寸注记，并按 tool_policy
+    // 收窄注册表工具及其使用规则（契约重建；生效期前缀本就逐轮变化）；会话动词不动，
+    // 她仍可沉默/离场
+    const bool enforcing = policyDecides && enforce;
+    bool plannedSilence = false;
+    std::vector<std::string> enforcedToolNames;
+    if (enforcing)
+    {
+        const std::vector<std::string> quietAllowed = affect::JudgePolicy::allowedActions(card);
+        plannedSilence = planned.plan.action == "no_reply" &&
+                         std::find(quietAllowed.begin(), quietAllowed.end(), "no_reply") !=
+                             quietAllowed.end();
+        if (!plannedSilence)
+        {
+            enforcedToolNames = filterToolNames(offeredToolNames, planned.plan);
+            contract = std::string(kEngagementContract) +
+                       (recallAvailable ? kRecallAvailableNote : kRecallExhaustedNote) +
+                       (tools != nullptr
+                            ? composeToolGuidance(*tools, enforcedToolNames,
+                                                  GuidanceScene::GroupTurn, {currentLocalDateIso()})
+                            : std::string()) +
+                       planNote(fromPlan(planned.plan));
+            schemas = {kSaySchema, kLeaveSchema};
+            if (recallAvailable)
+                schemas.push_back(kRecallSchema);
+            for (const std::string &name : enforcedToolNames)
+                if (const std::optional<std::string> schema = tools->schemaFor(name))
+                    schemas.push_back(*schema);
+        }
     }
 
     // 工具轮（Application/ToolLoop，与一对一对话共用同一实现）：召回 / 注册表工具 →
@@ -890,7 +925,14 @@ void EngagementService::runTurn(std::uint64_t groupId)
         }
         return result;
     };
-    hooks.offered = isTurnTool;
+    if (enforcing)
+        hooks.offered = [&enforcedToolNames](const std::string &name)
+        {
+            return std::find(enforcedToolNames.begin(), enforcedToolNames.end(), name) !=
+                   enforcedToolNames.end();
+        };
+    else
+        hooks.offered = isTurnTool;
     hooks.stopWhenNoKnownTool = true;
     // user_id=0：会话轮没有个人语境，图片解析只看本群 24h 群库；参数先归一化
     hooks.normalizeExecutionArguments = true;
@@ -923,22 +965,30 @@ void EngagementService::runTurn(std::uint64_t groupId)
     hooks.log.notOfferedSuffix = "（群 " + std::to_string(groupId) + "）";
     hooks.log.doneLog = ToolDoneLog::AfterRegistryCall;
 
-    ToolLoopResult loop = runToolLoop(history, mainAgent(contract, history, schemas), tools,
-                                      ToolContext{0, 0, std::string(), groupId}, hooks);
-    if (loop.stop == ToolLoopStop::ToolCancelled)
-        return;
-    if (loop.stop == ToolLoopStop::RoundLimit)
-        LOG_WARNING("会话轮工具轮次达上限（" + std::to_string(kTurnToolRounds) +
-                    " 趟）仍在请求工具，本拍按沉默处理：群 " + std::to_string(groupId));
-    const ChatResponse &response = loop.response;
-    if (response.cancelled || response.code != 200)
+    EngagementTurn turn; // 默认 Pass：计划沉默兑现时不调主模型，按今天的 Pass 分支收尾
+    if (plannedSilence)
     {
-        LOG_WARNING("会话轮调用失败（code=" + std::to_string(response.code) + "）：群 " +
-                    std::to_string(groupId));
-        return;
+        LOG_INFO("决策层：本轮按计划不开口，未请求主模型：群 " + std::to_string(groupId));
     }
+    else
+    {
+        ToolLoopResult loop = runToolLoop(history, mainAgent(contract, history, schemas), tools,
+                                          ToolContext{0, 0, std::string(), groupId}, hooks);
+        if (loop.stop == ToolLoopStop::ToolCancelled)
+            return;
+        if (loop.stop == ToolLoopStop::RoundLimit)
+            LOG_WARNING("会话轮工具轮次达上限（" + std::to_string(kTurnToolRounds) +
+                        " 趟）仍在请求工具，本拍按沉默处理：群 " + std::to_string(groupId));
+        const ChatResponse &response = loop.response;
+        if (response.cancelled || response.code != 200)
+        {
+            LOG_WARNING("会话轮调用失败（code=" + std::to_string(response.code) + "）：群 " +
+                        std::to_string(groupId));
+            return;
+        }
 
-    const EngagementTurn turn = parseTurn(response);
+        turn = parseTurn(response);
+    }
     const std::int64_t now = clock();
     bool moodDue = false;
     std::string latestSpeech;
@@ -1024,12 +1074,12 @@ void EngagementService::runTurn(std::uint64_t groupId)
     // 基线：只记录实际发生的动作（事后）；策略决策时记录它的计划。都不改变动作；
     // recorder 关闭时 no-op。
     std::string decisionId;
+    const char *const action = turn.kind == EngagementTurn::Kind::Speak
+                                   ? "group_say"
+                                   : turn.kind == EngagementTurn::Kind::Leave ? "leave_topic"
+                                                                              : "no_reply";
     if (decisionRecorder != nullptr && decisionRecorder->enabled())
     {
-        const char *action = turn.kind == EngagementTurn::Kind::Speak
-                                 ? "group_say"
-                                 : turn.kind == EngagementTurn::Kind::Leave ? "leave_topic"
-                                                                            : "no_reply";
         affect::DecisionRecord decision =
             policyDecides
                 ? affect::makePolicyDecision(decisionSource, groupId, 0, std::string(), planned,
@@ -1050,9 +1100,12 @@ void EngagementService::runTurn(std::uint64_t groupId)
         execution.decisionId = decisionId;
         execution.status = deliverPending && sender != nullptr ? "queued" : "skipped";
         execution.actualText = hasText ? turn.text : std::string();
-        // 影子期：计划只记录、未约束她，实际动作与计划之差留给导出分析
+        // 影子期：计划只记录、未约束她，实际动作与计划之差留给导出分析；
+        // 生效期：她（L2）与计划不符时记下她实际做了什么
         if (policyDecides && !enforce)
             execution.deviationReason = "shadow";
+        else if (policyDecides && planned.plan.action != action)
+            execution.deviationReason = std::string("model_override:") + action;
         decisionRecorder->recordExecution(std::move(execution));
     }
 

@@ -2039,3 +2039,210 @@ TEST(EngagementDecisionPointTest, CardTriggerKindPerTurn)
     flow.spike(12);
     EXPECT_EQ(latestTrigger(), "engagement_cold_entry/cold_spike");
 }
+
+// ---- R1.c 生效路径（affect.enforce=true）----
+namespace
+{
+// 绕过 JudgePolicy::allowedActions、无条件给 no_reply 的策略：验证 enforce 侧的第二道守卫
+class AlwaysSilentPolicy : public affect::DecisionPolicy
+{
+public:
+    affect::Decision decide(const affect::SituationCard &, const std::string &) override
+    {
+        affect::Decision decision;
+        decision.plan.action = "no_reply";
+        decision.plan.toolPolicy = "none";
+        return decision;
+    }
+    std::string version() const override { return "always_silent_v1"; }
+    std::string planVersion() const override { return "always_silent_plan_v1"; }
+};
+
+struct EnforcedHarness
+{
+    Harness harness;
+    affect::DecisionStore store{harness.directory.path() + "/affect.db"};
+    affect::DecisionRecorder recorder{&store, [this] { return harness.now; }};
+    std::string judgeOutput;
+    affect::JudgePolicy judge{[this](const std::string &, const std::string &) { return judgeOutput; },
+                              "judge-model"};
+
+    explicit EnforcedHarness(std::string output, affect::DecisionPolicy *policy = nullptr)
+        : judgeOutput(std::move(output))
+    {
+        harness.service->setDecisionRecorder(&recorder);
+        harness.service->setPolicy(policy != nullptr ? policy : &judge);
+        harness.service->setEnforce(true);
+    }
+
+    std::string latestDeviation()
+    {
+        const auto decisions = store.recentDecisions(1);
+        const auto rows = executionsOf(harness.directory.path() + "/affect.db",
+                                       decisions.front().decisionId);
+        return rows.empty() ? std::string("<none>") : rows.front().second;
+    }
+
+    std::string latestStatus()
+    {
+        const auto decisions = store.recentDecisions(1);
+        const auto rows = executionsOf(harness.directory.path() + "/affect.db",
+                                       decisions.front().decisionId);
+        return rows.empty() ? std::string("<none>") : rows.front().first;
+    }
+};
+
+std::string planWithTools(const std::string &toolPolicy, const std::string &allowedTools = "[]",
+                          const std::string &speechAct = "unspecified",
+                          const std::string &tone = "unspecified", int maxCodepoints = 0)
+{
+    return R"({"schema_version":1,"action":"group_say","speech_act":")" + speechAct +
+           R"(","tone":")" + tone + R"(","max_codepoints":)" + std::to_string(maxCodepoints) +
+           R"(,"tool_policy":")" + toolPolicy + R"(","allowed_tools":)" + allowedTools + "}";
+}
+} // namespace
+
+// lull 轮计划 no_reply：不调主模型，按 Pass 计数；冷启动入场计划 no_reply：直接收场
+TEST(EngagementEnforceTest, EnforcedNoReplyOnLullSkipsMainModel)
+{
+    EnforcedHarness enforced(judgeReply("no_reply"));
+    Harness &harness = enforced.harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(sayResponse("不该被请求"));
+    harness.service->runTurn(8823);
+
+    EXPECT_TRUE(harness.agentContracts.empty()) << "计划沉默兑现：主模型未被请求";
+    EXPECT_TRUE(harness.sender->texts.empty());
+    EXPECT_EQ(harness.service->sessionOf(8823)->consecutivePasses, 1);
+    const auto decisions = enforced.store.recentDecisions(1);
+    EXPECT_EQ(decisions.front().plan.action, "no_reply");
+    EXPECT_EQ(enforced.latestStatus(), "skipped");
+    EXPECT_EQ(enforced.latestDeviation(), "") << "计划与实际一致，无偏差";
+
+    ColdFlow flow(harness);
+    flow.setMembers(200);
+    flow.warm(3, 4);
+    const std::size_t requestsBefore = harness.agentContracts.size();
+    flow.spike(12);
+    ASSERT_TRUE(harness.service->sessionOf(77500).has_value());
+    EXPECT_EQ(harness.agentContracts.size(), requestsBefore) << "冷启动计划沉默也不请求主模型";
+    EXPECT_EQ(harness.service->sessionOf(77500)->state, EngagementState::Ended);
+    EXPECT_NE(harness.service->sessionOf(77500)->endReason.find("冷启动自决"), std::string::npos);
+}
+
+// enforce 侧第二道守卫：有人叫她的轮次（address）即使拿到 no_reply 也照常请求主模型
+TEST(EngagementEnforceTest, EnforcedNoReplyNeverAppliesToAddressedTurns)
+{
+    AlwaysSilentPolicy silent;
+    EnforcedHarness enforced("", &silent);
+    Harness &harness = enforced.harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.now += 5;
+    harness.feed(8823, "Klein 你觉得呢", harness.now, true);
+    ASSERT_TRUE(harness.service->sessionOf(8823)->addressPending);
+    harness.turnResponses.push_back(sayResponse("我觉得可以"));
+    harness.service->runTurn(8823);
+
+    ASSERT_EQ(harness.agentContracts.size(), 1U) << "被点名的轮次主模型必须被调用";
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(enforced.latestDeviation(), "model_override:group_say");
+}
+
+// allow_list：注册表工具按计划收窄，会话动词（group_say/leave_topic/recall_context）不动
+TEST(EngagementEnforceTest, EnforcedAllowListTrimsRegistryToolsButKeepsVerbs)
+{
+    ToolRegistry registry;
+    registry.registerTool(std::make_unique<FakeInspectTool>());
+    registry.registerTool(std::make_unique<FakeWebSearchTool>());
+    EnforcedHarness enforced(planWithTools("allow_list", R"(["klein_web_search"])"));
+    Harness &harness = enforced.harness;
+    harness.service->setTools(&registry, {"inspect_image", "klein_web_search"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.service->runTurn(8823);
+
+    ASSERT_EQ(harness.agentSchemas.size(), 1U);
+    const std::vector<std::string> &schemas = harness.agentSchemas.front();
+    EXPECT_TRUE(schemasMention(schemas, "group_say"));
+    EXPECT_TRUE(schemasMention(schemas, "leave_topic"));
+    EXPECT_TRUE(schemasMention(schemas, "recall_context"));
+    EXPECT_TRUE(schemasMention(schemas, "klein_web_search"));
+    EXPECT_FALSE(schemasMention(schemas, "inspect_image")) << "计划外的注册表工具被收窄";
+    EXPECT_EQ(schemas.size(), 4U);
+    const std::string &contract = harness.agentContracts.front();
+    EXPECT_EQ(contract.find("瞥了一眼"), std::string::npos) << "被裁掉工具的使用规则不再出现";
+    EXPECT_NE(contract.find("klein_web_search"), std::string::npos) << "开放工具的规则仍在";
+}
+
+// none：不给注册表工具，但她仍能说话（动词永远在）
+TEST(EngagementEnforceTest, EnforcedNoneStillLetsHerSpeak)
+{
+    ToolRegistry registry;
+    registry.registerTool(std::make_unique<FakeInspectTool>());
+    EnforcedHarness enforced(planWithTools("none"));
+    Harness &harness = enforced.harness;
+    harness.service->setTools(&registry, {"inspect_image"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(sayResponse("那我说一句"));
+    harness.service->runTurn(8823);
+
+    ASSERT_EQ(harness.agentSchemas.size(), 1U);
+    EXPECT_FALSE(schemasMention(harness.agentSchemas.front(), "inspect_image"));
+    EXPECT_TRUE(schemasMention(harness.agentSchemas.front(), "group_say"));
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(enforced.latestDeviation(), "");
+}
+
+// 她（L2）与计划不符：记下实际动作
+TEST(EngagementEnforceTest, ModelOverrideRecordsDeviation)
+{
+    EnforcedHarness enforced(judgeReply("group_say"));
+    Harness &harness = enforced.harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(passResponse());
+    harness.service->runTurn(8823);
+    EXPECT_EQ(enforced.latestDeviation(), "model_override:no_reply");
+
+    harness.now += 60;
+    harness.feed(8823, "又来一条", harness.now);
+    harness.turnResponses.push_back(leaveResponse("聊完了"));
+    harness.service->runTurn(8823);
+    EXPECT_EQ(enforced.latestDeviation(), "model_override:leave_topic");
+}
+
+// 分寸注记：只出现非 unspecified / 非 0 的片段；全无则契约与基线逐字相同
+TEST(EngagementEnforceTest, ToneNoteAppendedOnlyWhenSpecified)
+{
+    Harness legacy;
+    legacy.service->onAtActivated(8823, "话题");
+    legacy.feed(8823, "现场消息", legacy.now);
+    legacy.service->runTurn(8823);
+    ASSERT_EQ(legacy.agentContracts.size(), 1U);
+
+    EnforcedHarness noted(planWithTools("inherit", "[]", "banter", "轻松", 80));
+    noted.harness.service->onAtActivated(8823, "话题");
+    noted.harness.feed(8823, "现场消息", noted.harness.now);
+    noted.harness.service->runTurn(8823);
+    ASSERT_EQ(noted.harness.agentContracts.size(), 1U);
+    EXPECT_EQ(noted.harness.agentContracts.front(),
+              legacy.agentContracts.front() +
+                  "\n\n[系统注] 这一轮的分寸：speech_act=banter；tone=轻松；最多 80 个字符。");
+
+    EnforcedHarness toneOnly(planWithTools("inherit", "[]", "unspecified", "轻松", 0));
+    toneOnly.harness.service->onAtActivated(8823, "话题");
+    toneOnly.harness.feed(8823, "现场消息", toneOnly.harness.now);
+    toneOnly.harness.service->runTurn(8823);
+    EXPECT_EQ(toneOnly.harness.agentContracts.front(),
+              legacy.agentContracts.front() + "\n\n[系统注] 这一轮的分寸：tone=轻松。");
+
+    EnforcedHarness plain(planWithTools("inherit"));
+    plain.harness.service->onAtActivated(8823, "话题");
+    plain.harness.feed(8823, "现场消息", plain.harness.now);
+    plain.harness.service->runTurn(8823);
+    EXPECT_EQ(plain.harness.agentContracts.front(), legacy.agentContracts.front());
+    EXPECT_EQ(plain.harness.agentSchemas.front(), legacy.agentSchemas.front());
+}

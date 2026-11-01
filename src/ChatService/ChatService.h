@@ -14,6 +14,7 @@
 #include <vector>
 
 class MemoryService;
+struct ReplyConstraints;
 
 struct ChatReply
 {
@@ -38,11 +39,14 @@ public:
     // sharedScopeId：共享上下文作用域（ADR-019；调用方传群号，私聊 0），原样放进
     // ToolContext 供图片类工具选择资产库；本服务不解释它的含义。
     // 上下文对所有用户开放（2026-09-19）：每句原文都写入会话并进长期记忆队列
+    // constraints（R1.c，affect.enforce=true 的 @ 路径）：可空 = 与此前逐字相同。非空时
+    // 分寸注记接在 situationNote 之后，工具表与工具循环的开放名单按 tool_policy 收窄为同一份
     ChatReply reply(uint64_t user_id, const std::string &text,
                     std::optional<ChatImageContent> currentImage = std::nullopt,
                     const std::string &situationNote = {},
                     const std::string &requestContext = {},
-                    uint64_t sharedScopeId = 0);
+                    uint64_t sharedScopeId = 0,
+                    const ReplyConstraints *constraints = nullptr);
     // 人格化单轮回应（T6）：与 reply() 相同的人格装配（用户人格 / soul 兜底 + 服务契约），
     // 但单轮、不带工具、不写会话不入长期记忆——戳一戳、欢迎、提醒转达等被动场景不值得进记忆。
     // 失败返回空串，调用方决定降级，绝不把错误文案当回复发给用户

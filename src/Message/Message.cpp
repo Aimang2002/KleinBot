@@ -13,6 +13,7 @@
 #include "../Affect/DecisionRecord.h"
 #include "../Affect/DecisionRecorder.h"
 #include "../Application/AtReplySituation.h"
+#include "../Application/ReplyConstraints.h"
 #include "../Application/ShadowDecision.h"
 #include "../utils/LocalDate.h"
 #include "Message.h"
@@ -185,12 +186,40 @@ void Message::handleMessage(const InboundMessage &current_data)
 		// 这里不写基线决策；请求、回复与投递与基线逐字相同（Application/ShadowDecision.h）
 		std::string decisionId;
 		const bool recording = this->decisionRecorder != nullptr && this->decisionRecorder->enabled();
-		const bool shadowPolicy = recording && isGroup && !this->enforcePlan &&
+		const bool policyDecides = recording && isGroup &&
 			!affect::isBaselinePolicy(this->decisionPolicy);
+		const bool shadowPolicy = policyDecides && !this->enforcePlan;
+		const bool enforcedPolicy = policyDecides && this->enforcePlan;
 		const std::string triggerMessageId = !current_data.message_id_raw.empty()
 			? current_data.message_id_raw
 			: std::to_string(current_data.message_id);
-		if (recording && !shadowPolicy)
+		// judge 只看内存材料：群背景 + 触发句；card 只含派生字段
+		const auto atCard = [&]()
+		{
+			return atReplySituation(
+				current_data,
+				this->perception != nullptr ? this->perception->topicNoteFor(current_data.group_id)
+											: std::string(),
+				this->chatService.toolNames(), currentLocalHour());
+		};
+		const std::string judgeMaterial = policyDecides
+			? requestContext + "\n触发句：" + conversationText
+			: std::string();
+		// R1.c 生效期：judge 前置、决策在回复前记（与基线顺序一致）；动作只可能是 reply
+		//（越界已在 JudgePolicy 回退），计划只约束分寸与工具
+		ReplyConstraints constraints;
+		std::string plannedAction;
+		if (enforcedPolicy)
+		{
+			const affect::SituationCard card = atCard();
+			const affect::Decision decision = this->decisionPolicy->decide(card, judgeMaterial);
+			plannedAction = decision.plan.action;
+			constraints = fromPlan(decision.plan);
+			decisionId = this->decisionRecorder->recordDecision(affect::makePolicyDecision(
+				"at_reply", current_data.group_id, current_data.user_id, triggerMessageId,
+				decision, *this->decisionPolicy, card));
+		}
+		else if (recording && !shadowPolicy)
 		{
 			affect::DecisionRecord decision = affect::makeBaselineDecision(
 				current_data.message_type == "group" ? "at_reply" : "private_reply",
@@ -205,7 +234,8 @@ void Message::handleMessage(const InboundMessage &current_data)
 		// 共享作用域（ADR-019）：群聊传群号，图片类工具据此先查群资产库
 		ChatReply chatReply = this->chatService.reply(
 			current_data.user_id, conversationText, std::move(currentImage),
-			situationNote, requestContext, isGroup ? current_data.group_id : 0);
+			situationNote, requestContext, isGroup ? current_data.group_id : 0,
+			enforcedPolicy ? &constraints : nullptr);
 		std::string llm_text = chatReply.text;
 		// 群聊收敛契约（T7b）：模型判定无增量时输出 [不回应] 标记，静默不发
 		const bool textSuppressed = current_data.message_type == "group" &&
@@ -225,6 +255,11 @@ void Message::handleMessage(const InboundMessage &current_data)
 			execution.status = (!textWillSend && chatReply.outbound_messages.empty())
 				? "skipped" : "queued";
 			execution.actualText = chatReply.text;
+			// 生效期：她没有开口（[不回应] 或空回复）即与 reply 计划不符
+			const char *const actualAction =
+				(textWillSend || !chatReply.outbound_messages.empty()) ? "reply" : "no_reply";
+			if (enforcedPolicy && plannedAction != actualAction)
+				execution.deviationReason = std::string("model_override:") + actualAction;
 			if (!shadowPolicy)
 				this->decisionRecorder->recordExecution(execution);
 		}
@@ -287,15 +322,8 @@ void Message::handleMessage(const InboundMessage &current_data)
 
 		if (shadowPolicy)
 		{
-			// judge 只看内存材料：群背景 + 触发句；card 只含派生字段
-			const affect::SituationCard card = atReplySituation(
-				current_data,
-				this->perception != nullptr ? this->perception->topicNoteFor(current_data.group_id)
-											: std::string(),
-				this->chatService.toolNames(), currentLocalHour());
-			recordShadowAroundDelivery(*this->decisionRecorder, *this->decisionPolicy, card,
-				requestContext + "\n触发句：" + conversationText, triggerMessageId,
-				std::move(execution), deliver);
+			recordShadowAroundDelivery(*this->decisionRecorder, *this->decisionPolicy, atCard(),
+				judgeMaterial, triggerMessageId, std::move(execution), deliver);
 		}
 		else
 		{
