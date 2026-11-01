@@ -158,6 +158,21 @@ class ExportTest(unittest.TestCase):
             connection.execute("DELETE FROM affect_feedback")
         connection.close()
 
+    def test_orphan_execution_is_skipped_and_counted(self):
+        # @ 影子期：执行先落库、决策投递后补写；进程在两者之间退出会留下孤儿执行行
+        connection = sqlite3.connect(self.db)
+        connection.execute(
+            "INSERT INTO affect_executions (execution_id, decision_id, created_at, status,"
+            " actual_text) VALUES ('e9', 'missing-decision', 5000, 'queued', '孤儿')")
+        connection.commit()
+        connection.close()
+        text = self.run_main()
+        self.assertIn("决策 4 条", text)
+        self.assertIn("无决策的执行行：1 条", text)
+        reader = self.module.open_readonly(self.db)
+        self.assertEqual(self.module.count_orphan_executions(reader), 1)
+        reader.close()
+
     def test_since_parsing(self):
         self.assertEqual(self.module.parse_since("1793169349"), 1793169349)
         self.assertIsInstance(self.module.parse_since("2026-11-01"), int)

@@ -18,6 +18,12 @@ public:
     static BehaviorPlan planFor(const SituationCard &card);
 };
 
+// 空策略与基线等价：调用方据此走今天的事后记录原路（不装配 card、不调 decide）
+inline bool isBaselinePolicy(const DecisionPolicy *policy)
+{
+    return policy == nullptr || dynamic_cast<const BaselinePolicy *>(policy) != nullptr;
+}
+
 } // namespace affect
 
 #endif // AFFECT_BASELINE_POLICY_H

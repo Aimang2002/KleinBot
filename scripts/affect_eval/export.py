@@ -137,6 +137,15 @@ def collect(connection, since, group):
     return records
 
 
+def count_orphan_executions(connection):
+    """没有对应决策的执行行数。R1 @ 路径影子期先落执行、投递后才补写决策，进程恰在
+    两者之间退出会留下这种行；以决策为主连接时它们本就不进明细，这里只计数报告。"""
+    return connection.execute(
+        "SELECT COUNT(*) FROM affect_executions e"
+        " LEFT JOIN affect_decisions d ON d.decision_id = e.decision_id"
+        " WHERE d.decision_id IS NULL").fetchone()[0]
+
+
 def rate(numerator, denominator):
     if denominator == 0:
         return "n/a（0 条）"
@@ -190,7 +199,7 @@ def print_matrix(records):
               "  ".join("{:>13}".format(cells.get((row, c), 0)) for c in cols))
 
 
-def report(records, since, group):
+def report(records, since, group, orphans=0):
     print("# affect 导出")
     scope = []
     if since is not None:
@@ -202,6 +211,8 @@ def report(records, since, group):
         first = datetime.fromtimestamp(records[0]["created_at"]).isoformat(sep=" ")
         last = datetime.fromtimestamp(records[-1]["created_at"]).isoformat(sep=" ")
         print("时间：{} → {}".format(first, last))
+    if orphans:
+        print("无决策的执行行：{} 条（已跳过；@ 影子期投递后补写决策前进程退出所致）".format(orphans))
 
     print_counter("policy_version × source × trigger_kind × plan.action",
                   Counter((r["policy_version"], r["source"], r["trigger_kind"], r["plan_action"])
@@ -258,9 +269,10 @@ def main(argv=None):
     connection = open_readonly(args.db)
     try:
         records = collect(connection, args.since, args.group)
+        orphans = count_orphan_executions(connection)
     finally:
         connection.close()
-    report(records, args.since, args.group)
+    report(records, args.since, args.group, orphans)
     if args.csv:
         write_csv(records, args.csv)
         print("\nCSV 已写出：{}（{} 行）".format(args.csv, len(records)))

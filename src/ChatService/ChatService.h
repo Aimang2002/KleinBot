@@ -51,15 +51,19 @@ public:
     // 不写历史、不入记忆队列、无工具；失败返回空串
     std::string buildOnce(const std::string &systemPrompt, const std::string &userPrompt);
     // 指定杂务模型的一次性调用（话题判断/上下文压缩等后台苦力任务）：
-    // worker 端点已配置则直连该端点，否则回退默认模型。失败返回空串
+    // worker 端点已配置则直连该端点，否则回退默认模型。失败（含超时）返回空串。
+    // timeoutMs：本次 HTTP 超时（毫秒），0 = 适配器默认 300 秒；judge 用短超时快速失败
     std::string buildOnceWith(const ModelEndpointOptions &worker,
-                              const std::string &systemPrompt, const std::string &userPrompt);
+                              const std::string &systemPrompt, const std::string &userPrompt,
+                              long timeoutMs = 0);
     // 会话轮请求（群聊话题跟进）：人格 system（用户人格/soul 兜底 + 服务契约）
     // + systemNote 追加，history 与工具表由调用方给定，单次请求返回原始
     // ChatResponse（工具调用由调用方执行）。不落库、不入记忆、不写会话
     ChatResponse requestInCharacter(uint64_t personaSourceId, const std::string &systemNote,
                                     const std::vector<ChatMessage> &history,
                                     const std::vector<std::string> &toolSchemas);
+    // reply() 提供给模型的工具名（决策层情境卡的 available_tools）
+    std::vector<std::string> toolNames() const { return tools.names(); }
 
 private:
     Dock &dock;

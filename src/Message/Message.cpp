@@ -9,8 +9,12 @@
 #include "../Application/TypingIndicator.h"
 #include "../Perception/PerceptionChannel.h"
 #include "../Perception/GroupContextService.h"
+#include "../Affect/BaselinePolicy.h"
 #include "../Affect/DecisionRecord.h"
 #include "../Affect/DecisionRecorder.h"
+#include "../Application/AtReplySituation.h"
+#include "../Application/ShadowDecision.h"
+#include "../utils/LocalDate.h"
 #include "Message.h"
 #include "../Application/NonTextLabels.h"
 #include <algorithm>
@@ -27,12 +31,14 @@ Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatS
                  TypingIndicator *typingIndicator, PerceptionChannel *perception,
                  GroupContextService *groupContext,
                  affect::DecisionRecorder *decisionRecorder,
-                 ImageAssetStore *sharedAssets)
+                 ImageAssetStore *sharedAssets,
+                 affect::DecisionPolicy *decisionPolicy, bool enforcePlan)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry), voice(voice),
       options(std::move(options)), visionModel(std::move(visionModel)),
       global_Voice(globalVoice), typingIndicator(typingIndicator), perception(perception),
-      groupContext(groupContext), decisionRecorder(decisionRecorder), sharedAssets(sharedAssets)
+      groupContext(groupContext), decisionRecorder(decisionRecorder), sharedAssets(sharedAssets),
+      decisionPolicy(decisionPolicy), enforcePlan(enforcePlan)
 {
 }
 
@@ -175,12 +181,17 @@ void Message::handleMessage(const InboundMessage &current_data)
 
 		// M1 影子记录：@/私聊回复路径与主动接话共用同一决策合同；
 		// recorder 关闭时完全 no-op，不改变下面的实际请求。
+		// R1 影子期（群聊 @ + 非基线策略 + enforce=false）：决策改在投递之后由策略产出，
+		// 这里不写基线决策；请求、回复与投递与基线逐字相同（Application/ShadowDecision.h）
 		std::string decisionId;
-		if (this->decisionRecorder != nullptr && this->decisionRecorder->enabled())
+		const bool recording = this->decisionRecorder != nullptr && this->decisionRecorder->enabled();
+		const bool shadowPolicy = recording && isGroup && !this->enforcePlan &&
+			!affect::isBaselinePolicy(this->decisionPolicy);
+		const std::string triggerMessageId = !current_data.message_id_raw.empty()
+			? current_data.message_id_raw
+			: std::to_string(current_data.message_id);
+		if (recording && !shadowPolicy)
 		{
-			const std::string triggerMessageId = !current_data.message_id_raw.empty()
-				? current_data.message_id_raw
-				: std::to_string(current_data.message_id);
 			affect::DecisionRecord decision = affect::makeBaselineDecision(
 				current_data.message_type == "group" ? "at_reply" : "private_reply",
 				current_data.message_type == "group" ? current_data.group_id : 0,
@@ -202,18 +213,20 @@ void Message::handleMessage(const InboundMessage &current_data)
 		const bool textWillSend = !llm_text.empty() && !textSuppressed;
 
 		// 执行记录先落行、后投递（R0.2）：协议端答复经回执把 queued 推进为
-		// sent/failed/unknown 并回填真实 message_id，行必须先存在
+		// sent/failed/unknown 并回填真实 message_id，行必须先存在。
+		// 影子期由 recordShadowAroundDelivery 在投递前落这一行（引用预分配的 decision_id）
 		std::string executionId;
-		if (!decisionId.empty() && this->decisionRecorder != nullptr)
+		affect::ExecutionRecord execution;
+		if (!decisionId.empty() || shadowPolicy)
 		{
 			executionId = affect::DecisionRecorder::newExecutionId();
-			affect::ExecutionRecord execution;
 			execution.executionId = executionId;
 			execution.decisionId = decisionId;
 			execution.status = (!textWillSend && chatReply.outbound_messages.empty())
 				? "skipped" : "queued";
 			execution.actualText = chatReply.text;
-			this->decisionRecorder->recordExecution(std::move(execution));
+			if (!shadowPolicy)
+				this->decisionRecorder->recordExecution(execution);
 		}
 		// 回执关联键：一轮只给一条出站——有文本回复给文本（主回复），否则给第一条
 		// 出站消息。有记录器时 = execution_id；否则仅群聊需要（自消息 message_id 回填）
@@ -221,52 +234,72 @@ void Message::handleMessage(const InboundMessage &current_data)
 			? executionId
 			: (current_data.message_type == "group" && this->groupContext != nullptr
 				? utils::uniqueId("dlv") : std::string());
-		if (!inboundAssetId.empty())
-			this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
-				chatReply.user_message_id);
-		// 本轮第一条出站才带引用+@：被点名时第一句回应引用原消息，
-		// 后续分条/多消息作为普通群消息直接发，避免每条都重复指向同一条 @
-		bool replyContextPending = true;
-		for (const auto &outbound : chatReply.outbound_messages)
+		const auto deliver = [&]()
 		{
-			dispatch(current_data, outbound, replyContextPending,
-					 textWillSend ? std::string() : correlationPending);
-			replyContextPending = false;
-			if (!textWillSend)
-				correlationPending.clear();
-		}
-
-		if (llm_text.empty())
-		{
-			return;
-		}
-
-		// 抑制一律留日志：每次沉默都是可观测的决策，prompt 分寸靠它调
-		if (textSuppressed)
-		{
-			LOG_INFO("群聊收敛：本轮判定无增量，静默不回应（群 " +
-					 std::to_string(current_data.group_id) + "）");
-			return;
-		}
-
-		// 语音模式：text → TTS → VoiceMessage；否则直接 TextMessage 走分段
-		if (this->global_Voice && this->userSession.isVoiceMode(current_data.user_id))
-		{
-			std::string audioPath = this->textToVoice(llm_text);
-			if (audioPath.empty())
+			if (!inboundAssetId.empty())
+				this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
+					chatReply.user_message_id);
+			// 本轮第一条出站才带引用+@：被点名时第一句回应引用原消息，
+			// 后续分条/多消息作为普通群消息直接发，避免每条都重复指向同一条 @
+			bool replyContextPending = true;
+			for (const auto &outbound : chatReply.outbound_messages)
 			{
-				dispatch(current_data, TextMessage{"系统提示：语音模块异常。"},
-						 replyContextPending, correlationPending);
+				dispatch(current_data, outbound, replyContextPending,
+						 textWillSend ? std::string() : correlationPending);
+				replyContextPending = false;
+				if (!textWillSend)
+					correlationPending.clear();
+			}
+
+			if (llm_text.empty())
+			{
+				return;
+			}
+
+			// 抑制一律留日志：每次沉默都是可观测的决策，prompt 分寸靠它调
+			if (textSuppressed)
+			{
+				LOG_INFO("群聊收敛：本轮判定无增量，静默不回应（群 " +
+						 std::to_string(current_data.group_id) + "）");
+				return;
+			}
+
+			// 语音模式：text → TTS → VoiceMessage；否则直接 TextMessage 走分段
+			if (this->global_Voice && this->userSession.isVoiceMode(current_data.user_id))
+			{
+				std::string audioPath = this->textToVoice(llm_text);
+				if (audioPath.empty())
+				{
+					dispatch(current_data, TextMessage{"系统提示：语音模块异常。"},
+							 replyContextPending, correlationPending);
+				}
+				else
+				{
+					dispatch(current_data, VoiceMessage{audioPath}, replyContextPending,
+							 correlationPending);
+				}
 			}
 			else
 			{
-				dispatch(current_data, VoiceMessage{audioPath}, replyContextPending,
-						 correlationPending);
+				dispatchText(current_data, llm_text, replyContextPending, correlationPending);
 			}
+		};
+
+		if (shadowPolicy)
+		{
+			// judge 只看内存材料：群背景 + 触发句；card 只含派生字段
+			const affect::SituationCard card = atReplySituation(
+				current_data,
+				this->perception != nullptr ? this->perception->topicNoteFor(current_data.group_id)
+											: std::string(),
+				this->chatService.toolNames(), currentLocalHour());
+			recordShadowAroundDelivery(*this->decisionRecorder, *this->decisionPolicy, card,
+				requestContext + "\n触发句：" + conversationText, triggerMessageId,
+				std::move(execution), deliver);
 		}
 		else
 		{
-			dispatchText(current_data, llm_text, replyContextPending, correlationPending);
+			deliver();
 		}
 	}
 	catch (const std::exception &e)

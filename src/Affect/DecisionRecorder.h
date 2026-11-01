@@ -32,6 +32,9 @@ public:
 
     // 预生成 execution_id：调用方先拿 id 作投递 correlation_id，再 recordExecution
     static std::string newExecutionId();
+    // 预生成 decision_id（R1 @ 路径影子期）：执行记录先引用它落库、投递，judge 跑完后
+    // 再以同一 id recordDecision（record.decisionId 非空时原样写入）
+    static std::string newDecisionId();
 
     // DeliveryReceiptSink：传输线程调用，只做一次短 UPDATE；recorder 关闭时 no-op
     void onReceipt(DeliveryReceipt receipt) override;

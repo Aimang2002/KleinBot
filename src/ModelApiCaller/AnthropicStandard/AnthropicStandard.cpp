@@ -26,7 +26,8 @@ ChatResponse AnthropicStandard::request_chat(const ChatModel &model, const std::
     LOG_DEBUG("发送模型请求：消息数 " + std::to_string(request.history.size()) +
               "，图片数 " + std::to_string(ChatPayloadBuilder::imageCount(request)));
 
-    std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
+    std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload,
+                                                     request.timeout_ms);
     if (CurlRequestControl::cancellationRequested(running))
     {
         deserialize_result.cancelled = true;
@@ -97,7 +98,8 @@ ImageResponse AnthropicStandard::request_image(const ChatModel &model, const std
     return response;
 }
 
-std::pair<std::string, long> AnthropicStandard::http_post(const std::string &url, const std::string &api_key, const std::string &payload)
+std::pair<std::string, long> AnthropicStandard::http_post(const std::string &url, const std::string &api_key, const std::string &payload,
+                                                       long timeoutMs)
 {
     LOG_DEBUG("使用anthropic");
     if (url.empty() || api_key.empty())
@@ -131,7 +133,8 @@ std::pair<std::string, long> AnthropicStandard::http_post(const std::string &url
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload.length());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_chat);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-        CurlRequestControl::configure(curl, running);
+        const long timeout = timeoutMs > 0 ? timeoutMs : CurlRequestControl::kDefaultTimeoutMs;
+        CurlRequestControl::configure(curl, running, timeout, timeout);
 
         // 可选 HTTP 代理：.config.json 配置 "proxy" 非空时生效
         if (!proxy.empty())

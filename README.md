@@ -111,7 +111,7 @@ KleinBot 使用 Schema 化 JSON 配置，运行时读取当前工作目录的 `.
 | `voice` | TTS 开关、服务地址和参考音频（音频写入系统临时目录） |
 | `features` | 可选业务功能开关 |
 | `memory` | 长期记忆模型、批次和召回限制 |
-| `affect` | 决策层：`enabled` 决策记录开关（默认关闭）；`policy` 取 `baseline`（默认，复现既有行为）或 `judge`（worker 模型为每轮产出行为计划）；`enforce` 默认 `false`，即只记录计划不改变回应（影子）；`judge_model` 留空用 `models.worker`。开影子：`enabled=true, policy=judge, enforce=false`，改动需重启。R1.a 起配置可用，接入群回应路径在 R1.b |
+| `affect` | 决策层：`enabled` 决策记录开关（默认关闭）；`policy` 取 `baseline`（默认，复现既有行为）或 `judge`（worker 模型为每轮产出行为计划）；`enforce` 默认 `false`，即只记录计划不改变回应（影子）；`judge_model` 留空用 `models.worker`。开影子：`enabled=true, policy=judge, enforce=false`，改动需重启。R1.b 起 @ 回复与话题会话轮都接入决策点：影子期 judge 只写计划（执行记录标 `shadow`），实际回应不变；关闭影子把 `policy` 改回 `baseline` 并重启 |
 | `glance` | 群聊瞥视开关与每群每分钟预算，默认关闭 |
 | `web_search` | Tavily 联网搜索、超时和单次结果裁剪配置 |
 | `web_fetch` | 网页抓取工具的正文上限、超时和缓存配置 |

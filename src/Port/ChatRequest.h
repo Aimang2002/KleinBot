@@ -48,6 +48,10 @@ struct ChatRequest
     double frequency_penalty = 0.0;
     double presence_penalty = 0.0;
     int max_tokens = 0;
+
+    // 本次 HTTP 请求的连接/总超时（毫秒）；0 = 适配器默认（CurlRequestControl 300 秒）。
+    // 只给需要快速失败的后台调用（如 judge）用，不进请求体
+    long timeout_ms = 0;
 };
 
 #endif // CHATREQUEST_H

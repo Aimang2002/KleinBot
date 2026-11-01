@@ -6,8 +6,10 @@
 
 namespace CurlRequestControl
 {
+constexpr long kDefaultTimeoutMs = 300000;
+
 void configure(CURL *curl, const std::atomic<bool> *running,
-               long connectTimeoutMs = 300000, long requestTimeoutMs = 300000);
+               long connectTimeoutMs = kDefaultTimeoutMs, long requestTimeoutMs = kDefaultTimeoutMs);
 bool cancellationRequested(const std::atomic<bool> *running);
 bool wasCancelled(CURLcode result, const std::atomic<bool> *running);
 long failureStatusCode(CURLcode result);

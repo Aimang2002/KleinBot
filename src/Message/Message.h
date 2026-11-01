@@ -21,6 +21,7 @@
 
 namespace affect
 {
+class DecisionPolicy;
 class DecisionRecorder;
 }
 
@@ -41,7 +42,9 @@ public:
                      class PerceptionChannel *perception = nullptr,
                      class GroupContextService *groupContext = nullptr,
                      affect::DecisionRecorder *decisionRecorder = nullptr,
-                     ImageAssetStore *sharedAssets = nullptr);
+                     ImageAssetStore *sharedAssets = nullptr,
+                     affect::DecisionPolicy *decisionPolicy = nullptr,
+                     bool enforcePlan = false);
 
 	/**
 	 * @brief 消息过滤：群聊触发门槛与私聊放行
@@ -146,6 +149,9 @@ private:
     class PerceptionChannel *perception = nullptr;    // 可空：未注入则无话题注记
     class GroupContextService *groupContext = nullptr; // 可空：未注入则无内容级群上下文
     affect::DecisionRecorder *decisionRecorder = nullptr; // 可空：M1 影子决策记录
+    // 可空（= 基线）：R1 决策层。群聊 @ 且非基线策略时，影子期在投递之后跑 judge 并记录计划
+    affect::DecisionPolicy *decisionPolicy = nullptr;
+    bool enforcePlan = false; // R1.c 前只保存，不改变任何动作
     // 可空：群资产库（ADR-019）。群聊的当前图片进这里（24h），不进发送者个人库；
     // 工具经 ToolContext.shared_scope_id 先查它
     ImageAssetStore *sharedAssets = nullptr;

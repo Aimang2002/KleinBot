@@ -1,6 +1,7 @@
 add_executable(kleinbot_tests
     ActionTests.cpp
     AffectContractTests.cpp
+    AtReplySituationTests.cpp
     CapabilityBrokerTests.cpp
     CommandAdapterTests.cpp
     ConfigPanelServerTests.cpp
@@ -35,6 +36,7 @@ add_executable(kleinbot_tests
     PushServerTests.cpp
     ReminderTests.cpp
     ReplyContextRoutingTests.cpp
+    ShadowDecisionTests.cpp
     StorageIntegrationTests.cpp
     TaskSchedulerTests.cpp
     TextSplitTests.cpp

@@ -28,6 +28,9 @@ public:
                                              const std::string &userPrompt)>;
     static constexpr int kJudgeCallsPerHour = 30; // 资源护栏：每群每小时（滚动窗口）
     static constexpr int kMaxCodepoints = 400;    // 计划长度上限的夹紧值
+    // judge 调用的 HTTP 超时：卡住时快速失败回退基线（适配器默认 300 秒会把同群
+    // 会话轮拖住 5 分钟）。组合根经 makeWorkerSeam 传给 buildOnceWith
+    static constexpr long kTimeoutMs = 15000;
 
     // clock 返回 unix 秒（预算窗口用）；空 = 系统时钟
     JudgePolicy(Worker worker, std::string modelLabel,

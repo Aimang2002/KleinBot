@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
+#include "Affect/BaselinePolicy.h"
 #include "Affect/DecisionRecord.h"
 #include "Affect/DecisionRecorder.h"
 #include "Affect/DecisionStore.h"
+#include "Affect/JudgePolicy.h"
 #include "Perception/EngagementService.h"
 #include "Perception/GroupContextService.h"
 #include "Perception/GroupListService.h"
@@ -13,6 +15,7 @@
 #include "Tool/Tool.h"
 #include "Tool/ToolRegistry.h"
 
+#include <algorithm>
 #include <chrono>
 
 #include <cstdint>
@@ -20,6 +23,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <sqlite3.h>
 
 namespace
 {
@@ -1735,4 +1740,302 @@ TEST(EngagementDecisionRecordTest, NameMentionEntryPassStaysQuietAndRecordsNoRep
         }
     }
     EXPECT_TRUE(foundLeave);
+}
+
+// ---- R1.b 决策点影子接线 ----
+namespace
+{
+// 执行记录读回（status + deviation_reason）：DecisionStore 没有按决策列执行的读接口
+std::vector<std::pair<std::string, std::string>> executionsOf(const std::string &dbPath,
+                                                              const std::string &decisionId)
+{
+    std::vector<std::pair<std::string, std::string>> rows;
+    sqlite3 *db = nullptr;
+    if (sqlite3_open_v2(dbPath.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK)
+    {
+        sqlite3_close(db);
+        return rows;
+    }
+    sqlite3_stmt *statement = nullptr;
+    sqlite3_prepare_v2(db,
+                       "SELECT status, deviation_reason FROM affect_executions"
+                       " WHERE decision_id=?1 ORDER BY created_at, execution_id;",
+                       -1, &statement, nullptr);
+    sqlite3_bind_text(statement, 1, decisionId.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(statement) == SQLITE_ROW)
+        rows.emplace_back(reinterpret_cast<const char *>(sqlite3_column_text(statement, 0)),
+                          reinterpret_cast<const char *>(sqlite3_column_text(statement, 1)));
+    sqlite3_finalize(statement);
+    sqlite3_close(db);
+    return rows;
+}
+
+// 一行决策 + 它的执行，去掉随机 ID 后序列化，用于整行对拍
+std::string decisionRowWithoutIds(const affect::DecisionRecord &decision, const std::string &dbPath)
+{
+    std::string row = std::to_string(decision.createdAt) + "|" + decision.source + "|" +
+                      std::to_string(decision.groupId) + "|" + std::to_string(decision.userId) +
+                      "|" + decision.triggerMessageId + "|" + decision.plan.toJson().dump() + "|" +
+                      decision.policyVersion + "|" + decision.planVersion + "|" +
+                      decision.stateJson + "|" + decision.fallbackReason;
+    for (const auto &[status, deviation] : executionsOf(dbPath, decision.decisionId))
+        row += "|exec:" + status + "/" + deviation;
+    return row;
+}
+
+std::string flattenHistory(const std::vector<ChatMessage> &history)
+{
+    std::string flat;
+    for (const ChatMessage &message : history)
+    {
+        flat += message.role + ":" + message.content + ":" + message.tool_call_id;
+        for (const ToolCallRequest &call : message.tool_calls)
+            flat += "[" + call.id + "," + call.name + "," + call.arguments + "]";
+        flat += "\n";
+    }
+    return flat;
+}
+
+// 一次固定剧本（两拍 lull：先说一句、再沉默）在给定策略下的全部可观测输出
+struct TurnTranscript
+{
+    std::vector<std::string> contracts;
+    std::vector<std::string> histories;
+    std::vector<std::vector<std::string>> schemas;
+    std::vector<std::string> texts;
+    std::vector<std::string> decisionRows; // 时间升序
+    std::vector<affect::DecisionRecord> decisions;
+    std::vector<std::vector<std::pair<std::string, std::string>>> executions;
+};
+
+const char *const kMaterialMarker = "原文标记甲乙丙";
+
+TurnTranscript runTwoLullTurns(affect::DecisionPolicy *policy, bool setPolicy = true,
+                               bool enforce = false)
+{
+    Harness harness;
+    const std::string dbPath = harness.directory.path() + "/affect.db";
+    affect::DecisionStore store(dbPath);
+    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    harness.service->setDecisionRecorder(&recorder);
+    if (setPolicy)
+    {
+        harness.service->setPolicy(policy);
+        harness.service->setEnforce(enforce);
+    }
+
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, std::string("现场消息") + kMaterialMarker, harness.now);
+    harness.turnResponses.push_back(sayResponse("接一句"));
+    harness.service->runTurn(8823);
+    harness.now += 60;
+    harness.feed(8823, "又来一条", harness.now);
+    harness.turnResponses.push_back(passResponse());
+    harness.service->runTurn(8823);
+
+    TurnTranscript transcript;
+    transcript.contracts = harness.agentContracts;
+    for (const auto &history : harness.agentHistories)
+        transcript.histories.push_back(flattenHistory(history));
+    transcript.schemas = harness.agentSchemas;
+    transcript.texts = harness.sender->texts;
+    transcript.decisions = store.recentDecisions(10);
+    std::reverse(transcript.decisions.begin(), transcript.decisions.end());
+    for (const auto &decision : transcript.decisions)
+    {
+        transcript.decisionRows.push_back(decisionRowWithoutIds(decision, dbPath));
+        transcript.executions.push_back(executionsOf(dbPath, decision.decisionId));
+    }
+    return transcript;
+}
+
+void expectSameRequestsAndActions(const TurnTranscript &actual, const TurnTranscript &legacy)
+{
+    EXPECT_EQ(actual.contracts, legacy.contracts);
+    EXPECT_EQ(actual.histories, legacy.histories);
+    EXPECT_EQ(actual.schemas, legacy.schemas);
+    EXPECT_EQ(actual.texts, legacy.texts);
+}
+
+std::string judgeReply(const std::string &action)
+{
+    return R"({"schema_version":1,"action":")" + action +
+           R"(","tool_policy":")" + (action == "no_reply" ? "none" : "inherit") + R"("})";
+}
+} // namespace
+
+// 影子期：judge 对 lull 建议 no_reply，但她照常被请求、照常说话；记录里是 judge 的计划、
+// 执行标 shadow；请求体与无策略时逐字相同；state_json 是派生状态、不含材料原文
+TEST(EngagementDecisionPointTest, ShadowJudgeRecordsPlanButKeepsBaselineAction)
+{
+    const TurnTranscript legacy = runTwoLullTurns(nullptr, false);
+
+    std::vector<std::string> judgePrompts;
+    affect::JudgePolicy judge(
+        [&judgePrompts](const std::string &, const std::string &user)
+        {
+            judgePrompts.push_back(user);
+            return judgeReply("no_reply");
+        },
+        "judge-model");
+    const TurnTranscript shadow = runTwoLullTurns(&judge);
+
+    expectSameRequestsAndActions(shadow, legacy);
+    ASSERT_EQ(shadow.texts.size(), 1U) << "计划说 no_reply，影子期她仍照常说了";
+    ASSERT_EQ(judgePrompts.size(), 2U);
+    EXPECT_NE(judgePrompts.front().find(kMaterialMarker), std::string::npos)
+        << "原文只在内存里给 judge";
+
+    ASSERT_EQ(shadow.decisions.size(), 2U);
+    for (std::size_t index = 0; index < shadow.decisions.size(); ++index)
+    {
+        const affect::DecisionRecord &decision = shadow.decisions[index];
+        EXPECT_EQ(decision.source, "engagement_turn");
+        EXPECT_EQ(decision.plan.action, "no_reply");
+        EXPECT_EQ(decision.policyVersion, "judge_v1");
+        EXPECT_EQ(decision.planVersion, "judge_plan_v1");
+        EXPECT_TRUE(decision.fallbackReason.empty());
+        const nlohmann::json state = nlohmann::json::parse(decision.stateJson);
+        EXPECT_EQ(state["trigger_kind"], "lull");
+        EXPECT_TRUE(state.contains("turn_count"));
+        EXPECT_EQ(state["judge_model"], "judge-model");
+        EXPECT_TRUE(state.contains("judge_latency_ms"));
+        EXPECT_EQ(decision.stateJson.find(kMaterialMarker), std::string::npos)
+            << "state_json 不得含群聊原文";
+        ASSERT_EQ(shadow.executions[index].size(), 1U);
+        EXPECT_EQ(shadow.executions[index].front().second, "shadow");
+    }
+    EXPECT_EQ(shadow.executions[0].front().first, "queued");
+    EXPECT_EQ(shadow.executions[1].front().first, "skipped");
+    EXPECT_EQ(nlohmann::json::parse(shadow.decisions[1].stateJson)["turn_count"], 1)
+        << "会话统计取自锁内快照";
+}
+
+// 基线策略：不装配 card、不调 decide，记录与未设策略时整行一致（含 state_json="{}"）
+TEST(EngagementDecisionPointTest, BaselinePolicyRecordsIdenticalToLegacy)
+{
+    const TurnTranscript legacy = runTwoLullTurns(nullptr, false);
+    affect::BaselinePolicy baseline;
+    const TurnTranscript withBaseline = runTwoLullTurns(&baseline);
+
+    expectSameRequestsAndActions(withBaseline, legacy);
+    ASSERT_EQ(legacy.decisionRows.size(), 2U);
+    EXPECT_EQ(withBaseline.decisionRows, legacy.decisionRows);
+    EXPECT_EQ(legacy.decisions[0].stateJson, "{}");
+    EXPECT_EQ(legacy.decisions[0].plan.action, "group_say");
+    EXPECT_EQ(legacy.decisions[1].plan.action, "no_reply");
+    EXPECT_EQ(legacy.executions[0].front().second, "");
+}
+
+// 空策略（含 enforce=true）等价基线
+TEST(EngagementDecisionPointTest, NullPolicyBehavesAsBaseline)
+{
+    const TurnTranscript legacy = runTwoLullTurns(nullptr, false);
+    const TurnTranscript nullPolicy = runTwoLullTurns(nullptr, true, true);
+    expectSameRequestsAndActions(nullPolicy, legacy);
+    EXPECT_EQ(nullPolicy.decisionRows, legacy.decisionRows);
+}
+
+// 追问窗口轮：提问文本与工具表与改前一致，card 标 follow_up_window
+TEST(EngagementDecisionPointTest, FollowUpWindowTurnKeepsRequestBody)
+{
+    const auto runScenario = [](affect::DecisionPolicy *policy, std::string *triggerKind)
+    {
+        Harness harness;
+        const std::string dbPath = harness.directory.path() + "/affect.db";
+        affect::DecisionStore store(dbPath);
+        affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+        harness.service->setDecisionRecorder(&recorder);
+        harness.service->setPolicy(policy);
+
+        harness.service->onAtActivated(8823, "崩三前瞻");
+        harness.feed(8823, "主持人lulu", harness.now);
+        harness.turnResponses.push_back(sayResponse("lulu是谁？"));
+        harness.service->runTurn(8823);
+        harness.now += 3;
+        harness.feed(8823, "崩三前瞻主持人", harness.now);
+        harness.now += 5;
+        harness.service->pump(harness.now);
+        EXPECT_EQ(harness.submittedTurns.size(), 1U);
+        EXPECT_TRUE(harness.service->sessionOf(8823)->followUpPending);
+        harness.service->runTurn(8823);
+        EXPECT_FALSE(harness.service->sessionOf(8823)->followUpPending);
+
+        if (triggerKind != nullptr)
+        {
+            const auto decisions = store.recentDecisions(1);
+            *triggerKind = decisions.empty()
+                ? std::string()
+                : nlohmann::json::parse(decisions.front().stateJson).value("trigger_kind", "");
+        }
+        std::vector<std::string> requests;
+        for (std::size_t index = 0; index < harness.agentHistories.size(); ++index)
+            requests.push_back(harness.agentContracts[index] + "\n" +
+                               flattenHistory(harness.agentHistories[index]));
+        return requests;
+    };
+
+    const std::vector<std::string> legacy = runScenario(nullptr, nullptr);
+    affect::JudgePolicy judge([](const std::string &, const std::string &)
+                              { return judgeReply("group_say"); },
+                              "judge-model");
+    std::string triggerKind;
+    const std::vector<std::string> shadow = runScenario(&judge, &triggerKind);
+    ASSERT_EQ(legacy.size(), 2U);
+    EXPECT_EQ(shadow, legacy);
+    EXPECT_EQ(triggerKind, "follow_up_window");
+}
+
+// 五种轮次各一：card 的 trigger_kind 与来源
+TEST(EngagementDecisionPointTest, CardTriggerKindPerTurn)
+{
+    Harness harness;
+    const std::string dbPath = harness.directory.path() + "/affect.db";
+    affect::DecisionStore store(dbPath);
+    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    harness.service->setDecisionRecorder(&recorder);
+    affect::JudgePolicy judge(
+        [](const std::string &, const std::string &) { return judgeReply("group_say"); },
+        "judge-model");
+    harness.service->setPolicy(&judge);
+    const auto latestTrigger = [&store]()
+    {
+        const auto decisions = store.recentDecisions(1);
+        const nlohmann::json state = nlohmann::json::parse(decisions.front().stateJson);
+        return decisions.front().source + "/" + state.value("trigger_kind", "");
+    };
+
+    // lull：会话存活、无待执行标志
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.service->runTurn(8823);
+    EXPECT_EQ(latestTrigger(), "engagement_turn/lull");
+
+    // address：会话存活时被点名
+    harness.now += 5;
+    harness.feed(8823, "Klein 你觉得呢", harness.now, true);
+    harness.turnResponses.push_back(sayResponse("我觉得可以"));
+    harness.service->runTurn(8823);
+    EXPECT_EQ(latestTrigger(), "engagement_turn/address");
+
+    // follow_up_window：她刚开口，群友接了一句并静默
+    harness.now += 3;
+    harness.feed(8823, "哈哈", harness.now);
+    harness.now += 5;
+    harness.service->pump(harness.now);
+    harness.service->runTurn(8823);
+    EXPECT_EQ(latestTrigger(), "engagement_turn/follow_up_window");
+
+    // name_mention：另一个群无会话时提到她的名字
+    harness.now += 5;
+    harness.feed(8824, "克莱茵这个名字挺好听", harness.now, true);
+    harness.service->runTurn(8824);
+    EXPECT_EQ(latestTrigger(), "engagement_turn/name_mention");
+
+    // cold_spike：冷启动入场
+    ColdFlow flow(harness);
+    flow.setMembers(200);
+    flow.warm(3, 4);
+    flow.spike(12);
+    EXPECT_EQ(latestTrigger(), "engagement_cold_entry/cold_spike");
 }

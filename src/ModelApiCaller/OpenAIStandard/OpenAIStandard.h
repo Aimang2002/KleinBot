@@ -26,7 +26,9 @@ public:
     ImageResponse draw_json_parse(const std::string &response);
 
 private:
-    std::pair<std::string, long> http_post(const std::string &url, const std::string &api_key, const std::string &payload);
+    // timeoutMs：0 = CurlRequestControl 默认超时
+    std::pair<std::string, long> http_post(const std::string &url, const std::string &api_key, const std::string &payload,
+                                           long timeoutMs = 0);
 
     ChatResponse chat_json_parse(const std::string &response);
 

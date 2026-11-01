@@ -2,6 +2,7 @@
 #define AFFECT_DECISION_RECORD_H
 
 #include "BehaviorPlan.h"
+#include "DecisionPolicy.h"
 
 #include <cstdint>
 #include <string>
@@ -59,6 +60,17 @@ DecisionRecord makeBaselineDecision(const std::string &source,
                                     const std::string &triggerMessageId,
                                     const std::string &action,
                                     const std::string &toolPolicy = "inherit");
+
+// 按策略构造决策记录（R1，两条群回应路径共用这一份）：plan / fallback_reason 取自
+// decision，policy_version / plan_version 取自 policy，state_json = card.toJson()；
+// judge 时再加 judge_latency_ms 与 judge_model（模型名，不含端点/密钥）
+DecisionRecord makePolicyDecision(const std::string &source,
+                                  std::uint64_t groupId,
+                                  std::uint64_t userId,
+                                  const std::string &triggerMessageId,
+                                  const Decision &decision,
+                                  const DecisionPolicy &policy,
+                                  const SituationCard &card);
 
 } // namespace affect
 

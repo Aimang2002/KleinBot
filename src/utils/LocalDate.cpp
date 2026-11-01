@@ -26,6 +26,13 @@ std::string formatIsoDate(const std::tm &localTime)
 }
 }
 
+int currentLocalHour()
+{
+    const std::time_t now = std::chrono::system_clock::to_time_t(
+        std::chrono::system_clock::now());
+    return localTimeFor(now).tm_hour;
+}
+
 std::string currentLocalDateIso()
 {
     const std::time_t now = std::chrono::system_clock::to_time_t(

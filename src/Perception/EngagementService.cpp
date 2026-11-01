@@ -1,6 +1,9 @@
 #include "EngagementService.h"
+#include "../Affect/BaselinePolicy.h"
 #include "../Affect/DecisionRecord.h"
 #include "../Affect/DecisionRecorder.h"
+#include "../Affect/JudgePolicy.h"
+#include "../Affect/SituationCard.h"
 #include "../Application/ToolGuidance.h"
 #include "../Application/ToolLoop.h"
 #include "../utils/LocalDate.h"
@@ -366,6 +369,7 @@ void EngagementService::pump(std::int64_t now)
             {
                 session.newMessagesSinceTurn = 0;
                 session.followUpTurnsUsed += 1;
+                session.followUpPending = true;
                 dueTurns.push_back(session.groupId);
                 LOG_INFO("追问窗口轮次：群 " + std::to_string(session.groupId) + "（本次开口后第 " +
                          std::to_string(session.followUpTurnsUsed) + " 轮）");
@@ -696,7 +700,8 @@ void EngagementService::runTurn(std::uint64_t groupId)
     {
         Entry,
         ColdEntry,
-        FollowUp,
+        FollowUp,       // lull 轮
+        FollowUpWindow, // 追问窗口轮（提问文本同 FollowUp，只为给决策卡标触发类型）
         Address,
     };
     std::vector<GroupMessageRecord> records;
@@ -707,6 +712,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     std::string topicLine; // 提名字入场轮：提到她的那句（激活时的触发句）
     TurnKind kind = TurnKind::FollowUp;
     std::int64_t startTs = 0;
+    affect::SituationCard card; // 会话统计在锁内快照，只有非基线策略才用
     {
         std::lock_guard<std::mutex> lock(mutex);
         auto it = sessions.find(groupId);
@@ -720,10 +726,23 @@ void EngagementService::runTurn(std::uint64_t groupId)
             endSessionLocked(session, clock(), "消息量达上限", true);
             return;
         }
-        kind = session.addressPending ? TurnKind::Address
-                                      : (session.coldPending  ? TurnKind::ColdEntry
-                                         : session.entryPending ? TurnKind::Entry
-                                                                : TurnKind::FollowUp);
+        kind = session.addressPending  ? TurnKind::Address
+               : session.coldPending     ? TurnKind::ColdEntry
+               : session.entryPending    ? TurnKind::Entry
+               : session.followUpPending ? TurnKind::FollowUpWindow
+                                         : TurnKind::FollowUp;
+        const std::int64_t snapshotNow = clock();
+        card.turnCount = session.turnCount;
+        card.consecutivePasses = session.consecutivePasses;
+        card.newMessagesSinceTurn = session.newMessagesSinceTurn;
+        card.messagesSeen = session.messagesSeen;
+        card.followUpTurnsUsed = session.followUpTurnsUsed;
+        card.secondsSinceLastTurn = session.lastTurnTs > 0 ? snapshotNow - session.lastTurnTs : -1;
+        card.secondsSinceLastSpeech =
+            session.lastSpeakTs > 0 ? snapshotNow - session.lastSpeakTs : -1;
+        card.lullTurnsThisHour = static_cast<int>(std::count_if(
+            session.recentTurnTs.begin(), session.recentTurnTs.end(),
+            [snapshotNow](std::int64_t at) { return snapshotNow - at < kLullFuseWindow; }));
         startTs = session.startTs;
         digest = session.digest;
         compressedUpToTs = session.compressedUpToTs;
@@ -797,6 +816,40 @@ void EngagementService::runTurn(std::uint64_t groupId)
     const std::string contract = std::string(kEngagementContract) +
                                  (recallAvailable ? kRecallAvailableNote : kRecallExhaustedNote) +
                                  toolGuidance;
+
+    // R1 决策点：工具表与契约组装之后、请求主模型之前。基线（含未设策略）或记录器关闭时
+    // 不装配、不调用，记录走下面的事后基线原路；影子期（enforce=false）计划只进记录，
+    // 之后的请求、工具与动作与基线逐字相同
+    const char *const decisionSource =
+        kind == TurnKind::ColdEntry ? "engagement_cold_entry" : "engagement_turn";
+    const bool policyDecides = decisionRecorder != nullptr && decisionRecorder->enabled() &&
+                               !affect::isBaselinePolicy(policy);
+    affect::Decision planned;
+    if (policyDecides)
+    {
+        card.source = decisionSource;
+        card.triggerKind = kind == TurnKind::Address          ? "address"
+                           : kind == TurnKind::Entry          ? "name_mention"
+                           : kind == TurnKind::FollowUpWindow ? "follow_up_window"
+                           : kind == TurnKind::ColdEntry      ? "cold_spike"
+                                                              : "lull";
+        card.groupId = groupId;
+        card.recentSummary = context.digest;
+        card.moodLine = moodLine;
+        card.lullHourlyCap = static_cast<int>(kLullHourlyCap);
+        if (const auto *judge = dynamic_cast<const affect::JudgePolicy *>(policy))
+        {
+            card.judgeCallsThisHour = judge->callsThisHour(groupId);
+            card.judgeCallsCap = affect::JudgePolicy::kJudgeCallsPerHour;
+        }
+        card.localHour = currentLocalHour();
+        card.availableTools = {"group_say", "leave_topic"};
+        if (recallAvailable)
+            card.availableTools.push_back("recall_context");
+        card.availableTools.insert(card.availableTools.end(), offeredToolNames.begin(),
+                                   offeredToolNames.end());
+        planned = policy->decide(card, context.material);
+    }
 
     // 工具轮（Application/ToolLoop，与一对一对话共用同一实现）：召回 / 注册表工具 →
     // 回灌结果再定案（至多 kTurnToolRounds 趟）。group_say/leave_topic 是定案动作：
@@ -902,6 +955,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
         session.addressPending = false;
         session.entryPending = false;
         session.coldPending = false;
+        session.followUpPending = false;
         session.lastTurnTs = now;
         session.newMessagesSinceTurn = 0;
 
@@ -967,7 +1021,8 @@ void EngagementService::runTurn(std::uint64_t groupId)
     }
 
     // M1 影子记录：会话锁外写 SQLite，避免阻塞其它群的 pump/onGroupMessage。
-    // 只记录实际发生的动作，不改变动作；recorder 关闭时 no-op。
+    // 基线：只记录实际发生的动作（事后）；策略决策时记录它的计划。都不改变动作；
+    // recorder 关闭时 no-op。
     std::string decisionId;
     if (decisionRecorder != nullptr && decisionRecorder->enabled())
     {
@@ -975,9 +1030,11 @@ void EngagementService::runTurn(std::uint64_t groupId)
                                  ? "group_say"
                                  : turn.kind == EngagementTurn::Kind::Leave ? "leave_topic"
                                                                             : "no_reply";
-        affect::DecisionRecord decision = affect::makeBaselineDecision(
-            kind == TurnKind::ColdEntry ? "engagement_cold_entry" : "engagement_turn",
-            groupId, 0, std::string(), action);
+        affect::DecisionRecord decision =
+            policyDecides
+                ? affect::makePolicyDecision(decisionSource, groupId, 0, std::string(), planned,
+                                             *policy, card)
+                : affect::makeBaselineDecision(decisionSource, groupId, 0, std::string(), action);
         decisionId = decisionRecorder->recordDecision(std::move(decision));
     }
 
@@ -993,6 +1050,9 @@ void EngagementService::runTurn(std::uint64_t groupId)
         execution.decisionId = decisionId;
         execution.status = deliverPending && sender != nullptr ? "queued" : "skipped";
         execution.actualText = hasText ? turn.text : std::string();
+        // 影子期：计划只记录、未约束她，实际动作与计划之差留给导出分析
+        if (policyDecides && !enforce)
+            execution.deviationReason = "shadow";
         decisionRecorder->recordExecution(std::move(execution));
     }
 

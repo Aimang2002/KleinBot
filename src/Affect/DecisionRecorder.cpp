@@ -71,6 +71,11 @@ std::string DecisionRecorder::newExecutionId()
     return makeId("exe");
 }
 
+std::string DecisionRecorder::newDecisionId()
+{
+    return makeId("dec");
+}
+
 void DecisionRecorder::onReceipt(DeliveryReceipt receipt)
 {
     if (!enabled() || receipt.correlation_id.empty())

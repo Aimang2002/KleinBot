@@ -11,7 +11,9 @@
 #include <curl/curl.h>
 #include <future>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -119,4 +121,57 @@ TEST(ModelFailureTest, ReturnsConfigurationErrorInsteadOfParsingEmptyResponse)
     const ChatResponse anthropicResponse = anthropic.request_chat(model, "model", request);
     EXPECT_EQ(anthropicResponse.code, 500);
     EXPECT_EQ(anthropicResponse.error_message, "模型服务配置不完整，请联系管理员。");
+}
+
+// R1.b 前置：ChatRequest.timeout_ms 一路透传到适配器的 curl 超时。本地服务器只收请求
+// 不应答：带 300ms 超时的 chat 请求应在秒级内以"超时"失败（默认 300 秒则会一直挂着）
+TEST(ModelTimeoutTest, ChatRequestTimeoutReachesBothAdapters)
+{
+    using boost::asio::ip::tcp;
+
+    boost::asio::io_context ioContext;
+    tcp::acceptor acceptor(ioContext, tcp::endpoint(tcp::v4(), 0));
+    const unsigned short port = acceptor.local_endpoint().port();
+    std::mutex serverMutex;
+    std::condition_variable serverChanged;
+    bool releaseServer = false;
+
+    std::thread server([&]() {
+        std::vector<tcp::socket> held;
+        for (int index = 0; index < 2; ++index)
+        {
+            tcp::socket socket(ioContext);
+            acceptor.accept(socket);
+            held.push_back(std::move(socket));
+        }
+        std::unique_lock<std::mutex> lock(serverMutex);
+        serverChanged.wait(lock, [&]() { return releaseServer; });
+    });
+
+    std::atomic<bool> running{true};
+    ChatModel model;
+    model.endpoint = "http://127.0.0.1:" + std::to_string(port) + "/v1/chat";
+    model.api_key = "test-key";
+    ChatRequest request;
+    request.history.push_back({"user", "hi"});
+    request.timeout_ms = 300;
+    OpenAIStandard openAI({}, &running);
+    AnthropicStandard anthropic({}, &running);
+
+    const auto started = std::chrono::steady_clock::now();
+    const ChatResponse openAIResponse = openAI.request_chat(model, "model", request);
+    const ChatResponse anthropicResponse = anthropic.request_chat(model, "model", request);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    {
+        std::lock_guard<std::mutex> lock(serverMutex);
+        releaseServer = true;
+    }
+    serverChanged.notify_all();
+    server.join();
+
+    EXPECT_LT(elapsed, std::chrono::seconds(5));
+    EXPECT_EQ(openAIResponse.code, 504);
+    EXPECT_EQ(anthropicResponse.code, 504);
+    EXPECT_EQ(openAIResponse.error_message, "模型请求超时，请稍后重试。");
 }

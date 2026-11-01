@@ -28,7 +28,8 @@ ChatResponse OpenAIStandard::request_chat(const ChatModel &model, const std::str
               "，图片数 " + std::to_string(ChatPayloadBuilder::imageCount(request)));
 
     // 发送请求
-    std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
+    std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload,
+                                                     request.timeout_ms);
     if (CurlRequestControl::cancellationRequested(running))
     {
         deserialize_result.cancelled = true;
@@ -50,7 +51,7 @@ ChatResponse OpenAIStandard::request_chat(const ChatModel &model, const std::str
         payload_json.erase("frequency_penalty");
         payload_json.erase("presence_penalty");
         payload = payload_json.dump();
-        p = this->http_post(model.endpoint, model.api_key, payload);
+        p = this->http_post(model.endpoint, model.api_key, payload, request.timeout_ms);
         if (CurlRequestControl::cancellationRequested(running))
         {
             deserialize_result.cancelled = true;
@@ -134,7 +135,8 @@ ImageResponse OpenAIStandard::request_image(const ChatModel &model, const std::s
     return deserialize_result;
 }
 
-std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, const std::string &api_key, const std::string &payload)
+std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, const std::string &api_key, const std::string &payload,
+                                                       long timeoutMs)
 {
     if (url.empty() || api_key.empty())
     {
@@ -163,7 +165,8 @@ std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, c
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload.length());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_chat);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-        CurlRequestControl::configure(curl, running);
+        const long timeout = timeoutMs > 0 ? timeoutMs : CurlRequestControl::kDefaultTimeoutMs;
+        CurlRequestControl::configure(curl, running, timeout, timeout);
 
         // 可选 HTTP 代理：.config.json 配置 "proxy" 非空时生效
         if (!proxy.empty())

@@ -518,14 +518,15 @@ int main(int argc, char **argv)
 	// 杂务模型调用 seam：话题会话（压缩/情绪基调）与 judge 共用一份。模型按名字经注册表在
 	// 每次调用时解析（热重载即时生效）；显式配置了 endpoint 的旧形态仍直连；名字未注册时
 	// 保持空端点，由 buildOnceWith 回退默认对话模型
-	const auto makeWorkerSeam = [&chatService](EndpointProvider provider)
+	// timeoutMs：0 = 适配器默认 300 秒（话题会话保持不变）；judge 传自己的短超时
+	const auto makeWorkerSeam = [&chatService](EndpointProvider provider, long timeoutMs = 0)
 	{
-		return [&chatService, provider = std::move(provider)](const std::string &systemPrompt,
-															  const std::string &userPrompt)
-		{ return chatService.buildOnceWith(provider(), systemPrompt, userPrompt); };
+		return [&chatService, provider = std::move(provider), timeoutMs](
+				   const std::string &systemPrompt, const std::string &userPrompt)
+		{ return chatService.buildOnceWith(provider(), systemPrompt, userPrompt, timeoutMs); };
 	};
 	// R1 决策层：policy=judge（且决策记录已启用）时由 worker 模型产出行为计划，否则基线。
-	// R1.a 只构造，尚未接入两条群回应路径，实际行为不变
+	// 两条群回应路径（Message 的 @ 回复、话题会话轮）共用这一个策略；enforce=false 时只记录计划
 	std::unique_ptr<affect::DecisionPolicy> decisionPolicy;
 	if (decisionRecorder && settings.affect.policy == "judge")
 	{
@@ -547,7 +548,8 @@ int main(int argc, char **argv)
 		const std::string judgeLabel = judgeRegistered ? judgeModel
 			: !settings.models.worker.model.empty() ? settings.models.worker.model
 			: settings.chat.defaultModel;
-		decisionPolicy = std::make_unique<affect::JudgePolicy>(makeWorkerSeam(judgeEndpoint), judgeLabel);
+		decisionPolicy = std::make_unique<affect::JudgePolicy>(
+			makeWorkerSeam(judgeEndpoint, affect::JudgePolicy::kTimeoutMs), judgeLabel);
 	}
 	else
 	{
@@ -670,6 +672,8 @@ int main(int argc, char **argv)
 	// 则无主模型、跟进自动停摆（与主动发言同一底线）
 	EngagementService engagementService(settings.bot, groupContextStore.get(), &messageSender);
 	engagementService.setDecisionRecorder(decisionRecorder.get());
+	engagementService.setPolicy(decisionPolicy.get());
+	engagementService.setEnforce(settings.affect.enforce);
 	groupContextService.setEngagement(&engagementService);
 	if (settings.bot.managerId != 0)
 	{
@@ -703,7 +707,7 @@ int main(int argc, char **argv)
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, visionEndpoint,
 		globalVoice, &typingIndicator, &perceptionChannel, &groupContextService,
-		decisionRecorder.get(), &groupImageAssets);
+		decisionRecorder.get(), &groupImageAssets, decisionPolicy.get(), settings.affect.enforce);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,

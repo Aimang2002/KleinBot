@@ -176,10 +176,12 @@ std::string ChatService::buildOnce(const std::string &systemPrompt, const std::s
 
 std::string ChatService::buildOnceWith(const ModelEndpointOptions &worker,
                                        const std::string &systemPrompt,
-                                       const std::string &userPrompt)
+                                       const std::string &userPrompt,
+                                       long timeoutMs)
 {
     ChatRequest request;
     request.temperature = 0.3; // 判断/压缩类任务要稳定，不要创造性
+    request.timeout_ms = timeoutMs;
     request.system_prompt = systemPrompt;
     request.history.push_back({"user", userPrompt});
 

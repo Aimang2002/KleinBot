@@ -51,6 +51,7 @@
 
 namespace affect
 {
+class DecisionPolicy;
 class DecisionRecorder;
 }
 class ToolRegistry;
@@ -84,6 +85,7 @@ struct EngagementSession
     std::string digest;              // 已压缩部分的滚动摘要
     std::int64_t compressedUpToTs = 0; // 摘要覆盖到的时刻（之后为原文窗口）
     bool addressPending = false;     // 被点名/被回复，待回应（优先触发）
+    bool followUpPending = false;    // 追问窗口轮待执行（只为给决策卡标 follow_up_window）
     bool entryPending = false;       // 提名字激活后的入场轮待执行（@ 激活无入场轮）
     bool coldPending = false;        // 冷启动入场轮待执行（热度尖峰自决）
     bool coldInitiated = false;      // 本会话由冷启动开启（结束冷却更久）
@@ -150,6 +152,11 @@ public:
     {
         this->decisionRecorder = recorder;
     }
+    // R1 决策层：可空（= 基线）。非基线策略且记录器启用时，每轮在请求主模型前装配
+    // 情境卡并 decide，记录换成按策略构造的决策；enforce=false（影子）时之后的流程
+    // 与基线逐字相同。policy 由组合根持有、须比本服务活得久
+    void setPolicy(affect::DecisionPolicy *policy) { this->policy = policy; }
+    void setEnforce(bool enforce) { this->enforce = enforce; }
     // 会话轮可用的注册表工具（如 inspect_image / generate_image / send_image /
     // klein_web_search / klein_web_fetch；契约追加开放工具自带的 GroupTurn 使用规则）：
     // tools 由组合根持有、须比本服务活得久；allowedNames 当场过滤——未注册或
@@ -252,6 +259,8 @@ private:
     MemberProvider memberProvider;
     OutboundRecorder outboundRecorder;
     affect::DecisionRecorder *decisionRecorder = nullptr;
+    affect::DecisionPolicy *policy = nullptr;
+    bool enforce = false; // R1.c 前只保存，不改变任何动作
     const ToolRegistry *tools = nullptr;
     std::vector<std::string> turnToolNames; // setTools 过滤后的会话轮注册表工具名
 };
