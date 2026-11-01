@@ -879,12 +879,23 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     }
 
     // M1 决策记录（影子）：默认关闭；开启后只写决策/执行/反馈表，
-    // 不改变两条群回应路径的实际行为。其余 affect 配置键在 M2 接入。
+    // 不改变两条群回应路径的实际行为。
+    // R1 决策层：policy 只认 baseline / judge，非法值给诊断并回默认 baseline；
+    // enforce 默认 false（影子）；judge_model 空 = 用 models.worker
     const json *affect = decoder.object(document, "affect", "affect");
     if (affect != nullptr)
     {
-        decoder.unknownFields(*affect, {"enabled"}, "affect");
+        decoder.unknownFields(*affect, {"enabled", "policy", "enforce", "judge_model"}, "affect");
         config.affect.enabled = decoder.boolean(*affect, "enabled", "affect.enabled", false);
+        config.affect.policy = decoder.string(*affect, "policy", "affect.policy", "baseline");
+        if (config.affect.policy != "baseline" && config.affect.policy != "judge")
+        {
+            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Range,
+                               "affect.policy", "只能是 baseline 或 judge，已使用默认值 baseline");
+            config.affect.policy = "baseline";
+        }
+        config.affect.enforce = decoder.boolean(*affect, "enforce", "affect.enforce", false);
+        config.affect.judgeModel = decoder.string(*affect, "judge_model", "affect.judge_model");
     }
 
     // R1.1 群聊瞥视（ADR-020）：默认关闭；每群每分钟视觉调用预算 1–60，

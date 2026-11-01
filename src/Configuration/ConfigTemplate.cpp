@@ -74,7 +74,10 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
             "recall_limit": 8
         },
         "affect": {
-            "enabled": false
+            "enabled": false,
+            "policy": "baseline",
+            "enforce": false,
+            "judge_model": ""
         },
         "glance": {
             "enabled": false,

@@ -103,7 +103,8 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
         schema.memory.batchTurns,
         schema.memory.idleMinutes,
         schema.memory.recallLimit};
-    result.affect = {schema.affect.enabled};
+    result.affect = {schema.affect.enabled, schema.affect.policy, schema.affect.enforce,
+                     schema.affect.judgeModel};
     result.glance = {schema.glance.enabled, schema.glance.perGroupPerMinute};
     result.webSearch = {
         schema.webSearch.enabled,

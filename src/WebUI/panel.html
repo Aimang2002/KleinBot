@@ -1604,7 +1604,7 @@
     // registryModelNames 为注册表拉取的模型名缓存
     const MODEL_SELECT_PATHS = new Set([
       "chat.default_model", "memory.model",
-      "models.vision.model", "models.worker.model"
+      "models.vision.model", "models.worker.model", "affect.judge_model"
     ]);
     let registryModelNames = [];
     const TOKEN_STORAGE = "klein_webui_token";
@@ -1660,7 +1660,7 @@
       models: "对话模型的默认模型、轻量模型与采样参数，画图/视觉的专用端点（轻量模型未配置时回退默认模型）；模型本体在“模型供应商”页管理。",
       voice: "GPT-SoVITS 语音合成配置；字段不全时语音功能会自动关闭。",
       memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
-      affect: "决策记录（M1 影子）：默认关闭；开启后只记录群回应路径的决策/执行，不改变实际回应。",
+      affect: "决策层：开启后记录群回应路径的决策/执行；policy=judge 时由 worker 模型产出行为计划；enforce=false 只记录计划（影子），不改变实际回应（改动需重启）。",
       glance: "群聊瞥视：观察群里的每张图片由视觉模型（models.vision）瞥一眼，写成一行描述存入群缓冲，只丰富上下文、不触发回应（改动需重启）。",
       web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
       web_fetch: "网页抓取工具，无需第三方 Key，结果按 URL 缓存。",
@@ -1723,6 +1723,10 @@
       "memory.batch_turns": "每积累多少轮对话提取一次记忆。",
       "memory.idle_minutes": "用户空闲多少分钟后触发本批记忆提取。",
       "memory.recall_limit": "每次注入对话上下文的记忆条数上限。",
+      "affect.enabled": "决策记录总开关：开启后两条群回应路径的决策/执行/反馈写入数据库；需重启生效。",
+      "affect.policy": "决策策略，取值 baseline / judge：baseline 复现既有行为；judge 由 worker 模型为每轮产出行为计划。需重启生效。",
+      "affect.enforce": "计划是否生效：关闭（默认）时 judge 只记录计划（影子），实际回应不变；影子期达标前不要打开。需重启生效。",
+      "affect.judge_model": "judge 所用模型，从注册表下拉选择；留空使用 models.worker。需重启生效。",
       "glance.enabled": "群聊瞥视开关：需同时开启观察通道并配置视觉模型（models.vision），否则自动不启动；需重启生效。",
       "glance.per_group_per_minute": "每个群每分钟最多瞥视几张图（1~60，默认 6）；超出的图标记为“未看（刷屏）”，同一张图重复出现不重复计数。",
       "web_search.enabled": "联网搜索工具开关；开启需配置 Tavily API Key。",
@@ -1773,7 +1777,7 @@
       worker: ["model", "endpoint", "api_key", "api_standard"],
       voice: ["enabled", "host", "port", "reference_audio", "reference_text"],
       memory: ["enabled", "model", "batch_turns", "idle_minutes", "recall_limit"],
-      affect: ["enabled"],
+      affect: ["enabled", "policy", "enforce", "judge_model"],
       glance: ["enabled", "per_group_per_minute"],
       web_search: ["enabled", "provider", "endpoint", "api_key", "search_depth", "max_results",
         "max_content_chars", "max_response_bytes", "connect_timeout_ms", "request_timeout_ms"],

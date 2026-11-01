@@ -42,6 +42,9 @@ struct WebUiSettings
 struct AffectSettings
 {
     bool enabled = false;
+    std::string policy = "baseline"; // baseline / judge
+    bool enforce = false;            // false = judge 只记录计划（影子）
+    std::string judgeModel;          // 空 = 用 models.worker
 };
 
 struct RuntimeSettings

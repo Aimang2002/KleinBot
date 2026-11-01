@@ -21,6 +21,7 @@ using json = nlohmann::json;
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -270,6 +271,39 @@ TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsArrayAndClassifiesRestart
               nlohmann::json::array({"克莱茵", "klein"}));
 }
 
+// R1 affect 三键经面板 GET→POST 往返落盘、进快照，三键都分级为 Restart
+TEST_F(PanelServerFixture, PostAffectDecisionKeysRoundtripClassifiesRestart)
+{
+    httplib::Client client("127.0.0.1", port);
+    const auto fetched = client.Get("/api/config", authHeaders());
+    ASSERT_TRUE(fetched != nullptr);
+    ASSERT_EQ(fetched->status, 200);
+
+    nlohmann::json candidate = nlohmann::json::parse(fetched->body);
+    candidate["affect"]["enabled"] = true;
+    candidate["affect"]["policy"] = "judge";
+    candidate["affect"]["enforce"] = false;
+    candidate["affect"]["judge_model"] = "judge-model";
+    const auto posted = client.Post("/api/config", authHeaders(), candidate.dump(),
+                                    "application/json");
+    ASSERT_TRUE(posted != nullptr);
+    ASSERT_EQ(posted->status, 200);
+    const nlohmann::json body = nlohmann::json::parse(posted->body);
+    EXPECT_TRUE(body["reloadSuccess"].get<bool>());
+    std::set<std::string> paths;
+    for (const auto &change : body["diff"])
+        paths.insert(change["path"].get<std::string>());
+    EXPECT_TRUE(paths.count("affect.policy"));
+    EXPECT_TRUE(paths.count("affect.judge_model"));
+
+    const nlohmann::json written = nlohmann::json::parse(readFile());
+    EXPECT_EQ(written["affect"]["policy"], "judge");
+    EXPECT_EQ(written["affect"]["enforce"], false);
+    EXPECT_EQ(written["affect"]["judge_model"], "judge-model");
+    EXPECT_EQ(store->current()->schema->affect.policy, "judge");
+    EXPECT_EQ(store->current()->schema->affect.judgeModel, "judge-model");
+}
+
 TEST_F(PanelServerFixture, PostInvalidConfigReturns422AndKeepsFile)
 {
     const std::string before = readFile();
@@ -300,6 +334,9 @@ TEST_F(PanelServerFixture, RootServesPageFileWithoutAuth)
     // 配置节通用分区注册（关联点：骨架有节而面板未注册时分区不按序渲染）
     EXPECT_NE(result->body.find("glance: [\"enabled\", \"per_group_per_minute\"]"), std::string::npos);
     EXPECT_NE(result->body.find("glance: \"群聊瞥视\""), std::string::npos);
+    EXPECT_NE(result->body.find("affect: [\"enabled\", \"policy\", \"enforce\", \"judge_model\"]"),
+              std::string::npos);
+    EXPECT_NE(result->body.find("\"affect.judge_model\""), std::string::npos);
 }
 
 TEST_F(PanelServerFixture, RootReturns500WhenPageFileMissing)

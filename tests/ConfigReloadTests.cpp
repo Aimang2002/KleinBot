@@ -120,6 +120,68 @@ TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)
     candidate.affect.enabled = false;
     const ConfigDiff diff = compareConfig(*loaded.config, candidate);
     EXPECT_TRUE(containsChange(diff, "affect.enabled", ConfigChangeImpact::Restart));
+    // R1 三键缺省：基线、影子、跟随 worker
+    EXPECT_EQ(loaded.config->affect.policy, "baseline");
+    EXPECT_FALSE(loaded.config->affect.enforce);
+    EXPECT_TRUE(loaded.config->affect.judgeModel.empty());
+}
+
+// R1 决策层三键：解析、非法 policy 回默认 + 诊断、无未知字段告警、三键 Restart
+TEST(ConfigLoaderAffectTest, ParsesDecisionLayerKeysAndClassifiesRestart)
+{
+    const std::string base = R"({
+        "schema_version": 1,
+        "bot": {"id": 10001, "manager_id": 10002, "name": "Klein"},
+        "chat": {"default_model": "test-model"},
+        "models": {"registry_path": "ModelsName.json"},
+        "affect": AFFECT,
+        "communication": {
+            "protocol": {"type": "onebot"},
+            "active_transport": "local",
+            "transports": {
+                "local": {"type": "reverse_websocket", "bind": "127.0.0.1", "port": 8600}
+            }
+        }
+    })";
+    const auto withAffect = [&base](const std::string &affect)
+    {
+        std::string text = base;
+        text.replace(text.find("AFFECT"), 6, affect);
+        return text;
+    };
+
+    TemporaryConfigFile file;
+    file.write(withAffect(
+        R"({"enabled": true, "policy": "judge", "enforce": true, "judge_model": "judge-model"})"));
+    ConfigLoader loader;
+    const ConfigLoadResult loaded = loader.loadFile(file.path.string());
+    EXPECT_TRUE(loaded.canStart());
+    ASSERT_NE(loaded.config, nullptr);
+    EXPECT_EQ(loaded.config->affect.policy, "judge");
+    EXPECT_TRUE(loaded.config->affect.enforce);
+    EXPECT_EQ(loaded.config->affect.judgeModel, "judge-model");
+    for (const auto &diagnostic : loaded.diagnostics)
+        EXPECT_NE(diagnostic.path.rfind("affect", 0), 0u) << diagnostic.path << " " << diagnostic.message;
+
+    SchemaConfig candidate = *loaded.config;
+    candidate.affect.policy = "baseline";
+    candidate.affect.enforce = false;
+    candidate.affect.judgeModel = "other";
+    const ConfigDiff diff = compareConfig(*loaded.config, candidate);
+    EXPECT_TRUE(containsChange(diff, "affect.policy", ConfigChangeImpact::Restart));
+    EXPECT_TRUE(containsChange(diff, "affect.enforce", ConfigChangeImpact::Restart));
+    EXPECT_TRUE(containsChange(diff, "affect.judge_model", ConfigChangeImpact::Restart));
+
+    file.write(withAffect(R"({"enabled": true, "policy": "smart"})"));
+    const ConfigLoadResult invalid = loader.loadFile(file.path.string());
+    EXPECT_TRUE(invalid.canStart());
+    ASSERT_NE(invalid.config, nullptr);
+    EXPECT_EQ(invalid.config->affect.policy, "baseline");
+    bool warned = false;
+    for (const auto &diagnostic : invalid.diagnostics)
+        if (diagnostic.path == "affect.policy" && diagnostic.severity == ConfigSeverity::Warning)
+            warned = true;
+    EXPECT_TRUE(warned);
 }
 
 // R1.1 群聊瞥视配置节：缺省默认值、解析、越界回默认 + 诊断、Restart 级

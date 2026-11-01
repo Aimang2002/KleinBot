@@ -75,9 +75,15 @@ struct MemorySchema
 
 // M1 决策记录开关：默认 false（完全 v2.4.1 行为）；开启后只记录
 // 两条群回应路径的决策/执行/反馈，不改变实际回应。
+// R1 决策层：policy=baseline|judge（judge 由 worker 模型产出行为计划）；
+// enforce=false 时 judge 只记录计划（影子），不改变实际回应；
+// judge_model 空 = 用 models.worker。
 struct AffectSchema
 {
     bool enabled = false;
+    std::string policy = "baseline";
+    bool enforce = false;
+    std::string judgeModel;
 };
 
 // R1.1 群聊瞥视：每张群图异步瞥视成一行派生描述写回群缓冲（ADR-020）。

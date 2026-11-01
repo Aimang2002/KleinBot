@@ -138,6 +138,13 @@ ConfigDiff compareConfig(const SchemaConfig &current, const SchemaConfig &candid
     // M1 决策记录开关：存储与记录器在组合根构造，改动需重启
     addIfChanged(diff, current.affect.enabled, candidate.affect.enabled,
                  "affect.enabled", ConfigChangeImpact::Restart);
+    // R1 决策层：策略对象在组合根构造，三键都需重启
+    addIfChanged(diff, current.affect.policy, candidate.affect.policy,
+                 "affect.policy", ConfigChangeImpact::Restart);
+    addIfChanged(diff, current.affect.enforce, candidate.affect.enforce,
+                 "affect.enforce", ConfigChangeImpact::Restart);
+    addIfChanged(diff, current.affect.judgeModel, candidate.affect.judgeModel,
+                 "affect.judge_model", ConfigChangeImpact::Restart);
 
     // R1.1 群聊瞥视：worker 线程与预算在组合根启动时确定，改动需重启
     addIfChanged(diff, current.glance.enabled, candidate.glance.enabled,

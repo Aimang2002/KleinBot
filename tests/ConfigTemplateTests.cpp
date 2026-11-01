@@ -81,6 +81,8 @@ TEST(ConfigTemplateTest, CreateIfMissingGeneratesLoadableConfig)
     EXPECT_EQ(loaded.config->webUi.accessToken, token);
     // M1 决策记录默认关闭：未接线时保持 v2.4.1 行为
     EXPECT_FALSE(loaded.config->affect.enabled);
+    EXPECT_EQ(loaded.config->affect.policy, "baseline");
+    EXPECT_FALSE(loaded.config->affect.enforce);
     // R1.1 群聊瞥视默认关闭，预算默认 6
     EXPECT_FALSE(loaded.config->glance.enabled);
     EXPECT_EQ(loaded.config->glance.perGroupPerMinute, 6);
@@ -100,6 +102,9 @@ TEST(ConfigTemplateTest, CreateIfMissingGeneratesLoadableConfig)
                                 "webui", "push"})
         EXPECT_TRUE(document.contains(section)) << section;
     EXPECT_EQ(document["affect"]["enabled"], false);
+    EXPECT_EQ(document["affect"]["policy"], "baseline");
+    EXPECT_EQ(document["affect"]["enforce"], false);
+    EXPECT_EQ(document["affect"]["judge_model"], "");
     EXPECT_EQ(document["glance"]["enabled"], false);
     EXPECT_EQ(document["glance"]["per_group_per_minute"], 6);
     EXPECT_EQ(document["chat"]["temperature"], 1.0);

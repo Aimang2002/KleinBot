@@ -33,8 +33,10 @@
 #include "Push/PushDelivery.h"
 #include "Push/PushServer.h"
 #endif
+#include "Affect/BaselinePolicy.h"
 #include "Affect/DecisionRecorder.h"
 #include "Affect/DecisionStore.h"
+#include "Affect/JudgePolicy.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
 #include "Perception/PerceptionChannel.h"
@@ -513,6 +515,44 @@ int main(int argc, char **argv)
 	}
 	LOG_INFO("已注册模型工具：" + registeredTools);
 	ChatService chatService(dock, userSession, models, tools, memoryService, settings.chat, settings.bot.managerId);
+	// 杂务模型调用 seam：话题会话（压缩/情绪基调）与 judge 共用一份。模型按名字经注册表在
+	// 每次调用时解析（热重载即时生效）；显式配置了 endpoint 的旧形态仍直连；名字未注册时
+	// 保持空端点，由 buildOnceWith 回退默认对话模型
+	const auto makeWorkerSeam = [&chatService](EndpointProvider provider)
+	{
+		return [&chatService, provider = std::move(provider)](const std::string &systemPrompt,
+															  const std::string &userPrompt)
+		{ return chatService.buildOnceWith(provider(), systemPrompt, userPrompt); };
+	};
+	// R1 决策层：policy=judge（且决策记录已启用）时由 worker 模型产出行为计划，否则基线。
+	// R1.a 只构造，尚未接入两条群回应路径，实际行为不变
+	std::unique_ptr<affect::DecisionPolicy> decisionPolicy;
+	if (decisionRecorder && settings.affect.policy == "judge")
+	{
+		// judge 要便宜：judge_model 空或不在注册表时一律走 worker 端点（不回退主模型）。
+		// 每次调用时查注册表，热重载后补注册的名字即时生效
+		const std::string judgeModel = settings.affect.judgeModel;
+		const EndpointProvider judgeEndpoint = judgeModel.empty()
+			? workerEndpoint
+			: EndpointProvider([&models, judgeModel, workerEndpoint]()
+				{
+					return models.find(judgeModel)
+						? resolveEndpoint(ModelEndpointOptions{judgeModel}, models)
+						: workerEndpoint();
+				});
+		const bool judgeRegistered = !judgeModel.empty() && models.find(judgeModel).has_value();
+		if (!judgeModel.empty() && !judgeRegistered)
+			LOG_WARNING("affect.judge_model 未在模型注册表找到：" + judgeModel +
+						"，judge 将改用 worker 模型（models.worker）");
+		const std::string judgeLabel = judgeRegistered ? judgeModel
+			: !settings.models.worker.model.empty() ? settings.models.worker.model
+			: settings.chat.defaultModel;
+		decisionPolicy = std::make_unique<affect::JudgePolicy>(makeWorkerSeam(judgeEndpoint), judgeLabel);
+	}
+	else
+	{
+		decisionPolicy = std::make_unique<affect::BaselinePolicy>();
+	}
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;
 	QueuedMessageSender messageSender(outboundQueue);
@@ -639,15 +679,7 @@ int main(int argc, char **argv)
 				const std::vector<std::string> &toolSchemas)
 			{ return chatService.requestInCharacter(managerId, systemNote, history, toolSchemas); });
 	}
-	engagementService.setWorker(
-		[&chatService, workerEndpoint](const std::string &systemPrompt,
-									   const std::string &userPrompt)
-		{
-			// 杂务模型注册表解析（2026-09-19）：models.worker 只填 model 时，每次调用
-			// 按名字经注册表解析端点与密钥（workerEndpoint，热重载即时生效）；显式配置了
-			// endpoint 的旧形态仍直连。名字未注册时保持空端点，由 buildOnceWith 回退默认对话模型
-			return chatService.buildOnceWith(workerEndpoint(), systemPrompt, userPrompt);
-		});
+	engagementService.setWorker(makeWorkerSeam(workerEndpoint));
 	// 会话轮可用的注册表工具：群友发图时她能经 inspect_image 看图本身，
 	// 而不止占位符里的瞥视一句话（2026-10-30 真机缺陷）；点名让她画图/重发图时
 	// generate_image/send_image 的图当场发到群里（生图存群库）。看不懂的人名/梗/事件
