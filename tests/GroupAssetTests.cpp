@@ -393,23 +393,24 @@ TEST(BotIdentityTest, MentionsBotNameMatchesNameAndAliases)
 {
     BotIdentity bot;
     bot.name = "Klein";
-    bot.aliases = {"", "克莱茵", "Kc"};
+    bot.aliases = "克莱茵";
 
     EXPECT_TRUE(mentionsBotName(bot, "Klein 在吗"));
     EXPECT_TRUE(mentionsBotName(bot, "klein在吗")) << "ASCII 不区分大小写";
     EXPECT_TRUE(mentionsBotName(bot, "问问KLEIN"));
     EXPECT_TRUE(mentionsBotName(bot, "克莱茵，看一下这张图片")) << "别名命中";
-    EXPECT_TRUE(mentionsBotName(bot, "kc 你好")) << "别名同样不区分 ASCII 大小写";
     EXPECT_FALSE(mentionsBotName(bot, "凯琳")) << "非 ASCII 精确匹配";
     EXPECT_FALSE(mentionsBotName(bot, "克莱")) << "别名是被查找的子串，不是反过来";
-    EXPECT_FALSE(mentionsBotName(bot, "今天天气不错")) << "空别名不得匹配任何文本";
+    EXPECT_FALSE(mentionsBotName(bot, "今天天气不错"));
     EXPECT_FALSE(mentionsBotName(bot, ""));
 
     BotIdentity nameless;
     nameless.name.clear();
-    EXPECT_FALSE(mentionsBotName(nameless, "随便说点什么")) << "空名字不匹配";
-    nameless.aliases = {"克莱茵"};
+    EXPECT_FALSE(mentionsBotName(nameless, "随便说点什么")) << "空名字与空别名都不匹配";
+    nameless.aliases = "克莱茵";
     EXPECT_TRUE(mentionsBotName(nameless, "克莱茵在吗"));
+    nameless.aliases = "Kc";
+    EXPECT_TRUE(mentionsBotName(nameless, "kc 你好")) << "别名同样不区分 ASCII 大小写";
 }
 
 TEST(GroupContextMentionTest, ObserveDetectsAliasesAndLabelsEmptyMessages)
@@ -424,7 +425,7 @@ TEST(GroupContextMentionTest, ObserveDetectsAliasesAndLabelsEmptyMessages)
     BotIdentity bot;
     bot.id = 10086;
     bot.name = "Klein";
-    bot.aliases = {"克莱茵"};
+    bot.aliases = "克莱茵";
     GroupContextService service(&state, bot, &store, nullptr);
 
     InboundMessage base;

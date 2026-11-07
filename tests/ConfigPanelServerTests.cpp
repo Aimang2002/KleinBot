@@ -231,8 +231,8 @@ TEST_F(PanelServerFixture, PostSentinelRoundtripWritesFileAndReloadsStore)
     EXPECT_EQ(store->current()->schema->bot.name, "Alice");
 }
 
-// bot.aliases 数组经面板 GET→POST 往返原样落盘、进快照，分级为 Restart
-TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsArrayAndClassifiesRestart)
+// bot.aliases 字符串经面板 GET→POST 往返原样落盘、进快照，分级为 Restart
+TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsStringAndClassifiesRestart)
 {
     httplib::Client client("127.0.0.1", port);
     {
@@ -241,7 +241,7 @@ TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsArrayAndClassifiesRestart
         ASSERT_EQ(fetched->status, 200);
 
         nlohmann::json candidate = nlohmann::json::parse(fetched->body);
-        candidate["bot"]["aliases"] = nlohmann::json::array({"克莱茵", "klein"});
+        candidate["bot"]["aliases"] = "克莱茵";
         const auto posted = client.Post("/api/config", authHeaders(),
                                         candidate.dump(), "application/json");
         ASSERT_TRUE(posted != nullptr);
@@ -260,20 +260,18 @@ TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsArrayAndClassifiesRestart
     }
 
     const nlohmann::json written = nlohmann::json::parse(readFile());
-    EXPECT_EQ(written["bot"]["aliases"], nlohmann::json::array({"克莱茵", "klein"}));
-    const std::vector<std::string> expected{"克莱茵", "klein"};
-    EXPECT_EQ(store->current()->schema->bot.aliases, expected);
+    EXPECT_EQ(written["bot"]["aliases"], "克莱茵");
+    EXPECT_EQ(store->current()->schema->bot.aliases, "克莱茵");
 
-    // 再取一次：数组形态原样回给面板（不被掩码或压扁）
+    // 再取一次：字符串原样回给面板（不被掩码）
     const auto again = client.Get("/api/config", authHeaders());
     ASSERT_TRUE(again != nullptr);
     ASSERT_EQ(again->status, 200);
-    EXPECT_EQ(nlohmann::json::parse(again->body)["bot"]["aliases"],
-              nlohmann::json::array({"克莱茵", "klein"}));
+    EXPECT_EQ(nlohmann::json::parse(again->body)["bot"]["aliases"], "克莱茵");
 }
 
-// 写回严格（2026-11-08 缺陷）：bot.aliases 被写成 null 或字符串时加载器只告警并丢弃，
-// 面板写回必须 422 拒绝、诊断定位到 bot.aliases，磁盘与快照保持原数组
+// 写回严格（2026-11-08 缺陷）：bot.aliases 被写成 null 或旧数组形态时加载器只告警（丢弃/取第一项），
+// 面板写回必须 422 拒绝、诊断定位到 bot.aliases，磁盘与快照保持原字符串
 namespace
 {
 void expectAliasesCandidateRejected(httplib::Client &client, const httplib::Headers &headers,
@@ -285,7 +283,7 @@ void expectAliasesCandidateRejected(httplib::Client &client, const httplib::Head
     ASSERT_TRUE(fetched != nullptr);
     ASSERT_EQ(fetched->status, 200);
     nlohmann::json valid = nlohmann::json::parse(fetched->body);
-    valid["bot"]["aliases"] = nlohmann::json::array({"克莱茵"});
+    valid["bot"]["aliases"] = "克莱茵";
     const auto seeded = client.Post("/api/config", headers, valid.dump(), "application/json");
     ASSERT_TRUE(seeded != nullptr);
     ASSERT_EQ(seeded->status, 200);
@@ -306,24 +304,22 @@ void expectAliasesCandidateRejected(httplib::Client &client, const httplib::Head
     EXPECT_TRUE(foundAliases) << body.dump();
 
     EXPECT_EQ(readFile(), before);
-    EXPECT_EQ(nlohmann::json::parse(readFile())["bot"]["aliases"],
-              nlohmann::json::array({"克莱茵"}));
-    const std::vector<std::string> expected{"克莱茵"};
-    EXPECT_EQ(store.current()->schema->bot.aliases, expected);
+    EXPECT_EQ(nlohmann::json::parse(readFile())["bot"]["aliases"], "克莱茵");
+    EXPECT_EQ(store.current()->schema->bot.aliases, "克莱茵");
 }
 }
 
-TEST_F(PanelServerFixture, PostNullAliasesIsRejectedAndKeepsArray)
+TEST_F(PanelServerFixture, PostNullAliasesIsRejectedAndKeepsString)
 {
     httplib::Client client("127.0.0.1", port);
     expectAliasesCandidateRejected(client, authHeaders(), nlohmann::json(nullptr),
                                    [this]() { return readFile(); }, *store);
 }
 
-TEST_F(PanelServerFixture, PostStringAliasesIsRejectedAndKeepsArray)
+TEST_F(PanelServerFixture, PostArrayAliasesIsRejectedAndKeepsString)
 {
     httplib::Client client("127.0.0.1", port);
-    expectAliasesCandidateRejected(client, authHeaders(), nlohmann::json("克莱茵"),
+    expectAliasesCandidateRejected(client, authHeaders(), nlohmann::json::array({"klein"}),
                                    [this]() { return readFile(); }, *store);
 }
 

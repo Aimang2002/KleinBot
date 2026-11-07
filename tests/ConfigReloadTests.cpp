@@ -488,7 +488,8 @@ TEST(PushConfigDiffTest, ClassifiesAllPushKeysAsRestart)
         EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Restart)) << path;
 }
 
-// bot.aliases（2026-10-30）：她也会答应的名字；缺省空、空串告警丢弃、去重、Restart 级
+// bot.aliases：她也会答应的另一个名字（2026-10-30 引入；2026-11-08 用户定规改为单个字符串）。
+// 缺省空、字符串原样、旧数组取第一项并告警、null 告警视为空、Restart 级
 TEST(ConfigLoaderBotTest, AliasesDefaultToEmptyWhenMissing)
 {
     ConfigLoader loader;
@@ -498,13 +499,44 @@ TEST(ConfigLoaderBotTest, AliasesDefaultToEmptyWhenMissing)
     EXPECT_TRUE(loaded.config->bot.aliases.empty());
 }
 
-TEST(ConfigLoaderBotTest, ParsesAliasesDropsEmptyAndDuplicatesAndClassifiesRestart)
+namespace
+{
+std::string aliasesConfig(const std::string &aliasesJson)
+{
+    return R"({
+        "schema_version": 1,
+        "bot": {"id": 10001, "name": "Klein", "aliases": )" + aliasesJson + R"(},
+        "chat": {"default_model": "test-model"},
+        "models": {"registry_path": "ModelsName.json"},
+        "communication": {
+            "protocol": {"type": "onebot"},
+            "active_transport": "local",
+            "transports": {
+                "local": {"type": "reverse_websocket", "bind": "127.0.0.1", "port": 8600}
+            }
+        }
+    })";
+}
+
+std::vector<ConfigDiagnostic> aliasDiagnostics(const ConfigLoadResult &loaded)
+{
+    std::vector<ConfigDiagnostic> result;
+    for (const ConfigDiagnostic &diagnostic : loaded.diagnostics)
+    {
+        if (diagnostic.path == "bot.aliases")
+            result.push_back(diagnostic);
+    }
+    return result;
+}
+}
+
+TEST(ConfigLoaderBotTest, ParsesStringAliasesAndClassifiesRestart)
 {
     ConfigLoader loader;
     const ConfigLoadResult loaded = loader.loadText(R"({
         "schema_version": 1,
         "bot": {"id": 10001, "manager_id": 10002, "name": "Klein",
-                "aliases": ["克莱茵", "", "klein", "克莱茵", 42]},
+                "aliases": "克莱茵"},
         "chat": {"default_model": "test-model"},
         "models": {"registry_path": "ModelsName.json"},
         "communication": {
@@ -521,51 +553,55 @@ TEST(ConfigLoaderBotTest, ParsesAliasesDropsEmptyAndDuplicatesAndClassifiesResta
     })");
     ASSERT_TRUE(loaded.canStart());
     ASSERT_NE(loaded.config, nullptr);
-    const std::vector<std::string> expected{"克莱茵", "klein"};
-    EXPECT_EQ(loaded.config->bot.aliases, expected);
-
-    std::size_t aliasWarnings = 0;
-    for (const ConfigDiagnostic &diagnostic : loaded.diagnostics)
-    {
-        if (diagnostic.path == "bot.aliases")
-        {
-            EXPECT_EQ(diagnostic.severity, ConfigSeverity::Warning) << diagnostic.message;
-            ++aliasWarnings;
-        }
-    }
-    EXPECT_EQ(aliasWarnings, 2U) << "空串与非字符串元素各一条告警，重复项静默去重";
+    EXPECT_EQ(loaded.config->bot.aliases, "克莱茵");
+    EXPECT_TRUE(aliasDiagnostics(loaded).empty());
 
     SchemaConfig candidate = *loaded.config;
-    candidate.bot.aliases = {"克莱茵"};
+    candidate.bot.aliases = "Kc";
     const ConfigDiff diff = compareConfig(*loaded.config, candidate);
     EXPECT_EQ(diff.size(), 1U);
     EXPECT_TRUE(containsChange(diff, "bot.aliases", ConfigChangeImpact::Restart));
 }
 
-TEST(ConfigLoaderBotTest, NonArrayAliasesFallBackToEmptyWithDiagnostic)
+TEST(ConfigLoaderBotTest, EmptyStringAliasesMeansNoneWithoutDiagnostic)
 {
-    ConfigLoader loader;
-    const ConfigLoadResult loaded = loader.loadText(R"({
-        "schema_version": 1,
-        "bot": {"id": 10001, "name": "Klein", "aliases": "克莱茵"},
-        "chat": {"default_model": "test-model"},
-        "models": {"registry_path": "ModelsName.json"},
-        "communication": {
-            "protocol": {"type": "onebot"},
-            "active_transport": "local",
-            "transports": {
-                "local": {"type": "reverse_websocket", "bind": "127.0.0.1", "port": 8600}
-            }
-        }
-    })");
+    const ConfigLoadResult loaded = ConfigLoader().loadText(aliasesConfig(R"("")"));
     ASSERT_TRUE(loaded.canStart());
     ASSERT_NE(loaded.config, nullptr);
     EXPECT_TRUE(loaded.config->bot.aliases.empty());
-    bool found = false;
-    for (const ConfigDiagnostic &diagnostic : loaded.diagnostics)
+    EXPECT_TRUE(aliasDiagnostics(loaded).empty());
+}
+
+// 旧的数组形态（2026-10-30 至 2026-11-08）：读取宽容，取第一个非空字符串元素，并发一条 Type 警告
+TEST(ConfigLoaderBotTest, LegacyArrayAliasesTakesFirstItemWithTypeWarning)
+{
+    const ConfigLoadResult loaded =
+        ConfigLoader().loadText(aliasesConfig(R"(["", 42, "克莱茵", "klein"])"));
+    ASSERT_TRUE(loaded.canStart());
+    ASSERT_NE(loaded.config, nullptr);
+    EXPECT_EQ(loaded.config->bot.aliases, "克莱茵");
+    const std::vector<ConfigDiagnostic> diagnostics = aliasDiagnostics(loaded);
+    ASSERT_EQ(diagnostics.size(), 1U);
+    EXPECT_EQ(diagnostics[0].severity, ConfigSeverity::Warning);
+    EXPECT_EQ(diagnostics[0].category, ConfigErrorCategory::Type);
+
+    const ConfigLoadResult empty = ConfigLoader().loadText(aliasesConfig("[]"));
+    ASSERT_TRUE(empty.canStart());
+    EXPECT_TRUE(empty.config->bot.aliases.empty());
+    EXPECT_EQ(aliasDiagnostics(empty).size(), 1U);
+}
+
+TEST(ConfigLoaderBotTest, NullOrNonStringAliasesFallBackToEmptyWithTypeWarning)
+{
+    for (const char *value : {"null", "42", "{}"})
     {
-        if (diagnostic.path == "bot.aliases" && diagnostic.severity == ConfigSeverity::Warning)
-            found = true;
+        const ConfigLoadResult loaded = ConfigLoader().loadText(aliasesConfig(value));
+        ASSERT_TRUE(loaded.canStart()) << value;
+        ASSERT_NE(loaded.config, nullptr);
+        EXPECT_TRUE(loaded.config->bot.aliases.empty()) << value;
+        const std::vector<ConfigDiagnostic> diagnostics = aliasDiagnostics(loaded);
+        ASSERT_EQ(diagnostics.size(), 1U) << value;
+        EXPECT_EQ(diagnostics[0].severity, ConfigSeverity::Warning) << value;
+        EXPECT_EQ(diagnostics[0].category, ConfigErrorCategory::Type) << value;
     }
-    EXPECT_TRUE(found);
 }

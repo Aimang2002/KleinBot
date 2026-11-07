@@ -256,40 +256,29 @@ std::vector<std::int64_t> decodeIdArray(Decoder &decoder, const json &parent,
     return result;
 }
 
-// 字符串数组（bot.aliases 等）：元素级宽容——非字符串/空串告警跳过，重复项去重
-std::vector<std::string> decodeStringArray(Decoder &decoder, const json &parent,
-                                           const std::string &key, const std::string &path)
+// bot.aliases：单个名字字符串（用户定规 2026-11-08），空串表示没有。读取宽容：
+// 旧的数组形态取第一个非空字符串元素并告警（Type，写回时因此被拒，面板保存会改成字符串）；
+// null 与其他类型按 Decoder::string 的规则告警并视为空
+std::string decodeAliasName(Decoder &decoder, const json &parent,
+                            const std::string &key, const std::string &path)
 {
-    std::vector<std::string> result;
     auto iterator = parent.find(key);
-    if (iterator == parent.end())
-        return result;
-    if (!iterator->is_array())
+    if (iterator != parent.end() && iterator->is_array())
     {
-        decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
-                           path, "必须是字符串数组");
-        return result;
-    }
-    for (const auto &entry : *iterator)
-    {
-        if (!entry.is_string())
+        std::string first;
+        for (const auto &entry : *iterator)
         {
-            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type,
-                               path, "元素必须是字符串，已跳过");
-            continue;
+            if (entry.is_string() && !entry.get<std::string>().empty())
+            {
+                first = entry.get<std::string>();
+                break;
+            }
         }
-        std::string value = entry.get<std::string>();
-        if (value.empty())
-        {
-            decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Range,
-                               path, "元素不能为空字符串，已跳过");
-            continue;
-        }
-        if (std::find(result.begin(), result.end(), value) != result.end())
-            continue;
-        result.push_back(std::move(value));
+        decoder.diagnostic(ConfigSeverity::Warning, ConfigErrorCategory::Type, path,
+                           "已改为单个名称（字符串），旧的数组形态取第一项");
+        return first;
     }
-    return result;
+    return decoder.string(parent, key, path);
 }
 
 ModelEndpointSchema decodeModelEndpoint(Decoder &decoder, const json &parent,
@@ -654,7 +643,7 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
         config.bot.id = decoder.unsignedInteger(*bot, "id", "bot.id", true);
         config.bot.managerId = decoder.unsignedInteger(*bot, "manager_id", "bot.manager_id", false);
         config.bot.name = decoder.string(*bot, "name", "bot.name", "Klein");
-        config.bot.aliases = decodeStringArray(decoder, *bot, "aliases", "bot.aliases");
+        config.bot.aliases = decodeAliasName(decoder, *bot, "aliases", "bot.aliases");
         config.bot.groupChatEnabled = decoder.boolean(*bot, "group_chat_enabled", "bot.group_chat_enabled", true);
     }
 

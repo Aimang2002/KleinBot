@@ -1691,7 +1691,7 @@
       "bot.id": "机器人的 QQ 号，用于识别 @ 消息与发送消息（改动需重启）。",
       "bot.manager_id": "管理员 QQ，可执行 #刷新配置文件 等管理命令；0 表示不设置。",
       "bot.name": "机器人昵称，用于人格提示词（改动需重启）。",
-      "bot.aliases": "她在群里也会答应的名字，如 克莱茵；JSON 字符串数组，例 [\"克莱茵\"]，英文不区分大小写，空串会被丢弃（改动需重启）。",
+      "bot.aliases": "她在群里也会答应的另一个名字，如 克莱茵；留空表示没有（英文不区分大小写，改动需重启）。",
       "bot.group_chat_enabled": "是否响应群聊消息，关闭后仅私聊可用（保存即生效）。",
       "chat.default_model": "默认对话模型：从模型注册表下拉选择（模型在「模型供应商」页维护）；需重启生效。",
       "chat.temperature": "采样温度 0~2：越高回答越随机，常用 0.7~1.0。",
@@ -1783,7 +1783,7 @@
 
     // 配置里类型为数组的键；值为 null/缺失时仍按数组渲染，否则面板无法写回数组——
     // 新增数组型配置键时必须登记（关联点）
-    const ARRAY_PATHS = new Set(["bot.aliases", "push.allowed_groups", "push.allowed_users"]);
+    const ARRAY_PATHS = new Set(["push.allowed_groups", "push.allowed_users"]);
 
     // 已废弃字段：不渲染、保存时随收集自然消失（旧配置残留值不再显示为可编辑项）；
     // worker 不再单独成卡（2026-09-19）：模型下拉挪进"对话模型"，端点与密钥由注册表提供
@@ -2350,10 +2350,10 @@
         input = createComboSelect(options, currentValue);
         input.dataset.kind = "null";
         input.dataset.original = value === null ? "null" : currentValue;
-      } else if (Array.isArray(value) || ARRAY_PATHS.has(path)) {
-        // 登记的数组键被写坏成 null/字符串时也按数组渲染：字符串视为单个元素预填，用户保存即修复
-        const arrayValue = Array.isArray(value) ? value
-          : (typeof value === "string" && value !== "" ? [value] : []);
+      } else if (Array.isArray(value) ||
+        (ARRAY_PATHS.has(path) && (value === null || value === undefined))) {
+        // 已被写坏成 null 的数组键也按数组渲染，用户可在此直接修复
+        const arrayValue = Array.isArray(value) ? value : [];
         input = document.createElement("textarea");
         input.value = JSON.stringify(arrayValue, null, 2);
         input.dataset.kind = "json";

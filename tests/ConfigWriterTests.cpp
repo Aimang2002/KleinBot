@@ -128,7 +128,7 @@ TEST(ConfigWriterTest, WriteRejectsTypeDiagnosticsAndKeepsFile)
 
     ConfigWriter writer;
     const std::vector<nlohmann::json> badValues{
-        nlohmann::json(nullptr), nlohmann::json("克莱茵"), nlohmann::json::array({"克莱茵", 1})};
+        nlohmann::json(nullptr), nlohmann::json(42), nlohmann::json::array({"克莱茵"})};
     for (const nlohmann::json &badAliases : badValues)
     {
         nlohmann::json candidate = nlohmann::json::parse(secretConfig);
@@ -150,12 +150,11 @@ TEST(ConfigWriterTest, WriteRejectsTypeDiagnosticsAndKeepsFile)
         EXPECT_EQ(file.read(), secretConfig);
     }
 
-    // 合法数组照常写回
+    // 合法字符串照常写回
     nlohmann::json candidate = nlohmann::json::parse(secretConfig);
-    candidate["bot"]["aliases"] = nlohmann::json::array({"克莱茵"});
+    candidate["bot"]["aliases"] = "克莱茵";
     ASSERT_TRUE(writer.write(file.path.string(), candidate).success);
-    EXPECT_EQ(nlohmann::json::parse(file.read())["bot"]["aliases"],
-              nlohmann::json::array({"克莱茵"}));
+    EXPECT_EQ(nlohmann::json::parse(file.read())["bot"]["aliases"], "克莱茵");
 }
 
 TEST(ConfigWriterTest, WrittenFileLoadsBackWithTightPermissions)

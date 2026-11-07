@@ -112,8 +112,8 @@ TEST(ConfigTemplateTest, CreateIfMissingGeneratesLoadableConfig)
     EXPECT_EQ(document["models"]["drawing"]["api_key"], "");
     EXPECT_EQ(document["web_search"]["max_results"], 5);
     EXPECT_EQ(document["bot"]["manager_id"], 0);
-    // bot.aliases 骨架为空数组（面板首跑即可见该键）
-    EXPECT_EQ(document["bot"]["aliases"], nlohmann::json::array());
+    // bot.aliases 骨架为空串（单个名字，留空表示没有；面板首跑即可见该键）
+    EXPECT_EQ(document["bot"]["aliases"], "");
     EXPECT_TRUE(loaded.config->bot.aliases.empty());
     // 推送门骨架默认关闭（无外部脚本依赖时不应意外启用 HTTP 端点）
     EXPECT_EQ(document["push"]["enabled"], false);

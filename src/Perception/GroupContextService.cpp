@@ -83,7 +83,7 @@ void GroupContextService::observe(const InboundMessage &message)
         record.text = atMentioned ? ("[@" + bot.name + "]") : std::string("[非文本消息]");
     record.timestamp = message.message_timestamp > 0 ? message.message_timestamp
                                                      : std::time(nullptr);
-    // 点名 = @ 她，或正文含 bot.name / 任一 bot.aliases（ASCII 不区分大小写）
+    // 点名 = @ 她，或正文含 bot.name / bot.aliases（ASCII 不区分大小写）
     record.mentionsBot = atMentioned || mentionsBotName(bot, message.plain_text);
     record.messageId = !message.message_id_raw.empty()
                            ? message.message_id_raw

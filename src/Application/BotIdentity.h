@@ -3,15 +3,14 @@
 
 #include <cstdint>
 #include <string>
-#include <vector>
 
 struct BotIdentity
 {
     std::uint64_t id = 0;
     std::uint64_t managerId = 0;
     std::string name = "Klein";
-    // 她也会答应的别名（bot.aliases，如 "克莱茵"）
-    std::vector<std::string> aliases;
+    // 她也会答应的另一个名字（bot.aliases，如 "克莱茵"）；空串表示没有
+    std::string aliases;
 };
 
 namespace bot_identity_detail
@@ -28,7 +27,7 @@ inline std::string asciiLower(std::string text)
 }
 }
 
-// 正文里是否点到她的名字：bot.name 或任一别名的子串匹配（ASCII 不区分大小写，
+// 正文里是否点到她的名字：bot.name 或别名的子串匹配（ASCII 不区分大小写，
 // 非 ASCII 精确匹配），空名字忽略
 inline bool mentionsBotName(const BotIdentity &bot, const std::string &text)
 {
@@ -40,14 +39,7 @@ inline bool mentionsBotName(const BotIdentity &bot, const std::string &text)
         return !name.empty() &&
                haystack.find(bot_identity_detail::asciiLower(name)) != std::string::npos;
     };
-    if (contains(bot.name))
-        return true;
-    for (const std::string &alias : bot.aliases)
-    {
-        if (contains(alias))
-            return true;
-    }
-    return false;
+    return contains(bot.name) || contains(bot.aliases);
 }
 
 #endif
