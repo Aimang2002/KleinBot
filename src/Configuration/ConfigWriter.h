@@ -33,7 +33,8 @@ public:
     };
 
     // 把候选配置写回 path：仍为哨兵的位置从当前文件恢复原值（保留 from_env 形态与未知键），
-    // 经 ConfigLoader 全量校验通过后才原子落盘
+    // 经 ConfigLoader 全量校验通过后才原子落盘；写回比读取严格——存在 Error/Fatal
+    // 或任何 Type 类诊断（加载器会丢弃/替换的值）时拒绝写盘
     Result write(const std::string &path, const nlohmann::json &candidate);
 
 private:

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -117,6 +118,44 @@ TEST(ConfigWriterTest, WriteRejectsInvalidCandidateAndKeepsFile)
     EXPECT_FALSE(result.success);
     ASSERT_FALSE(result.diagnostics.empty());
     EXPECT_EQ(file.read(), secretConfig);
+}
+
+// 写回严格：Type 诊断在加载时只是 Warning（值被丢弃/替换），写回时一律拒绝且不动文件
+TEST(ConfigWriterTest, WriteRejectsTypeDiagnosticsAndKeepsFile)
+{
+    TemporaryConfigFile file;
+    file.write(secretConfig);
+
+    ConfigWriter writer;
+    const std::vector<nlohmann::json> badValues{
+        nlohmann::json(nullptr), nlohmann::json("克莱茵"), nlohmann::json::array({"克莱茵", 1})};
+    for (const nlohmann::json &badAliases : badValues)
+    {
+        nlohmann::json candidate = nlohmann::json::parse(secretConfig);
+        candidate["bot"]["aliases"] = badAliases;
+
+        // 前提：加载器对它只发 Warning，按旧规则（只看 canStart）会照样落盘
+        const ConfigLoadResult loaded = ConfigLoader().loadDocument(candidate);
+        ASSERT_TRUE(loaded.canStart());
+
+        const ConfigWriter::Result result = writer.write(file.path.string(), candidate);
+        EXPECT_FALSE(result.success) << badAliases.dump();
+        bool foundType = false;
+        for (const ConfigDiagnostic &diagnostic : result.diagnostics)
+        {
+            if (diagnostic.category == ConfigErrorCategory::Type && diagnostic.path == "bot.aliases")
+                foundType = true;
+        }
+        EXPECT_TRUE(foundType) << badAliases.dump();
+        EXPECT_EQ(file.read(), secretConfig);
+    }
+
+    // 合法数组照常写回
+    nlohmann::json candidate = nlohmann::json::parse(secretConfig);
+    candidate["bot"]["aliases"] = nlohmann::json::array({"克莱茵"});
+    ASSERT_TRUE(writer.write(file.path.string(), candidate).success);
+    EXPECT_EQ(nlohmann::json::parse(file.read())["bot"]["aliases"],
+              nlohmann::json::array({"克莱茵"}));
 }
 
 TEST(ConfigWriterTest, WrittenFileLoadsBackWithTightPermissions)

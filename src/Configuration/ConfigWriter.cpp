@@ -1,6 +1,7 @@
 #include "ConfigWriter.h"
 #include "ConfigLoader.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -250,6 +251,20 @@ ConfigWriter::Result ConfigWriter::write(const std::string &path, const json &ca
 
     const ConfigLoadResult validation = ConfigLoader().loadDocument(merged);
     if (!validation.canStart())
+    {
+        result.diagnostics = validation.diagnostics;
+        return result;
+    }
+
+    // 写回严格：加载器会丢弃/替换的值（任何 Type 诊断，无论 severity）不得落盘，
+    // 否则面板显示「保存成功」而运行时悄悄回退默认值（2026-11-08 bot.aliases 被写成 null）。
+    // 读取仍宽容：启动与 #刷新配置文件 读手改文件时 Type 诊断照旧只记录为 Warning
+    const bool hasTypeDiagnostic = std::any_of(
+        validation.diagnostics.begin(), validation.diagnostics.end(),
+        [](const ConfigDiagnostic &diagnostic) {
+            return diagnostic.category == ConfigErrorCategory::Type;
+        });
+    if (hasTypeDiagnostic)
     {
         result.diagnostics = validation.diagnostics;
         return result;

@@ -18,6 +18,7 @@ using json = nlohmann::json;
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -269,6 +270,61 @@ TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsArrayAndClassifiesRestart
     ASSERT_EQ(again->status, 200);
     EXPECT_EQ(nlohmann::json::parse(again->body)["bot"]["aliases"],
               nlohmann::json::array({"克莱茵", "klein"}));
+}
+
+// 写回严格（2026-11-08 缺陷）：bot.aliases 被写成 null 或字符串时加载器只告警并丢弃，
+// 面板写回必须 422 拒绝、诊断定位到 bot.aliases，磁盘与快照保持原数组
+namespace
+{
+void expectAliasesCandidateRejected(httplib::Client &client, const httplib::Headers &headers,
+                                    const nlohmann::json &badAliases,
+                                    const std::function<std::string()> &readFile,
+                                    ConfigSnapshotStore &store)
+{
+    const auto fetched = client.Get("/api/config", headers);
+    ASSERT_TRUE(fetched != nullptr);
+    ASSERT_EQ(fetched->status, 200);
+    nlohmann::json valid = nlohmann::json::parse(fetched->body);
+    valid["bot"]["aliases"] = nlohmann::json::array({"克莱茵"});
+    const auto seeded = client.Post("/api/config", headers, valid.dump(), "application/json");
+    ASSERT_TRUE(seeded != nullptr);
+    ASSERT_EQ(seeded->status, 200);
+    const std::string before = readFile();
+
+    nlohmann::json candidate = valid;
+    candidate["bot"]["aliases"] = badAliases;
+    const auto posted = client.Post("/api/config", headers, candidate.dump(), "application/json");
+    ASSERT_TRUE(posted != nullptr);
+    EXPECT_EQ(posted->status, 422);
+    const nlohmann::json body = nlohmann::json::parse(posted->body);
+    bool foundAliases = false;
+    for (const auto &diagnostic : body["diagnostics"])
+    {
+        if (diagnostic["path"] == "bot.aliases")
+            foundAliases = true;
+    }
+    EXPECT_TRUE(foundAliases) << body.dump();
+
+    EXPECT_EQ(readFile(), before);
+    EXPECT_EQ(nlohmann::json::parse(readFile())["bot"]["aliases"],
+              nlohmann::json::array({"克莱茵"}));
+    const std::vector<std::string> expected{"克莱茵"};
+    EXPECT_EQ(store.current()->schema->bot.aliases, expected);
+}
+}
+
+TEST_F(PanelServerFixture, PostNullAliasesIsRejectedAndKeepsArray)
+{
+    httplib::Client client("127.0.0.1", port);
+    expectAliasesCandidateRejected(client, authHeaders(), nlohmann::json(nullptr),
+                                   [this]() { return readFile(); }, *store);
+}
+
+TEST_F(PanelServerFixture, PostStringAliasesIsRejectedAndKeepsArray)
+{
+    httplib::Client client("127.0.0.1", port);
+    expectAliasesCandidateRejected(client, authHeaders(), nlohmann::json("克莱茵"),
+                                   [this]() { return readFile(); }, *store);
 }
 
 // R1 affect 三键经面板 GET→POST 往返落盘、进快照，三键都分级为 Restart

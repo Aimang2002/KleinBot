@@ -1787,6 +1787,10 @@
       webui: ["enabled", "bind", "port", "access_token"]
     };
 
+    // 配置里类型为数组的键；值为 null/缺失时仍按数组渲染，否则面板无法写回数组——
+    // 新增数组型配置键时必须登记（关联点）
+    const ARRAY_PATHS = new Set(["bot.aliases", "push.allowed_groups", "push.allowed_users"]);
+
     // 已废弃字段：不渲染、保存时随收集自然消失（旧配置残留值不再显示为可编辑项）；
     // worker 不再单独成卡（2026-09-19）：模型下拉挪进"对话模型"，端点与密钥由注册表提供
     const HIDDEN_KEYS = {
@@ -2352,10 +2356,14 @@
         input = createComboSelect(options, currentValue);
         input.dataset.kind = "null";
         input.dataset.original = value === null ? "null" : currentValue;
-      } else if (Array.isArray(value)) {
+      } else if (Array.isArray(value) || ARRAY_PATHS.has(path)) {
+        // 登记的数组键被写坏成 null/字符串时也按数组渲染：字符串视为单个元素预填，用户保存即修复
+        const arrayValue = Array.isArray(value) ? value
+          : (typeof value === "string" && value !== "" ? [value] : []);
         input = document.createElement("textarea");
-        input.value = JSON.stringify(value, null, 2);
+        input.value = JSON.stringify(arrayValue, null, 2);
         input.dataset.kind = "json";
+        input.dataset.original = JSON.stringify(arrayValue);
       } else if (typeof value === "boolean") {
         input = document.createElement("input");
         input.type = "checkbox";
@@ -2400,8 +2408,13 @@
         return Number.isNaN(number) ? Number(input.dataset.original) : number;
       }
       if (kind === "json") {
+        // 解析失败只标红并回传渲染时的原值，绝不产出 null；saveConfig 见 .invalid 即拦截
         try { return JSON.parse(input.value || "[]"); }
-        catch { input.classList.add("invalid"); input.title = "JSON 解析失败"; return null; }
+        catch {
+          input.classList.add("invalid");
+          input.title = "JSON 解析失败";
+          return JSON.parse(input.dataset.original || "[]");
+        }
       }
       const original = input.dataset.original;
       return input.value === "" && original === "null" ? null : input.value;
@@ -3039,6 +3052,15 @@
     async function saveConfig() {
       clearMarks();
       const candidate = collectConfig();
+      // 收集时标红的字段（JSON 解析失败等）一律拦在前端，不发请求
+      const invalidInputs = document.querySelectorAll(".invalid");
+      if (invalidInputs.length > 0) {
+        const lines = Array.from(invalidInputs).map((input) =>
+          (input.dataset.path || "?") + " - " + (input.title || "格式无效"));
+        showBanner("保存被拒绝（" + invalidInputs.length + " 个字段格式无效）：\n" +
+          lines.join("\n"), true);
+        return;
+      }
       try {
         const response = await request("/api/config", { method: "POST", body: JSON.stringify(candidate) });
         const body = await response.json();
