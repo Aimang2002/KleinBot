@@ -4,6 +4,7 @@
 #include "../Persistence/ConversationStore.h"
 #include "../Memory/MemoryService.h"
 #include "../Asset/ImageAssetStore.h"
+#include "../utils/TextTokenize.h"
 #include "../utils/Utils.hpp"
 
 #include <algorithm>
@@ -133,6 +134,7 @@ void UserSessionService::resetChat(const uint64_t user_id)
         this->store.setContextStartId(user_id, history.back().id + 1);
     history.clear();
     user->second.history_anchor = 0;
+    user->second.context_digest.clear();
     // 长期记忆不受重置影响——它以对话轮次为源，与 system_prompt 正交
 }
 
@@ -144,6 +146,7 @@ void UserSessionService::resetContext(const uint64_t user_id)
     // 彻底重置会删除之前的所有信息，但不包括人格信息
     user->second.user_chatHistory.clear();
     user->second.history_anchor = 0;
+    user->second.context_digest.clear();
     this->store.clearUser(user_id); // 同步清库
     this->store.setContextStartId(user_id, 0);
     if (this->memoryService != nullptr)
@@ -189,6 +192,7 @@ void UserSessionService::resetPersonality(const uint64_t user_id)
         this->store.setContextStartId(user_id, history.back().id + 1);
     history.clear();
     user->second.history_anchor = 0;
+    user->second.context_digest.clear();
 }
 
 void UserSessionService::switchModel(const uint64_t user_id, const std::string &newModel)
@@ -272,7 +276,22 @@ Person UserSessionService::getUserConfig(const uint64_t user_id)
     return this->user_messages->find(user_id)->second;
 }
 
-std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_t &user_id)
+void UserSessionService::setContextDigest(uint64_t user_id, const std::string &digest)
+{
+    std::lock_guard<std::mutex> locker(this->mutex_message);
+    this->ensureUserExistsUnlock(user_id);
+    this->user_messages->find(user_id)->second.context_digest = digest;
+}
+
+std::string UserSessionService::getContextDigest(uint64_t user_id)
+{
+    std::lock_guard<std::mutex> locker(this->mutex_message);
+    this->ensureUserExistsUnlock(user_id);
+    return this->user_messages->find(user_id)->second.context_digest;
+}
+
+std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_t &user_id,
+                                                                   bool trimWindow)
 {
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
@@ -299,22 +318,22 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     result.request.frequency_penalty = this->chatOptions.frequencyPenalty;
     result.request.presence_penalty = this->chatOptions.presencePenalty;
 
-    // ===== 临时裁切算法（占位，待 Phase 3 后期替换） =====
-    // 策略：
+    // ===== 上下文窗口裁切（token 水位 + 滚动摘要，2026-11-08） =====
     //   1. 丢弃超过存活时间的旧消息（仅在缓存已冷的场景生效，
     //      供应商缓存 TTL 只有几分钟，隔天返回时缓存本来就失效）
-    //   2. 高低水位裁切：history_anchor 记录当前窗口在存活消息列表中的
-    //      起始下标，窗口长度未超过高水位时锚点不动，历史头部逐字节
-    //      稳定，供应商前缀缓存才能跨请求命中；只有窗口实际越过高水位
-    //      时才把锚点一次性前移到低水位边界，在截断那一轮付一次全量
-    //      缓存 miss，随后前缀重新稳定。锚点必须持久在 Person 里：
-    //      若按"存活总数是否超限"逐次判断，完整历史只增不减，首次
-    //      截断后每一轮都会重新触发截断，退化为逐轮滑动的滑窗
+    //   2. 高低水位裁切（按 utils::estimateTokens 估算）：history_anchor 记录当前
+    //      窗口在存活消息列表中的起始下标。窗口（含滚动摘要）累计未超过高水位
+    //      kContextHighTokens 时锚点不动，历史头部逐字节稳定，供应商前缀缓存才能
+    //      跨请求命中；越过高水位时把锚点一次性前移到"从该点到末尾（含摘要）
+    //      ≤ 低水位 kContextLowTokens"的最小下标，落在 assistant 上则后挪到下一条
+    //      user（窗口以用户发言开头），在截断那一轮付一次全量缓存 miss，随后前缀
+    //      重新稳定。锚点必须持久在 Person 里：若按"存活总量是否超限"逐次判断，
+    //      完整历史只增不减，首次截断后每一轮都会重新触发，退化为逐轮滑动的滑窗
+    //   3. 被移出窗口的那段原文格式化进 bundle.evicted_lines，由 ChatService 在锁外
+    //      交杂务模型合并进 Person::context_digest（不在锁内调模型）
     // 注意：裁切不回写 user_chatHistory，原始历史保持完整
     const time_t now = std::time(nullptr);
     const time_t survival = chatOptions.messageSurvivalSeconds;
-    const size_t HISTORY_HIGH_WATERMARK = 40;
-    const size_t HISTORY_LOW_WATERMARK = 20;
 
     std::vector<ChatMessage> filtered;
     filtered.reserve(p.user_chatHistory.size());
@@ -326,8 +345,50 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     }
     // 先夹紧锚点：撤回、重置或过期收缩存活列表时保证下标合法
     p.history_anchor = std::min(p.history_anchor, filtered.size());
-    if (filtered.size() - p.history_anchor > HISTORY_HIGH_WATERMARK)
-        p.history_anchor = filtered.size() - HISTORY_LOW_WATERMARK;
+    result.digest_before = p.context_digest;
+
+    if (trimWindow && !filtered.empty())
+    {
+        const std::size_t digestTokens = utils::estimateTokens(p.context_digest);
+        std::size_t windowTokens = digestTokens;
+        for (std::size_t index = p.history_anchor; index < filtered.size(); ++index)
+            windowTokens += utils::estimateTokens(filtered[index].content);
+        if (windowTokens > kContextHighTokens)
+        {
+            // 从末尾往前累计，找"到末尾 ≤ 低水位"的最小下标
+            std::size_t suffixTokens = digestTokens;
+            std::size_t cut = filtered.size();
+            while (cut > p.history_anchor)
+            {
+                const std::size_t tokens = utils::estimateTokens(filtered[cut - 1].content);
+                if (suffixTokens + tokens > kContextLowTokens)
+                    break;
+                suffixTokens += tokens;
+                --cut;
+            }
+            // 最后一条单独就超过低水位时至少保住它
+            if (cut >= filtered.size())
+                cut = filtered.size() - 1;
+            // 窗口以用户发言开头；后面没有 user 时保持原位
+            std::size_t userCut = cut;
+            while (userCut < filtered.size() && filtered[userCut].role != "user")
+                ++userCut;
+            if (userCut < filtered.size())
+                cut = userCut;
+            if (cut > p.history_anchor)
+            {
+                for (std::size_t index = p.history_anchor; index < cut; ++index)
+                {
+                    std::string line = filtered[index].content;
+                    std::replace(line.begin(), line.end(), '\n', ' ');
+                    result.evicted_lines +=
+                        (filtered[index].role == "user" ? std::string("用户") : botIdentity.name) +
+                        ": " + line + "\n";
+                }
+                p.history_anchor = cut;
+            }
+        }
+    }
     result.request.history.assign(filtered.begin() + p.history_anchor,
                                   filtered.end());
 

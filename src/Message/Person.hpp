@@ -27,6 +27,12 @@ struct Person
     // 供应商前缀缓存才能跨请求命中（见 UserSessionService::buildChatRequest）
     std::size_t history_anchor = 0;
 
+    // 滚动摘要：锚点前移时被移出窗口的原文经杂务模型合并成的"早前对话摘要"，
+    // 由 ChatService 前插进请求（见 Application/ContextDigest）。只在内存：
+    // 用户 2026-11-08 决定不落库（落库需要给会话表加列，待议），重启即空。
+    // #重置对话/#重置上下文/#人格还原 清空；#删除上条对话（撤回）不动
+    std::string context_digest;
+
     // 会话设定
     std::string system_prompt;
     double temperature = 0.7;       // 温度

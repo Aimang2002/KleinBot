@@ -9,6 +9,7 @@
 #include "../Tool/ToolRegistry.h"
 #include "../Port/OutboundMessage.h"
 #include "../Port/ChatRequest.h"
+#include "../Application/ContextDigest.h"
 #include <optional>
 #include <string>
 #include <vector>
@@ -68,6 +69,9 @@ public:
                                     const std::vector<std::string> &toolSchemas);
     // reply() 提供给模型的工具名（决策层情境卡的 available_tools）
     std::vector<std::string> toolNames() const { return tools.names(); }
+    // 私聊滚动摘要的杂务模型 seam（组合根用 makeWorkerSeam 适配，20 秒超时）。
+    // 未注入时锚点前移照常发生，被移出的原文直接丢弃（2026-11-08 之前的行为）
+    void setContextDigestWorker(DigestWorker worker) { this->digestWorker = std::move(worker); }
 
 private:
     Dock &dock;
@@ -77,6 +81,7 @@ private:
     MemoryService &memoryService;
     ChatOptions chatConfig;
     uint64_t managerId;
+    DigestWorker digestWorker;
 
     static constexpr int max_tool_rounds = 5; // 防工具调用死循环
 };

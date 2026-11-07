@@ -6,6 +6,7 @@
  * 话题热度（PerceptionChannel）共用的基础手法，从 TextRecall
  * 匿名命名空间提升而来，行为零变化。
  */
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,11 @@ bool hasNonAscii(const std::string &value);
 // 高频功能词判定（"我们""什么"这类）：召回查询与观察通道热度共用的
 // 噪声过滤——它们出现得最多，但从来不是话题
 bool isStopTerm(const std::string &term);
+
+// token 启发式估算（预算门控用，非精确计价）：非 ASCII 码点 ≈1 token/字（CJK），
+// ASCII ≈1 token/4 字符。私聊上下文水位与群会话轮材料预算共用
+// （2026-11-08 从 EngagementService::estimateTokens 提升而来，行为零变化）
+std::size_t estimateTokens(const std::string &text);
 }
 
 #endif // TEXT_TOKENIZE_H

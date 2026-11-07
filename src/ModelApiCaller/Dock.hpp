@@ -88,6 +88,12 @@ public:
         return RequestDraw(toChatModel(endpoint), endpoint.model, prompt);
     }
 
+    // 按 APIStandard 名注册（或替换）一个适配器：扩展点，也是测试注入 Fake 适配器的 seam
+    void registerStandard(const std::string &name, std::unique_ptr<LLMPort> port)
+    {
+        this->registryLLM[name] = std::move(port);
+    }
+
     // 析构函数
     ~Dock()
     {

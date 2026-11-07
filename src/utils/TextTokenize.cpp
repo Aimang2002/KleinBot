@@ -102,4 +102,26 @@ bool isStopTerm(const std::string &term)
         "告诉", "记得", "事情", "东西", "问题", "这个", "那个"};
     return stopTerms.find(term) != stopTerms.end();
 }
+
+std::size_t estimateTokens(const std::string &text)
+{
+    // UTF-8 启发式：CJK 码点按 1 token/字，ASCII 按 1 token/4 字符
+    std::size_t cjk = 0;
+    std::size_t ascii = 0;
+    for (std::size_t index = 0; index < text.size();)
+    {
+        const unsigned char lead = static_cast<unsigned char>(text[index]);
+        if (lead < 0x80)
+        {
+            ascii += 1;
+            index += 1;
+        }
+        else
+        {
+            cjk += 1;
+            index += lead < 0xE0 ? 2 : (lead < 0xF0 ? 3 : 4);
+        }
+    }
+    return cjk + ascii / 4;
+}
 }

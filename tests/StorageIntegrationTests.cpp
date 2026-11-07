@@ -9,7 +9,9 @@
 #include "Port/ChatRequest.h"
 #include "Tool/SendImageTool.h"
 #include "UserSession/UserSessionService.h"
+#include "utils/TextTokenize.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -252,6 +254,36 @@ TEST(UserSessionContextBoundaryTest, RequestOnlyContextStaysOutOfPersistedHistor
     EXPECT_EQ(store.search(10, "什么意思").size(), 1U);
 }
 
+namespace
+{
+// 估算恰为 tokens 的消息："消息N" 打头便于定位，其余用 CJK 字补足（1 字 ≈ 1 token）
+std::string paddedMessage(int index, std::size_t tokens)
+{
+    std::string text = "消息" + std::to_string(index);
+    const std::size_t used = utils::estimateTokens(text);
+    for (std::size_t count = used; count < tokens; ++count)
+        text += "字";
+    return text;
+}
+
+std::string roleOf(int index)
+{
+    return index % 2 == 1 ? "user" : "assistant";
+}
+
+bool startsWith(const std::string &text, const std::string &prefix)
+{
+    return text.compare(0, prefix.size(), prefix) == 0;
+}
+
+std::size_t lineCount(const std::string &text)
+{
+    return static_cast<std::size_t>(std::count(text.begin(), text.end(), '\n'));
+}
+}
+
+// 私聊窗口 token 水位（2026-11-08）：未越过高水位时头部逐字节不动，越过时一次性前移到
+// 低水位边界（被移出的原文进 evicted_lines），之后头部重新稳定、不退化成滑窗
 TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
 {
     TemporaryDirectory temporaryDirectory;
@@ -261,46 +293,143 @@ TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
     options.defaultModel = "test-model";
     BotIdentity bot;
     UserSessionService session(registry, store, bot, options);
+    const std::size_t unit = UserSessionService::kContextHighTokens / 10;
+    ASSERT_EQ(UserSessionService::kContextLowTokens, unit * 5);
 
-    for (int i = 1; i <= 40; ++i)
-        session.appendMessage(10, i % 2 == 1 ? "user" : "assistant",
-                              "消息" + std::to_string(i));
+    for (int i = 1; i <= 10; ++i)
+        session.appendMessage(10, roleOf(i), paddedMessage(i, unit));
 
+    // 恰好等于高水位：不裁切
     auto bundle = session.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
-    ASSERT_EQ(bundle->request.history.size(), 40U);
-    // 超过旧上限 20 条但未到高水位 40 时头部不动，前缀保持稳定
-    EXPECT_EQ(bundle->request.history.front().content, "消息1");
-    EXPECT_EQ(bundle->request.history.back().content, "消息40");
+    ASSERT_EQ(bundle->request.history.size(), 10U);
+    EXPECT_TRUE(startsWith(bundle->request.history.front().content, "消息1字"));
+    EXPECT_TRUE(bundle->evicted_lines.empty());
 
-    session.appendMessage(10, "user", "消息41");
-    session.appendMessage(10, "assistant", "消息42");
+    // 越过高水位：锚点一次性前移到"到末尾 ≤ 低水位"的位置（5 条），窗口以 user 开头
+    session.appendMessage(10, roleOf(11), paddedMessage(11, unit));
     bundle = session.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
-    // 越过高水位后一次性截回低水位 20 条，之后头部重新稳定
-    ASSERT_EQ(bundle->request.history.size(), 20U);
-    EXPECT_EQ(bundle->request.history.front().content, "消息23");
-    EXPECT_EQ(bundle->request.history.back().content, "消息42");
+    ASSERT_EQ(bundle->request.history.size(), 5U);
+    EXPECT_EQ(bundle->request.history.front().role, "user");
+    EXPECT_TRUE(startsWith(bundle->request.history.front().content, "消息7字"));
+    EXPECT_TRUE(startsWith(bundle->request.history.back().content, "消息11字"));
+    EXPECT_EQ(lineCount(bundle->evicted_lines), 6U);
+    EXPECT_TRUE(startsWith(bundle->evicted_lines, "用户: 消息1字"));
+    EXPECT_NE(bundle->evicted_lines.find("\nKlein: 消息2字"), std::string::npos);
+    EXPECT_EQ(bundle->evicted_lines.find("消息7字"), std::string::npos);
+    const std::vector<ChatMessage> afterCut = bundle->request.history;
 
-    // 关键回归：截断之后的轮次头部不得继续滑动，否则退化为滑窗，
-    // 每轮请求的前缀缓存都会整体作废
-    for (int i = 43; i <= 62; ++i)
-        session.appendMessage(10, i % 2 == 1 ? "user" : "assistant",
-                              "消息" + std::to_string(i));
+    // 关键回归：截断之后到下一次越界之前，头部逐字节不变（前缀缓存稳定）
+    for (int i = 12; i <= 16; ++i)
+    {
+        session.appendMessage(10, roleOf(i), paddedMessage(i, unit));
+        bundle = session.buildChatRequest(10);
+        ASSERT_TRUE(bundle.has_value());
+        EXPECT_TRUE(bundle->evicted_lines.empty()) << i;
+        for (std::size_t index = 0; index < afterCut.size(); ++index)
+            EXPECT_EQ(bundle->request.history[index].content, afterCut[index].content) << i;
+    }
+    ASSERT_EQ(bundle->request.history.size(), 10U);
+
+    // 第二次越界：再次一次性前移，进入下一个稳定周期
+    session.appendMessage(10, roleOf(17), paddedMessage(17, unit));
     bundle = session.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
-    ASSERT_EQ(bundle->request.history.size(), 40U);
-    EXPECT_EQ(bundle->request.history.front().content, "消息23");
-    EXPECT_EQ(bundle->request.history.back().content, "消息62");
+    ASSERT_EQ(bundle->request.history.size(), 5U);
+    EXPECT_TRUE(startsWith(bundle->request.history.front().content, "消息13字"));
+    EXPECT_TRUE(startsWith(bundle->evicted_lines, "用户: 消息7字"));
+    EXPECT_EQ(lineCount(bundle->evicted_lines), 6U);
+}
 
-    // 第二次越界：再次一次性截回低水位，进入下一个稳定周期
-    session.appendMessage(10, "user", "消息63");
-    session.appendMessage(10, "assistant", "消息64");
+// 低水位边界落在 assistant 上时后挪到下一条 user：窗口总以用户发言开头
+TEST(UserSessionWindowTest, AnchorMovesToNextUserMessage)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+    UserSessionService session(registry, store, bot, options);
+    const std::size_t unit = UserSessionService::kContextLowTokens / 4;
+
+    for (int i = 1; i <= 9; ++i)
+        session.appendMessage(10, roleOf(i), paddedMessage(i, unit));
+    auto bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    // 低水位放得下 4 条 → 边界是消息6（assistant）→ 后挪到消息7
+    ASSERT_EQ(bundle->request.history.size(), 3U);
+    EXPECT_EQ(bundle->request.history.front().role, "user");
+    EXPECT_TRUE(startsWith(bundle->request.history.front().content, "消息7字"));
+    EXPECT_EQ(lineCount(bundle->evicted_lines), 6U);
+}
+
+// 水位计入滚动摘要的 token；重置清摘要，撤回不清；bundle 携带摘要快照
+TEST(UserSessionWindowTest, DigestCountsTowardWatermarkAndFollowsResetSemantics)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+    UserSessionService session(registry, store, bot, options);
+    const std::size_t unit = UserSessionService::kContextHighTokens / 10;
+
+    for (int i = 1; i <= 10; ++i)
+        session.appendMessage(10, roleOf(i), paddedMessage(i, unit));
+    session.setContextDigest(10, "摘");
+    auto bundle = session.buildChatRequest(10);
+    ASSERT_TRUE(bundle.has_value());
+    EXPECT_EQ(bundle->digest_before, "摘");
+    // 原文恰好等于高水位，多出的 1 token 摘要使它越界；低水位同样计入摘要，只放得下 4 条
+    ASSERT_EQ(bundle->request.history.size(), 4U);
+    EXPECT_TRUE(startsWith(bundle->request.history.front().content, "消息7字"));
+    EXPECT_FALSE(bundle->evicted_lines.empty());
+    // buildChatRequest 不改摘要（合并由 ChatService 在锁外完成）
+    EXPECT_EQ(session.getContextDigest(10), "摘");
+
+    // 撤回不动摘要
+    EXPECT_EQ(session.removePreviousContext(10), "上条对话已被删除！");
+    EXPECT_EQ(session.getContextDigest(10), "摘");
+
+    session.resetChat(10);
+    EXPECT_TRUE(session.getContextDigest(10).empty());
+
+    session.setContextDigest(10, "摘");
+    session.resetPersonality(10);
+    EXPECT_TRUE(session.getContextDigest(10).empty());
+
+    session.setContextDigest(10, "摘");
+    session.resetContext(10);
+    EXPECT_TRUE(session.getContextDigest(10).empty());
+}
+
+// trimWindow=false（replyInCharacter/requestInCharacter）：不前移锚点、不产出移出原文，
+// 那段留给下一次正常请求进摘要
+TEST(UserSessionWindowTest, BuildWithoutTrimLeavesAnchorForNextReply)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+    UserSessionService session(registry, store, bot, options);
+    const std::size_t unit = UserSessionService::kContextHighTokens / 10;
+
+    for (int i = 1; i <= 11; ++i)
+        session.appendMessage(10, roleOf(i), paddedMessage(i, unit));
+    auto bundle = session.buildChatRequest(10, false);
+    ASSERT_TRUE(bundle.has_value());
+    EXPECT_EQ(bundle->request.history.size(), 11U);
+    EXPECT_TRUE(bundle->evicted_lines.empty());
+
     bundle = session.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
-    ASSERT_EQ(bundle->request.history.size(), 20U);
-    EXPECT_EQ(bundle->request.history.front().content, "消息45");
-    EXPECT_EQ(bundle->request.history.back().content, "消息64");
+    EXPECT_EQ(bundle->request.history.size(), 5U);
+    EXPECT_EQ(lineCount(bundle->evicted_lines), 6U);
 }
 
 TEST(UserSessionWindowTest, DropsExpiredMessagesOnColdStartLoad)

@@ -684,6 +684,9 @@ int main(int argc, char **argv)
 			{ return chatService.requestInCharacter(managerId, systemNote, history, toolSchemas); });
 	}
 	engagementService.setWorker(makeWorkerSeam(workerEndpoint));
+	// 私聊滚动摘要（2026-11-08）：锚点前移时把移出窗口的原文合并进摘要。
+	// 20 秒短超时（理由同 judge：在回复路径上，别拖住用户），失败即退化为丢弃那段
+	chatService.setContextDigestWorker(makeWorkerSeam(workerEndpoint, 20000));
 	// 会话轮可用的注册表工具：群友发图时她能经 inspect_image 看图本身，
 	// 而不止占位符里的瞥视一句话（2026-10-30 真机缺陷）；点名让她画图/重发图时
 	// generate_image/send_image 的图当场发到群里（生图存群库）。看不懂的人名/梗/事件

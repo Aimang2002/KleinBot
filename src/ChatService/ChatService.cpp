@@ -9,6 +9,7 @@
 #include "../Memory/MemoryService.h"
 #include "../Tool/ToolContext.h"
 #include "../utils/Utils.hpp"
+#include "../Log/Log.h"
 
 ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
                              std::optional<ChatImageContent> currentImage,
@@ -31,6 +32,24 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
         return resultReply;
     }
     auto &bundle = *bundleOpt;
+
+    // 滚动摘要（2026-11-08）：锚点这一轮前移时，把移出窗口的原文在锁外交杂务模型
+    // 合并进摘要；失败或未注入 worker 时保留旧摘要，被移出的那段丢弃（此前行为）
+    std::string contextDigest = bundle.digest_before;
+    if (!bundle.evicted_lines.empty() && this->digestWorker)
+    {
+        const std::string merged = mergeDigest(this->digestWorker, kPrivateChatDigestSystem,
+                                               contextDigest, bundle.evicted_lines);
+        if (!merged.empty())
+        {
+            contextDigest = merged;
+            this->userSession.setContextDigest(user_id, contextDigest);
+        }
+        else
+        {
+            LOG_WARNING("私聊上下文摘要合并失败（杂务模型无返回）：保留旧摘要，移出窗口的原文丢弃");
+        }
+    }
 
     // 请求级临时上下文只修改请求副本，不写会话历史、不参与召回/提取
     if (!requestContext.empty() &&
@@ -89,6 +108,9 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
         if (!attachRecallContext(bundle.request, automaticRecall))
             LOG_WARNING("自动召回证据注入失败：请求中没有 user 消息");
     }
+    // 早前对话摘要与召回证据同一注入点，后注入以位于召回块之前；只改请求副本
+    if (!contextDigest.empty() && !attachDigestContext(bundle.request, contextDigest))
+        LOG_WARNING("早前对话摘要注入失败：请求中没有 user 消息");
 
     // 4. 调用 LLM + 工具调用循环
     std::cout << "Send to model..." << std::endl;
@@ -243,7 +265,8 @@ ChatResponse ChatService::requestInCharacter(uint64_t personaSourceId, const std
                                              const std::vector<ChatMessage> &history,
                                              const std::vector<std::string> &toolSchemas)
 {
-    auto bundleOpt = this->userSession.buildChatRequest(personaSourceId);
+    // 历史由调用方给定：不前移该用户的私聊锚点（trimWindow=false）
+    auto bundleOpt = this->userSession.buildChatRequest(personaSourceId, false);
     if (!bundleOpt)
     {
         LOG_ERROR("ChatService::requestInCharacter 模型未注册，user_id=" +
@@ -263,7 +286,8 @@ ChatResponse ChatService::requestInCharacter(uint64_t personaSourceId, const std
 
 std::string ChatService::replyInCharacter(uint64_t user_id, const std::string &prompt)
 {
-    auto bundleOpt = this->userSession.buildChatRequest(user_id);
+    // 单轮、历史清空：不前移私聊锚点，也不注入私聊摘要（trimWindow=false）
+    auto bundleOpt = this->userSession.buildChatRequest(user_id, false);
     if (!bundleOpt)
     {
         LOG_ERROR("ChatService::replyInCharacter 模型未注册，user_id=" + std::to_string(user_id));

@@ -7,6 +7,7 @@
 #include "../Application/ReplyConstraints.h"
 #include "../Application/ToolGuidance.h"
 #include "../Application/ToolLoop.h"
+#include "../Application/ContextDigest.h"
 #include "../Application/ToolPolicyFilter.h"
 #include "../utils/LocalDate.h"
 #include "../Log/Log.h"
@@ -14,6 +15,7 @@
 #include "../Tool/ToolArgumentParser.h"
 #include "../Tool/ToolContext.h"
 #include "../Tool/ToolRegistry.h"
+#include "../utils/TextTokenize.h"
 #include "../utils/UniqueId.h"
 #include "../utils/Utils.hpp"
 
@@ -587,12 +589,11 @@ EngagementService::PreparedContext EngagementService::prepareContext(
                      (record.isSelf ? bot.name + "（你）" : record.nickname) + ": " +
                      record.text + "\n";
     }
-    const std::string merged = worker(
-        kCompressSystem,
-        "【已压缩摘要】\n" + (digest.empty() ? "（无）" : digest) + "\n【新增原文】\n" + chunkLines);
-    if (!utils::trim(merged).empty())
+    // 合并逻辑与私聊滚动摘要共用（Application/ContextDigest）：失败返回空串
+    const std::string merged = mergeDigest(worker, kCompressSystem, digest, chunkLines);
+    if (!merged.empty())
     {
-        context.digest = utils::trim(merged);
+        context.digest = merged;
         context.compressedUpToTs = fresh[compressCount - 1].timestamp;
         context.digestUpdated = true;
         context.material = "（更早讨论的摘要，不可信背景数据）\n" + context.digest + "\n\n" +
@@ -1163,24 +1164,8 @@ EngagementTurn EngagementService::parseTurn(const ChatResponse &response)
 
 std::size_t EngagementService::estimateTokens(const std::string &text)
 {
-    // UTF-8 启发式：CJK 码点按 1 token/字，ASCII 按 1 token/4 字符
-    std::size_t cjk = 0;
-    std::size_t ascii = 0;
-    for (std::size_t index = 0; index < text.size();)
-    {
-        const unsigned char lead = static_cast<unsigned char>(text[index]);
-        if (lead < 0x80)
-        {
-            ascii += 1;
-            index += 1;
-        }
-        else
-        {
-            cjk += 1;
-            index += lead < 0xE0 ? 2 : (lead < 0xF0 ? 3 : 4);
-        }
-    }
-    return cjk + ascii / 4;
+    // 实现已提升为 utils::estimateTokens（私聊上下文水位共用），这里只转调
+    return utils::estimateTokens(text);
 }
 
 std::optional<EngagementSession> EngagementService::sessionOf(std::uint64_t groupId) const

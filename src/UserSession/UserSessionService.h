@@ -23,6 +23,11 @@ struct ChatCallBundle
     ChatModel model;
     std::string model_name;
     ChatRequest request;
+    // 本次构造时锚点前移、被移出窗口的原文（"用户: …"/"<bot.name>: …"每行一条）；
+    // 锚点未动时为空。由 ChatService 在锁外交杂务模型合并进滚动摘要
+    std::string evicted_lines;
+    // 构造时 Person::context_digest 的快照（可能为空）
+    std::string digest_before;
 };
 
 class UserSessionService
@@ -60,7 +65,17 @@ public:
     void updateChatHistory(const uint64_t user_id, const std::vector<TimestampedMessage> &history);
     int64_t appendMessage(const uint64_t user_id, const std::string &role, const std::string &content);
     Person getUserConfig(const uint64_t user_id);
-    std::optional<ChatCallBundle> buildChatRequest(const uint64_t &user_id);
+    // 私聊上下文 token 水位（2026-11-08，取代 40/20 条）：窗口（含滚动摘要）累计超过
+    // 高水位时，锚点一次性前移到"从该点到末尾 ≤ 低水位"的位置
+    static constexpr std::size_t kContextHighTokens = 32000;
+    static constexpr std::size_t kContextLowTokens = 16000;
+    // trimWindow=false：只装配人格/超参数/当前窗口，不前移锚点、不产出 evicted_lines。
+    // 供 replyInCharacter/requestInCharacter 这类自带 history 的调用——它们丢弃窗口，
+    // 若在这里前移锚点，被移出的那段就永远进不了摘要
+    std::optional<ChatCallBundle> buildChatRequest(const uint64_t &user_id, bool trimWindow = true);
+    // 滚动摘要读写（持锁）；只在内存，重启即空
+    void setContextDigest(uint64_t user_id, const std::string &digest);
+    std::string getContextDigest(uint64_t user_id);
 
 private:
     std::mutex mutex_message;
