@@ -390,6 +390,10 @@ TEST_F(PanelServerFixture, RootServesPageFileWithoutAuth)
     EXPECT_EQ(result->body.find("affect: \"心境与决策\""), std::string::npos);
     EXPECT_EQ(result->body.find("glance: \"群聊瞥视\""), std::string::npos);
     EXPECT_EQ(result->body.find("\"affect.judge_model\""), std::string::npos);
+    // bot.aliases 同样不进前端（用户定规 2026-11-08）：字段级 PASSTHROUGH_PATHS 原样带回，
+    // 不再有字段提示
+    EXPECT_NE(result->body.find("PASSTHROUGH_PATHS = new Set([\"bot.aliases\"])"), std::string::npos);
+    EXPECT_EQ(result->body.find("\"bot.aliases\":"), std::string::npos);
 }
 
 TEST_F(PanelServerFixture, RootReturns500WhenPageFileMissing)
