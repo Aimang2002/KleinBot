@@ -387,12 +387,13 @@ TEST_F(PanelServerFixture, RootServesPageFileWithoutAuth)
     EXPECT_NE(result->body.find("<!DOCTYPE html>"), std::string::npos);
     EXPECT_NE(result->body.find("Klein"), std::string::npos);
     EXPECT_NE(result->get_header_value("Cache-Control").find("no-store"), std::string::npos);
-    // 配置节通用分区注册（关联点：骨架有节而面板未注册时分区不按序渲染）
-    EXPECT_NE(result->body.find("glance: [\"enabled\", \"per_group_per_minute\"]"), std::string::npos);
-    EXPECT_NE(result->body.find("glance: \"群聊瞥视\""), std::string::npos);
-    EXPECT_NE(result->body.find("affect: [\"enabled\", \"policy\", \"enforce\", \"judge_model\"]"),
+    // 策略类配置节不进前端（用户定规 2026-11-08：后台不做精细化，affect/glance 只在
+    // .config.json 手改）：登记为原样带回的 PASSTHROUGH_SECTIONS，不再有分区标签与字段元数据
+    EXPECT_NE(result->body.find("PASSTHROUGH_SECTIONS = new Set([\"affect\", \"glance\"])"),
               std::string::npos);
-    EXPECT_NE(result->body.find("\"affect.judge_model\""), std::string::npos);
+    EXPECT_EQ(result->body.find("affect: \"心境与决策\""), std::string::npos);
+    EXPECT_EQ(result->body.find("glance: \"群聊瞥视\""), std::string::npos);
+    EXPECT_EQ(result->body.find("\"affect.judge_model\""), std::string::npos);
 }
 
 TEST_F(PanelServerFixture, RootReturns500WhenPageFileMissing)
