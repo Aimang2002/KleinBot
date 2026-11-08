@@ -22,6 +22,7 @@ add_executable(kleinbot_tests
     GroupContextTests.cpp
     GroupListTests.cpp
     ImagePlaceholderTests.cpp
+    InboundCoalescerTests.cpp
     MemoryRecallTests.cpp
     ModelCatalogTests.cpp
     ModelEndpointResolverTests.cpp

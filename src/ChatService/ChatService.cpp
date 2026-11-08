@@ -16,7 +16,8 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
                              const std::string &situationNote,
                              const std::string &requestContext,
                              uint64_t sharedScopeId,
-                             const ReplyConstraints *constraints)
+                             const ReplyConstraints *constraints,
+                             const std::string &tailNote)
 {
     ChatReply resultReply;
     // 1. 增量追加用户这句（内存 + SQLite 同步落盘）：上下文对所有用户开放。
@@ -100,6 +101,9 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
         appendContextNote(bundle.request,
             "当前用户消息中的图片没有直接提供给你；涉及其内容时必须调用 inspect_image。");
     }
+    // 调用方给的当轮尾部注记（R2.2 连发：后面还有哪几条、会各自单独回复）
+    if (!tailNote.empty())
+        appendContextNote(bundle.request, tailNote);
 
     const std::string automaticRecall = this->memoryService.recallForMessage(
         user_id, text, userMessageId);

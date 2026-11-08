@@ -60,7 +60,10 @@ public:
 	bool messageFilter(const InboundMessage &data);
 
 	// 处理一条入站消息：分类 → 命令 / Vision / 普通对话，结果直接经由 sender 发出
-	void handleMessage(const InboundMessage &current_data);
+	// burstNote（R2.2 私聊连发）：同一连发里这条之后还有哪些消息的事实性注记
+	// （burstFollowUpNote 产出），只进本轮请求尾部；空 = 与此前逐字相同。
+	// 每条消息仍各自一次回复（N 进 N 出），不改回复条数、分段与语音路径
+	void handleMessage(const InboundMessage &current_data, const std::string &burstNote = {});
 
 	// 这条消息会不会被当作 #命令 处理（只匹配不执行）。组合根据此把命令消息排除在
 	// 群内容缓冲与话题会话之外——命令往来是协议层对话，不是群聊内容（2026-10-28 修复：

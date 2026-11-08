@@ -57,7 +57,7 @@ bool Message::isCommand(const InboundMessage &data) const
 	return data.post_type == "message" && this->registry.matches(data.plain_text);
 }
 
-void Message::handleMessage(const InboundMessage &current_data)
+void Message::handleMessage(const InboundMessage &current_data, const std::string &burstNote)
 {
 	Intent intent = classify(current_data);
 
@@ -235,7 +235,7 @@ void Message::handleMessage(const InboundMessage &current_data)
 		ChatReply chatReply = this->chatService.reply(
 			current_data.user_id, conversationText, std::move(currentImage),
 			situationNote, requestContext, isGroup ? current_data.group_id : 0,
-			enforcedPolicy ? &constraints : nullptr);
+			enforcedPolicy ? &constraints : nullptr, burstNote);
 		std::string llm_text = chatReply.text;
 		// 群聊收敛契约（T7b）：模型判定无增量时输出 [不回应] 标记，静默不发
 		const bool textSuppressed = current_data.message_type == "group" &&

@@ -7,6 +7,7 @@
 #include <csignal>
 #include "JsonParse/JsonParse.h"
 #include "Application/EventRouter.h"
+#include "Application/InboundCoalescer.h"
 #include "Port/ToolNames.h"
 #include "Bootstrap/ConfigSnapshotStore.h"
 #include "Bootstrap/RuntimeSettings.h"
@@ -221,7 +222,8 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 // 子线程
 void workingThread(Message &messageClass, EventRouter &eventRouter,
 				   PerceptionChannel &perception, GroupContextService &groupContext,
-				   InboundMessage data, std::size_t maxMessageTokens)
+				   InboundMessage data, std::size_t maxMessageTokens,
+				   const std::string &burstNote = {})
 {
 	// notice/request 事件：不过消息过滤，按 key 路由给已注册 handler（v2.4.1 T6 起有订阅者）
 	if (data.post_type != "message")
@@ -260,7 +262,7 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 
 	// @bot 已处理消息进互动计数
 	perception.observeInteraction(data);
-	messageClass.handleMessage(data);
+	messageClass.handleMessage(data, burstNote);
 }
 
 void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWorkers,
@@ -804,6 +806,32 @@ int main(int argc, char **argv)
 	}
 #endif
 
+	// 入站连发合并（R2.2，私聊范围）：纯文本私聊连发先攒桶，静默 1.5s / 满 5 条 / 首条后 10s
+	// 整桶放行；命令、图片/附件、群聊与事件直通（先放行同用户已攒的桶，保证顺序）。
+	// 一个 Burst 提交为该用户 lane 上的一个任务，任务内逐条处理、逐条回复（N 进 N 出），
+	// 每条请求尾部带"后面还有哪几条"的事实性注记。只在主线程使用，不新增线程
+	InboundCoalescer inboundCoalescer;
+	const auto submitBurst = [&](Burst burst)
+	{
+		auto shared = std::make_shared<Burst>(std::move(burst));
+		const TaskSubmitResult submitResult = messageWorkers.submit(
+			shared->user_id,
+			[&messageClass, &eventRouter, &perceptionChannel, &groupContextService,
+			 maxMessageTokens = settings.chat.maxMessageTokens, shared]() {
+			for (std::size_t index = 0; index < shared->messages.size(); ++index)
+				workingThread(messageClass, eventRouter, perceptionChannel, groupContextService,
+							  shared->messages[index], maxMessageTokens,
+							  burstFollowUpNote(shared->messages, index));
+		});
+		if (submitResult == TaskSubmitResult::Full)
+		{
+			LOG_WARNING("消息执行队列已满，拒绝新的入站消息");
+			for (const InboundMessage &message : shared->messages)
+				if (messageClass.messageFilter(message))
+					messageClass.sendError(message, "系统繁忙，请稍后重试。");
+		}
+	};
+
 	while (running.load())
 	{
 		if (receivedSignal != 0)
@@ -813,27 +841,26 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		if (auto msg = inboundQueue.tryPop())
+		auto msg = inboundQueue.tryPop();
+		const std::int64_t nowMs = inboundCoalescer.nowMs();
+		if (msg)
 		{
-			auto message = std::make_shared<InboundMessage>(std::move(*msg));
-			const TaskSubmitResult submitResult = messageWorkers.submit(
-				message->user_id,
-				[&messageClass, &eventRouter, &perceptionChannel, &groupContextService,
-				 maxMessageTokens = settings.chat.maxMessageTokens,
-				 message]() mutable {
-				workingThread(messageClass, eventRouter, perceptionChannel, groupContextService, std::move(*message), maxMessageTokens);
-			});
-			if (submitResult == TaskSubmitResult::Full)
-			{
-				LOG_WARNING("消息执行队列已满，拒绝新的入站消息");
-				if (messageClass.messageFilter(*message))
-					messageClass.sendError(*message, "系统繁忙，请稍后重试。");
-			}
+			for (Burst &burst : inboundCoalescer.offer(std::move(*msg), nowMs))
+				submitBurst(std::move(burst));
 		}
-		else
-		{
+		for (Burst &burst : inboundCoalescer.flushDue(nowMs))
+			submitBurst(std::move(burst));
+		if (!msg)
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		}
+	}
+
+	// 退出时尚在连发桶里的消息不再提交（执行器即将停止），只记日志
+	{
+		std::size_t dropped = 0;
+		for (const Burst &burst : inboundCoalescer.flushAll())
+			dropped += burst.messages.size();
+		if (dropped > 0)
+			LOG_INFO("退出时丢弃连发桶中尚未处理的私聊消息 " + std::to_string(dropped) + " 条");
 	}
 
 	resourceCleanup(running, messageWorkers, glanceService, memoryService, timingThread,
