@@ -13,6 +13,7 @@ add_executable(kleinbot_tests
     DecisionPolicyTests.cpp
     DeliveryReceiptTests.cpp
     EngagementTests.cpp
+    EngagementTurnTests.cpp
     EventRoutingTests.cpp
     FeedbackTests.cpp
     FsUtilTests.cpp

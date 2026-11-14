@@ -4,6 +4,7 @@
 #include "../Affect/DecisionRecorder.h"
 #include "../Affect/JudgePolicy.h"
 #include "../Affect/SituationCard.h"
+#include "../Application/EngagementTurn.h"
 #include "../Application/ReplyConstraints.h"
 #include "../Application/ToolGuidance.h"
 #include "../Application/ToolLoop.h"
@@ -188,13 +189,6 @@ std::string truncateColloquial(const std::string &text, std::size_t maxChars)
         return text;
     const std::size_t cut = (lastStop > 0) ? lastStop : pos;
     return text.substr(0, cut) + "……（后文略）";
-}
-
-std::string jsonArg(const nlohmann::json &arguments, const char *key)
-{
-    if (arguments.is_object() && arguments.contains(key) && arguments[key].is_string())
-        return arguments[key].get<std::string>();
-    return {};
 }
 } // namespace
 
@@ -988,7 +982,13 @@ void EngagementService::runTurn(std::uint64_t groupId)
             return;
         }
 
-        turn = parseTurn(response);
+        turn = parseEngagementTurn(response);
+        // 没调工具、直接写出的文字已按沉默处理（L3 护栏，判定见 Application/EngagementTurn）。
+        // 只记长度：那段文字可能引用了群友的话或昵称，原文不进日志
+        if (turn.unspokenChars > 0)
+            LOG_WARNING("会话轮模型未经 group_say 直接输出了 " +
+                        std::to_string(turn.unspokenChars) + " 个字符，未发出，本拍按沉默处理：群 " +
+                        std::to_string(groupId));
     }
     const std::int64_t now = clock();
     bool moodDue = false;
@@ -1133,33 +1133,6 @@ void EngagementService::runTurn(std::uint64_t groupId)
             moodIt->second.startTs == startTs)
             moodIt->second.moodLine = mood;
     }
-}
-
-EngagementTurn EngagementService::parseTurn(const ChatResponse &response)
-{
-    EngagementTurn turn;
-    for (const auto &call : response.tool_calls)
-    {
-        if (call.name != "group_say" && call.name != "leave_topic")
-            continue;
-        const nlohmann::json arguments = parseToolArguments(call.arguments);
-        if (call.name == "group_say")
-        {
-            turn.kind = EngagementTurn::Kind::Speak;
-            turn.text = jsonArg(arguments, "text");
-            turn.reason.clear();
-            return turn;
-        }
-        turn.kind = EngagementTurn::Kind::Leave;
-        turn.reason = jsonArg(arguments, "reason");
-        turn.text = jsonArg(arguments, "final_text");
-        return turn;
-    }
-    if (!response.tool_calls.empty())
-        return turn; // 只有未知工具：视为本拍沉默
-    turn.text = utils::trim(response.content);
-    turn.kind = turn.text.empty() ? EngagementTurn::Kind::Pass : EngagementTurn::Kind::Speak;
-    return turn;
 }
 
 std::size_t EngagementService::estimateTokens(const std::string &text)

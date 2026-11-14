@@ -111,6 +111,16 @@ ChatResponse leaveResponse(const std::string &reason, const std::string &finalTe
     return response;
 }
 
+// 不调工具、直接写了一段文字：主动轮里这不是她说出口的话，按沉默处理（L3 护栏）
+ChatResponse bareTextResponse(const std::string &content)
+{
+    ChatResponse response;
+    response.code = 200;
+    response.finish_reason = "stop";
+    response.content = content;
+    return response;
+}
+
 struct Harness
 {
     TemporaryDirectory directory;
@@ -206,32 +216,7 @@ std::string repeatUtf8(const std::string &unit, int times)
 }
 } // namespace
 
-TEST(EngagementTurnTest, ParsesToolCallsAndPlainText)
-{
-    auto say = EngagementService::parseTurn(sayResponse("大家好"));
-    EXPECT_EQ(say.kind, EngagementTurn::Kind::Speak);
-    EXPECT_EQ(say.text, "大家好");
-
-    auto leave = EngagementService::parseTurn(leaveResponse("话题翻页了", "先这样"));
-    EXPECT_EQ(leave.kind, EngagementTurn::Kind::Leave);
-    EXPECT_EQ(leave.reason, "话题翻页了");
-    EXPECT_EQ(leave.text, "先这样");
-
-    auto pass = EngagementService::parseTurn(passResponse());
-    EXPECT_EQ(pass.kind, EngagementTurn::Kind::Pass);
-
-    // 无工具的裸文本宽容视为说话
-    ChatResponse bare;
-    bare.code = 200;
-    bare.content = "那我说一句";
-    EXPECT_EQ(EngagementService::parseTurn(bare).kind, EngagementTurn::Kind::Speak);
-
-    // 空白裸文本 = 沉默
-    ChatResponse blank;
-    blank.code = 200;
-    blank.content = "  ";
-    EXPECT_EQ(EngagementService::parseTurn(blank).kind, EngagementTurn::Kind::Pass);
-}
+// 定案判定（group_say / leave_topic / 未知工具 / 裸文本）的单测在 EngagementTurnTests.cpp
 
 TEST(EngagementSessionTest, AtActivationMergesIntoLiveSession)
 {
@@ -329,6 +314,64 @@ TEST(EngagementSessionTest, ThreeConsecutivePassesEndSession)
     harness.service->runTurn(8823);
     EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
     EXPECT_EQ(harness.service->sessionOf(8823)->endReason, "连续沉默");
+}
+
+// 主动轮没调工具、直接写了一段文字（线上见过"（没有说话，继续留意后续）"）：不是她说出口的话。
+// 不投递、不进群缓冲、不开追问窗口，按一拍沉默计；提名字入场轮里同样等于"不接"，直接收场
+TEST(EngagementSessionTest, BareTextTurnStaysSilent)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(bareTextResponse("（没有说话，继续留意后续）"));
+    harness.service->runTurn(8823);
+
+    EXPECT_TRUE(harness.sender->deliveries.empty()) << "没有任何消息被投递";
+    for (const GroupMessageRecord &entry : harness.store->snapshot(8823))
+        EXPECT_FALSE(entry.isSelf) << "旁白不进群缓冲";
+    auto session = harness.service->sessionOf(8823);
+    ASSERT_TRUE(session.has_value());
+    EXPECT_EQ(session->state, EngagementState::Active);
+    EXPECT_EQ(session->consecutivePasses, 1);
+    EXPECT_EQ(session->turnCount, 0);
+    EXPECT_EQ(session->lastSpeakTs, 0) << "没开口，不开追问窗口";
+
+    // 连续三拍都没调工具（哪怕写的像一句正常的话）：与连续沉默一样收场
+    harness.turnResponses.push_back(bareTextResponse("（等对方回答，这一拍不出声）"));
+    harness.turnResponses.push_back(bareTextResponse("那我说一句"));
+    harness.service->runTurn(8823);
+    harness.service->runTurn(8823);
+    EXPECT_TRUE(harness.sender->deliveries.empty());
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
+    EXPECT_EQ(harness.service->sessionOf(8823)->endReason, "连续沉默");
+
+    // 提名字入场轮：裸文本 = 她没接，与沉默一样直接收场
+    harness.now += 5;
+    harness.feed(8824, "克莱茵这个名字挺好听", harness.now, true);
+    ASSERT_EQ(harness.submittedTurns.size(), 1U);
+    harness.turnResponses.push_back(bareTextResponse("（只是在聊我，不出声）"));
+    harness.service->runTurn(8824);
+    EXPECT_TRUE(harness.sender->deliveries.empty());
+    EXPECT_EQ(harness.service->sessionOf(8824)->state, EngagementState::Ended);
+    EXPECT_EQ(harness.service->sessionOf(8824)->endReason, "提名字自决：不接");
+}
+
+// group_say 只带空白（行为未变）：不投递，按一拍沉默计
+TEST(EngagementSessionTest, BlankGroupSayCountsAsPass)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(sayResponse("  "));
+    harness.service->runTurn(8823);
+
+    EXPECT_TRUE(harness.sender->deliveries.empty());
+    auto session = harness.service->sessionOf(8823);
+    ASSERT_TRUE(session.has_value());
+    EXPECT_EQ(session->state, EngagementState::Active);
+    EXPECT_EQ(session->consecutivePasses, 1);
+    EXPECT_EQ(session->turnCount, 0);
+    EXPECT_EQ(session->lastSpeakTs, 0);
 }
 
 TEST(EngagementSessionTest, LeaveWithFinalTextDeliversThenEnds)
@@ -2245,4 +2288,118 @@ TEST(EngagementEnforceTest, ToneNoteAppendedOnlyWhenSpecified)
     plain.harness.service->runTurn(8823);
     EXPECT_EQ(plain.harness.agentContracts.front(), legacy.agentContracts.front());
     EXPECT_EQ(plain.harness.agentSchemas.front(), legacy.agentSchemas.front());
+}
+
+// ---- 裸文本不是发言（L3 护栏，2026-11-14）----
+namespace
+{
+// 执行记录整行（去掉随机 ID）：status / actual_text / outbound_message_id / deviation_reason / created_at
+std::vector<std::string> executionRowsOf(const std::string &dbPath, const std::string &decisionId)
+{
+    std::vector<std::string> rows;
+    sqlite3 *db = nullptr;
+    if (sqlite3_open_v2(dbPath.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK)
+    {
+        sqlite3_close(db);
+        return rows;
+    }
+    sqlite3_stmt *statement = nullptr;
+    sqlite3_prepare_v2(db,
+                       "SELECT status, actual_text, outbound_message_id, deviation_reason, created_at"
+                       " FROM affect_executions WHERE decision_id=?1 ORDER BY created_at, execution_id;",
+                       -1, &statement, nullptr);
+    sqlite3_bind_text(statement, 1, decisionId.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(statement) == SQLITE_ROW)
+    {
+        const auto column = [statement](int index)
+        { return std::string(reinterpret_cast<const char *>(sqlite3_column_text(statement, index))); };
+        rows.push_back("status=" + column(0) + ";text=" + column(1) + ";outbound=" + column(2) +
+                       ";deviation=" + column(3) + ";at=" + column(4));
+    }
+    sqlite3_finalize(statement);
+    sqlite3_close(db);
+    return rows;
+}
+
+// 一拍 lull 主动轮在给定记录模式下的可观测结果：投递条数、会话推进、决策行与执行整行。
+// 去掉随机 ID；state_json 里 judge 耗时与本地小时取自墙钟，对拍时去掉
+struct OneTurnOutcome
+{
+    std::size_t deliveries = 0;
+    std::string session;
+    std::vector<std::string> records;
+};
+
+OneTurnOutcome runOneLullTurn(const ChatResponse &response, const std::string &mode)
+{
+    Harness harness;
+    const std::string dbPath = harness.directory.path() + "/affect.db";
+    affect::DecisionStore store(dbPath);
+    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    affect::JudgePolicy judge([](const std::string &, const std::string &)
+                              { return judgeReply("group_say"); },
+                              "judge-model");
+    harness.service->setDecisionRecorder(&recorder);
+    if (mode != "baseline")
+    {
+        harness.service->setPolicy(&judge);
+        harness.service->setEnforce(mode == "enforce");
+    }
+
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(response);
+    harness.service->runTurn(8823);
+
+    OneTurnOutcome outcome;
+    outcome.deliveries = harness.sender->deliveries.size();
+    if (const auto session = harness.service->sessionOf(8823))
+        outcome.session =
+            std::string(session->state == EngagementState::Active ? "active" : "ended") +
+            "/passes=" + std::to_string(session->consecutivePasses) +
+            "/turns=" + std::to_string(session->turnCount) +
+            "/spoke=" + std::to_string(session->lastSpeakTs) +
+            "/lastTurn=" + std::to_string(session->lastTurnTs) +
+            "/sinceTurn=" + std::to_string(session->newMessagesSinceTurn);
+    for (const affect::DecisionRecord &decision : store.recentDecisions(10))
+    {
+        nlohmann::json state = nlohmann::json::parse(decision.stateJson);
+        state.erase("judge_latency_ms");
+        state.erase("local_hour");
+        std::string row = std::to_string(decision.createdAt) + "|" + decision.source + "|" +
+                          std::to_string(decision.groupId) + "|" + decision.plan.toJson().dump() +
+                          "|" + decision.policyVersion + "|" + decision.planVersion + "|" +
+                          state.dump() + "|" + decision.fallbackReason;
+        for (const std::string &execution : executionRowsOf(dbPath, decision.decisionId))
+            row += "|" + execution;
+        outcome.records.push_back(row);
+    }
+    return outcome;
+}
+} // namespace
+
+// 裸文本那一拍与她主动选择沉默逐项一致：会话推进、决策行、执行行（skipped、actual_text 为空、
+// 偏差标记相同），旁白原文不进记录。基线、影子期 judge、生效期 judge 三种记录模式各对拍一次
+TEST(EngagementDecisionRecordTest, BareTextTurnRecordsLikeChosenSilence)
+{
+    for (const std::string mode : {"baseline", "shadow", "enforce"})
+    {
+        const OneTurnOutcome bare =
+            runOneLullTurn(bareTextResponse("（等对方回答，这一拍不出声）"), mode);
+        const OneTurnOutcome silent = runOneLullTurn(passResponse(), mode);
+
+        EXPECT_EQ(bare.deliveries, 0U) << mode;
+        EXPECT_FALSE(bare.session.empty()) << mode;
+        EXPECT_EQ(bare.session, silent.session) << mode;
+        ASSERT_EQ(bare.records.size(), 1U) << mode;
+        EXPECT_EQ(bare.records, silent.records) << mode;
+        EXPECT_NE(bare.records.front().find("status=skipped;text=;"), std::string::npos) << mode;
+        // 沉默在三种模式下的样子：基线记实际动作 no_reply；影子期记 judge 计划 + shadow；
+        // 生效期计划是 group_say、她没开口，记 model_override:no_reply
+        const std::string silenceMark = mode == "baseline" ? "\"action\":\"no_reply\""
+                                        : mode == "shadow" ? "deviation=shadow;"
+                                                           : "deviation=model_override:no_reply;";
+        EXPECT_NE(bare.records.front().find(silenceMark), std::string::npos) << mode;
+        EXPECT_EQ(bare.records.front().find("不出声"), std::string::npos) << "旁白原文不进记录";
+    }
 }

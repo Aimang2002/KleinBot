@@ -13,10 +13,12 @@
  * 其中 @ 只算活动（回答由 Message 的 @ 路径给出），提名字/引用回复她才触发会话轮。
  *
  * 轮次循环：主 Agent（人格 system + 公共上下文材料 + 动作工具表）每轮
- * 三选一——group_say（说话）/ 不调用工具且无文字（pass，连续 3 拍收场）/
- * leave_topic（离场，可带最后一句）。定案前可走至多 3 趟工具轮（recall_context
- * 召回 + setTools 开放的注册表工具，如 inspect_image / generate_image /
- * klein_web_search），结果回灌后再定案；工具产出的出站消息（图）当场投递并入群缓冲。
+ * 三选一——group_say（说话）/ 不调用工具（pass，连续 3 拍收场）/
+ * leave_topic（离场，可带最后一句）。发进群里的只有 group_say 的话与离场最后一句：
+ * 不调工具、直接写出的文字按沉默处理，不发出（L3 护栏，判定见 Application/EngagementTurn）。
+ * 定案前可走至多 3 趟工具轮（recall_context 召回 + setTools 开放的注册表工具，
+ * 如 inspect_image / generate_image / klein_web_search），结果回灌后再定案；
+ * 工具产出的出站消息（图）当场投递并入群缓冲。
  * 工具轮走 Application/ToolLoop（与一对一对话共用同一实现），开放工具的使用规则
  * 由工具自带、经 Application/ToolGuidance 组装（GroupTurn 场景）。
  * 轮次触发：点名/引用回复她（立即）、追问窗口（她开口后 120s 内群友接话 + 静默，
@@ -92,20 +94,6 @@ struct EngagementSession
     std::string endReason;
 };
 
-// 主 Agent 单轮的解析结果（say / pass / leave 三选一）
-struct EngagementTurn
-{
-    enum class Kind
-    {
-        Speak,
-        Pass,
-        Leave,
-    };
-    Kind kind = Kind::Pass;
-    std::string text;   // Speak：那句话；Leave：final_text（可空）
-    std::string reason; // Leave：离场理由（仅日志）
-};
-
 class EngagementService
 {
 public:
@@ -179,12 +167,9 @@ public:
     // pollingThread 每 3s：硬后盖（消息量/不活跃）+ 保留期清扫 + 追问窗口/lull 轮次触发
     void pump(std::int64_t now);
 
-    // 群 lane worker 内执行：一轮跟进（装配材料 → 主 Agent → 动作分发）
+    // 群 lane worker 内执行：一轮跟进（装配材料 → 主 Agent → 定案（Application/EngagementTurn）
+    // → 动作分发）
     void runTurn(std::uint64_t groupId);
-
-    // 轮次动作解析：工具调用 group_say/leave_topic 定案；无工具时非空文字
-    // 宽容视为说话（模型偶尔不带工具直出），空文字 = pass
-    static EngagementTurn parseTurn(const ChatResponse &response);
 
     // token 启发式估算（预算门控用，非精确计价）：CJK 码点 ≈1 token/字，
     // ASCII ≈1 token/4 字符
