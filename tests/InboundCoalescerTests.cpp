@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include "Affect/DecisionRecorder.h"
+#include "Affect/DecisionStore.h"
+#include "Affect/JudgePolicy.h"
 #include "Application/InboundCoalescer.h"
 #include "Asset/ImageAssetStore.h"
 #include "ChatService/ChatService.h"
@@ -279,7 +282,9 @@ public:
 
 struct PrivateMessageFixture
 {
-    PrivateMessageFixture()
+    // recorder / policy 可空（默认）：给了就走群聊决策点（配置实时生效的 enforce 用例）
+    explicit PrivateMessageFixture(affect::DecisionRecorder *recorder = nullptr,
+                                   affect::DecisionPolicy *policy = nullptr)
         : store(directory.path() + "/conversation.db"),
           registry(writeRegistry()),
           dock(network),
@@ -292,8 +297,10 @@ struct PrivateMessageFixture
           commands(1),
           liveVoice(VoiceOptions{}),
           voice(liveVoice),
-          message(dock, session, chat, sender, assets, commands, voice, MessageOptions{},
-                  [] { return ModelEndpointOptions{}; }, globalVoice)
+          liveMessage(messageOptions()),
+          message(dock, session, chat, sender, assets, commands, voice, liveMessage,
+                  [] { return ModelEndpointOptions{}; }, globalVoice, liveAffect, nullptr, nullptr,
+                  nullptr, recorder, nullptr, policy)
     {
         dock.registerStandard("Fake", std::make_unique<CountingChatPort>(&captured));
     }
@@ -317,6 +324,12 @@ struct PrivateMessageFixture
     {
         ChatOptions options;
         options.defaultModel = "test-model";
+        return options;
+    }
+    static MessageOptions messageOptions()
+    {
+        MessageOptions options;
+        options.bot.id = 10086;
         return options;
     }
 
@@ -345,6 +358,8 @@ struct PrivateMessageFixture
     Live<VoiceOptions> liveVoice;
     Voice voice;
     Live<bool> globalVoice{false};
+    Live<MessageOptions> liveMessage;
+    Live<AffectOptions> liveAffect{AffectOptions{}};
     Message message;
     std::vector<ChatRequest> captured;
 };
@@ -443,4 +458,67 @@ TEST(MessageLiveConfigTest, GlobalVoiceSwitchIsReadAtEachReply)
     fixture.message.handleMessage(privateText(7, "还在吗"));
     EXPECT_EQ(fixture.sender.texts, (std::vector<std::string>{"回复1", "系统提示：语音模块异常。"}))
         << "开关打开后下一条走语音路径";
+}
+
+// 配置实时生效（L1.f）：群聊开关在每次过滤时取。先放行一条 @ 她的群消息，
+// 关掉开关后下一条就不处理；私聊不受影响；bot 身份不随开关变
+TEST(MessageLiveConfigTest, GroupChatSwitchIsReadAtEachFilter)
+{
+    PrivateMessageFixture fixture;
+    InboundMessage at = privateText(7, "在吗");
+    at.message_type = "group";
+    at.group_id = 8823;
+    at.mentioned_ids = {10086};
+    ASSERT_TRUE(fixture.message.messageFilter(at));
+
+    MessageOptions next = *fixture.liveMessage.get();
+    next.groupChatEnabled = false;
+    fixture.liveMessage.set(next);
+    EXPECT_FALSE(fixture.message.messageFilter(at));
+    EXPECT_TRUE(fixture.message.messageFilter(privateText(7, "私聊照常")));
+
+    next.groupChatEnabled = true;
+    fixture.liveMessage.set(next);
+    EXPECT_TRUE(fixture.message.messageFilter(at));
+}
+
+// 配置实时生效（L1.f）：Message 每条消息取一次 affect.enforce。群聊 @ 走决策点：影子期 judge
+// 在投递之后才调用（这条消息的主模型请求已发出），换成生效期后，下一条消息的 judge 在请求
+// 主模型之前调用
+TEST(MessageLiveConfigTest, EnforceIsReadAtEachMessage)
+{
+    CoalesceTemporaryDirectory decisions;
+    affect::DecisionStore store(decisions.path() + "/affect.db");
+    affect::DecisionRecorder recorder(&store, [] { return std::int64_t(1000); });
+    const std::vector<ChatRequest> *requests = nullptr;
+    std::vector<std::size_t> requestsSeenByJudge;
+    affect::JudgePolicy judge(
+        [&requests, &requestsSeenByJudge](const std::string &, const std::string &)
+        {
+            requestsSeenByJudge.push_back(requests->size());
+            return std::string(R"({"schema_version":1,"action":"reply","tool_policy":"inherit"})");
+        },
+        "judge-model");
+    PrivateMessageFixture fixture(&recorder, &judge);
+    requests = &fixture.captured;
+    InboundMessage at = privateText(7, "在吗");
+    at.message_type = "group";
+    at.group_id = 8823;
+    at.message_id = 1;
+    at.mentioned_ids = {10086};
+
+    fixture.message.handleMessage(at);
+    ASSERT_EQ(fixture.captured.size(), 1U);
+    EXPECT_EQ(requestsSeenByJudge, (std::vector<std::size_t>{1})) << "影子期：投递之后才调 judge";
+
+    AffectOptions next = *fixture.liveAffect.get();
+    next.enforce = true;
+    fixture.liveAffect.set(next);
+    at.message_id = 2;
+    at.plain_text = "还在吗";
+    at.raw_message = "还在吗";
+    fixture.message.handleMessage(at);
+    ASSERT_EQ(fixture.captured.size(), 2U);
+    EXPECT_EQ(requestsSeenByJudge, (std::vector<std::size_t>{1, 1}))
+        << "生效期：先调 judge、再请求主模型";
 }

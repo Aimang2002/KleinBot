@@ -193,9 +193,10 @@ std::string truncateColloquial(const std::string &text, std::size_t maxChars)
 } // namespace
 
 EngagementService::EngagementService(BotIdentity bot, GroupContextStore *store,
+                                     const Live<AffectOptions> &affectOptions,
                                      MessageSenderPort *sender,
                                      std::function<std::int64_t()> clock)
-    : bot(bot), store(store), sender(sender),
+    : bot(bot), store(store), affectOptions(affectOptions), sender(sender),
       clock(clock ? std::move(clock)
                   : [] { return static_cast<std::int64_t>(std::time(nullptr)); })
 {
@@ -692,6 +693,8 @@ void EngagementService::runTurn(std::uint64_t groupId)
 {
     if (mainAgent == nullptr || store == nullptr)
         return;
+    // 一个会话轮取一次（锁外）：决策点与执行记录用同一个 enforce
+    const bool enforce = affectOptions.get()->enforce;
 
     enum class TurnKind
     {

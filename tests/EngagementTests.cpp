@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "Affect/AffectOptions.h"
 #include "Affect/BaselinePolicy.h"
 #include "Affect/DecisionRecord.h"
 #include "Affect/DecisionRecorder.h"
@@ -14,6 +15,7 @@
 #include "Tool/ImageToolGuidance.h"
 #include "Tool/Tool.h"
 #include "Tool/ToolRegistry.h"
+#include "utils/Live.h"
 
 #include <algorithm>
 #include <chrono>
@@ -126,6 +128,7 @@ struct Harness
     TemporaryDirectory directory;
     std::unique_ptr<GroupContextStore> store;
     std::unique_ptr<FakeSender> sender;
+    Live<AffectOptions> affect{AffectOptions{}};
     std::unique_ptr<EngagementService> service;
     std::int64_t now = 1'000'000;
     std::vector<std::uint64_t> submittedTurns;
@@ -140,7 +143,7 @@ struct Harness
         : store(std::make_unique<GroupContextStore>(directory.path() + "/conversation.db")),
           sender(std::make_unique<FakeSender>()),
           service(std::make_unique<EngagementService>(
-              bot, store.get(), sender.get(), [this] { return now; }))
+              bot, store.get(), affect, sender.get(), [this] { return now; }))
     {
         service->setSubmitTurn([this](std::uint64_t group) { submittedTurns.push_back(group); });
         // 与组合根一致：她的出站经 recorder 入群缓冲并算会话活动（GroupContextService::
@@ -195,6 +198,14 @@ struct Harness
     {
         GroupMessageRecord value = record(group, 42, "小白", text, ts);
         store->append(value); // 只入库不喂会话（构造超窗口材料用）
+    }
+
+    // affect.enforce 是活值（配置实时生效 L1.f）：测试经它切换影子期 / 生效期
+    void setEnforce(bool enforce)
+    {
+        AffectOptions options = *affect.get();
+        options.enforce = enforce;
+        affect.set(options);
     }
 };
 
@@ -1385,7 +1396,8 @@ TEST(EngagementIntegrationTest, ObserveFeedsEngagementAndNameMentionActivates)
     bot.id = 10086;
     bot.name = "Klein";
     GroupContextService contextService(&state, bot, &store, &sender);
-    EngagementService engagement(bot, &store, &sender, [] { return std::int64_t(1000); });
+    Live<AffectOptions> affect{AffectOptions{}};
+    EngagementService engagement(bot, &store, affect, &sender, [] { return std::int64_t(1000); });
     contextService.setEngagement(&engagement);
     int workerCalls = 0;
     engagement.setWorker([&workerCalls](const std::string &, const std::string &)
@@ -1433,7 +1445,8 @@ TEST(EngagementIntegrationTest, AtMentionHardActivatesSession)
     bot.id = 10086;
     bot.name = "Klein";
     GroupContextService contextService(&state, bot, &store, &sender);
-    EngagementService engagement(bot, &store, &sender, [] { return std::int64_t(1000); });
+    Live<AffectOptions> affect{AffectOptions{}};
+    EngagementService engagement(bot, &store, affect, &sender, [] { return std::int64_t(1000); });
     contextService.setEngagement(&engagement);
 
     // @ 消息：Message 路径调用 onAtActivated 硬激活（observe 只管入库）
@@ -1598,7 +1611,8 @@ TEST(EngagementColdTest, LearningStateSurvivesRestart)
 
     std::int64_t now = 1'000'000;
     auto store1 = std::make_unique<GroupContextStore>(dbPath);
-    EngagementService first(bot, store1.get(), nullptr, [&now] { return now; });
+    Live<AffectOptions> affect{AffectOptions{}};
+    EngagementService first(bot, store1.get(), affect, nullptr, [&now] { return now; });
     first.setMemberProvider([](std::uint64_t) { return 100L; });
 
     // 学习基线 4 小时（每小时 40 条）
@@ -1617,7 +1631,7 @@ TEST(EngagementColdTest, LearningStateSurvivesRestart)
 
     // 重启后：武装期与基线从库恢复 → 立即武装，小尖峰直接触发（无需再等 2 小时）
     auto store2 = std::make_unique<GroupContextStore>(dbPath);
-    EngagementService second(bot, store2.get(), nullptr, [&now] { return now; });
+    EngagementService second(bot, store2.get(), affect, nullptr, [&now] { return now; });
     second.setMemberProvider([](std::uint64_t) { return 100L; });
     std::vector<std::uint64_t> submitted;
     second.setSubmitTurn([&](std::uint64_t g) { submitted.push_back(g); });
@@ -1647,7 +1661,8 @@ TEST(EngagementColdTest, DailyCapSurvivesRestart)
 
     std::int64_t now = 2'000'000;
     auto store1 = std::make_unique<GroupContextStore>(dbPath);
-    EngagementService first(bot, store1.get(), nullptr, [&now] { return now; });
+    Live<AffectOptions> affect{AffectOptions{}};
+    EngagementService first(bot, store1.get(), affect, nullptr, [&now] { return now; });
     first.setMemberProvider([](std::uint64_t) { return 100L; });
 
     auto feedBurst = [&](GroupContextStore &store, EngagementService &service, int count)
@@ -1684,7 +1699,7 @@ TEST(EngagementColdTest, DailyCapSurvivesRestart)
 
     // 重启后当日帽仍在（不再有 3 次机会）
     auto store2 = std::make_unique<GroupContextStore>(dbPath);
-    EngagementService second(bot, store2.get(), nullptr, [&now] { return now; });
+    EngagementService second(bot, store2.get(), affect, nullptr, [&now] { return now; });
     second.setMemberProvider([](std::uint64_t) { return 100L; });
     std::vector<std::uint64_t> submitted;
     second.setSubmitTurn([&](std::uint64_t g) { submitted.push_back(g); });
@@ -1864,7 +1879,7 @@ TurnTranscript runTwoLullTurns(affect::DecisionPolicy *policy, bool setPolicy = 
     if (setPolicy)
     {
         harness.service->setPolicy(policy);
-        harness.service->setEnforce(enforce);
+        harness.setEnforce(enforce);
     }
 
     harness.service->onAtActivated(8823, "话题");
@@ -2115,7 +2130,7 @@ struct EnforcedHarness
     {
         harness.service->setDecisionRecorder(&recorder);
         harness.service->setPolicy(policy != nullptr ? policy : &judge);
-        harness.service->setEnforce(true);
+        harness.setEnforce(true);
     }
 
     std::string latestDeviation()
@@ -2343,7 +2358,7 @@ OneTurnOutcome runOneLullTurn(const ChatResponse &response, const std::string &m
     if (mode != "baseline")
     {
         harness.service->setPolicy(&judge);
-        harness.service->setEnforce(mode == "enforce");
+        harness.setEnforce(mode == "enforce");
     }
 
     harness.service->onAtActivated(8823, "话题");
@@ -2402,4 +2417,40 @@ TEST(EngagementDecisionRecordTest, BareTextTurnRecordsLikeChosenSilence)
         EXPECT_NE(bare.records.front().find(silenceMark), std::string::npos) << mode;
         EXPECT_EQ(bare.records.front().find("不出声"), std::string::npos) << "旁白原文不进记录";
     }
+}
+
+// 配置实时生效（L1.f）：affect.enforce 是活值，每个会话轮开头取一次。同一个服务先在影子期
+// 跑一轮（计划 no_reply 只进记录，主模型照常被请求），换成生效之后，下一轮计划就兑现
+TEST(EngagementEnforceTest, EnforceFollowsLiveValueOnNextTurn)
+{
+    Harness harness;
+    affect::DecisionStore store(harness.directory.path() + "/affect.db");
+    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    affect::JudgePolicy judge([](const std::string &, const std::string &)
+                              { return judgeReply("no_reply"); },
+                              "judge-model");
+    harness.service->setDecisionRecorder(&recorder);
+    harness.service->setPolicy(&judge);
+
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.service->runTurn(8823);
+    ASSERT_EQ(harness.agentContracts.size(), 1U) << "影子期：计划沉默只记录，主模型照常被请求";
+    EXPECT_EQ(executionsOf(harness.directory.path() + "/affect.db",
+                           store.recentDecisions(1).front().decisionId)
+                  .front()
+                  .second,
+              "shadow");
+
+    harness.setEnforce(true);
+    harness.now += 60;
+    harness.feed(8823, "又来一条", harness.now);
+    harness.service->runTurn(8823);
+    EXPECT_EQ(harness.agentContracts.size(), 1U) << "换成生效后的下一轮：计划沉默兑现，不请求主模型";
+    ASSERT_EQ(store.recentDecisions(10).size(), 2U);
+    EXPECT_EQ(executionsOf(harness.directory.path() + "/affect.db",
+                           store.recentDecisions(1).front().decisionId)
+                  .front()
+                  .first,
+              "skipped");
 }

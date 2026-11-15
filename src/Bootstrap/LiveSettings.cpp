@@ -12,6 +12,7 @@ LiveSettings::LiveSettings(const RuntimeSettings &startup)
       webFetch(startup.webFetch),
       dock(startup.dock),
       glance(startup.glance),
-      message(startup.message)
+      message(startup.message),
+      affect(startup.affect)
 {
 }

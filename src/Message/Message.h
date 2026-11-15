@@ -13,6 +13,7 @@
 #include "../Asset/ImageAssetStore.h"
 #include "../Action/Action.h"
 #include "MessageOptions.h"
+#include "../Affect/AffectOptions.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
 #include "../utils/Live.h"
 #include <iostream>
@@ -35,18 +36,19 @@ public:
     // perception 可空：注入时白名单群被 @ 的回复带上话题背景注记（T7），关闭时内部 no-op
     // groupContext 可空：注入时白名单群启用内容级上下文装配与收敛契约（T7b）
     // visionModel：视觉端点来源，每次调用时取一次（models.vision 可只填注册名）
-    // globalVoice：语音总开关（活值，只读），每次回复投递时取一次
+    // options / globalVoice / affectOptions 都是组合根的活值（ADR-023，只读）：
+    // 群聊开关在每次过滤时取，语音总开关在每次投递回复时取，enforce 在每次决策时取
     explicit Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                      MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
-                     CommandRegistry &registry, Voice &voice, MessageOptions options,
+                     CommandRegistry &registry, Voice &voice, const Live<MessageOptions> &options,
                      EndpointProvider visionModel, const Live<bool> &globalVoice,
+                     const Live<AffectOptions> &affectOptions,
                      class TypingIndicator *typingIndicator = nullptr,
                      class PerceptionChannel *perception = nullptr,
                      class GroupContextService *groupContext = nullptr,
                      affect::DecisionRecorder *decisionRecorder = nullptr,
                      ImageAssetStore *sharedAssets = nullptr,
-                     affect::DecisionPolicy *decisionPolicy = nullptr,
-                     bool enforcePlan = false);
+                     affect::DecisionPolicy *decisionPolicy = nullptr);
 
 	/**
 	 * @brief 消息过滤：群聊触发门槛与私聊放行
@@ -148,7 +150,7 @@ private:
 	ImageAssetStore &imageAssetStore;
 	CommandRegistry &registry;
     Voice &voice;
-    MessageOptions options;
+    const Live<MessageOptions> &options;
     EndpointProvider visionModel;
     class TypingIndicator *typingIndicator = nullptr; // 可空：未注入则无输入状态提示
     class PerceptionChannel *perception = nullptr;    // 可空：未注入则无话题注记
@@ -156,7 +158,7 @@ private:
     affect::DecisionRecorder *decisionRecorder = nullptr; // 可空：M1 影子决策记录
     // 可空（= 基线）：R1 决策层。群聊 @ 且非基线策略时，影子期在投递之后跑 judge 并记录计划
     affect::DecisionPolicy *decisionPolicy = nullptr;
-    bool enforcePlan = false; // R1.c 前只保存，不改变任何动作
+    const Live<AffectOptions> &affectOptions; // enforce：false = 影子期，计划只进记录
     // 可空：群资产库（ADR-019）。群聊的当前图片进这里（24h），不进发送者个人库；
     // 工具经 ToolContext.shared_scope_id 先查它
     ImageAssetStore *sharedAssets = nullptr;

@@ -234,11 +234,13 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 	// 分支已在上文 return，不计入库）；服务内部有开关/白名单/群聊三重门控。
 	// 例外：会被当作 #命令 处理的消息不是群聊内容，不入库也不喂话题会话
 	// （否则 "@她 #坏" 会被会话当成点名而多回一句，2026-10-28）
-	const bool command = messageClass.messageFilter(data) && messageClass.isCommand(data);
+	// 过滤只做一次：群聊开关是活值，同一条消息的入库判断与回应判断用同一个结果
+	const bool accepted = messageClass.messageFilter(data);
+	const bool command = accepted && messageClass.isCommand(data);
 	if (!command)
 		groupContext.observe(data);
 
-	if (!messageClass.messageFilter(data))
+	if (!accepted)
 	{
 		// 非 @ 群消息等过滤失败路径：观察通道只看不说（T7，白名单外/关闭时内部 no-op）
 		perception.observeMessage(data);
@@ -647,7 +649,8 @@ int main(int argc, char **argv)
 	// 未配置"并保持 no-op；观察通道关闭时 store 为空同理。
 	// 已知限制（L2.b 解除）：seam 每次调用按活值解析端点，改 models.vision 下一张图即用新端点；
 	// 但设不设 seam 只看启动时的就绪状态，启动时未就绪、之后才补配的要重启才开始瞥视
-	GlanceService glanceService(groupContextStore.get(), &groupImageAssets, settings.glance);
+	// 每群每分钟预算持活值（每张图取一次）；glance.enabled 仍按启动值决定是否起线程（L2.b）
+	GlanceService glanceService(groupContextStore.get(), &groupImageAssets, liveSettings.glance);
 	if (modelEndpointReadinessText(visionEndpoint(), "视觉", "models.vision").empty())
 	{
 		glanceService.setVision(
@@ -678,10 +681,11 @@ int main(int argc, char **argv)
 	// 话题会话（意志层 v2）：每群至多一个存活会话，激活→轮次→保留 2h；
 	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=压缩/情绪基调），未配管理员
 	// 则无主模型、跟进自动停摆（与主动发言同一底线）
-	EngagementService engagementService(settings.bot, groupContextStore.get(), &messageSender);
+	// affect.enforce 持活值，每个会话轮取一次；决策记录与策略仍按启动配置构造（L2.c）
+	EngagementService engagementService(settings.bot, groupContextStore.get(), liveSettings.affect,
+										&messageSender);
 	engagementService.setDecisionRecorder(decisionRecorder.get());
 	engagementService.setPolicy(decisionPolicy.get());
-	engagementService.setEnforce(settings.affect.enforce);
 	groupContextService.setEngagement(&engagementService);
 	if (settings.bot.managerId != 0)
 	{
@@ -715,10 +719,12 @@ int main(int argc, char **argv)
 					return entry.memberCount;
 			return 0;
 		});
+	// 群聊开关、语音总开关、affect.enforce 都持活值（ADR-023）；MessageOptions 里的 bot
+	// 身份保持运行值（决定 9）
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
-		commandRegistry, voice, settings.message, visionEndpoint,
-		liveSettings.globalVoice, &typingIndicator, &perceptionChannel, &groupContextService,
-		decisionRecorder.get(), &groupImageAssets, decisionPolicy.get(), settings.affect.enforce);
+		commandRegistry, voice, liveSettings.message, visionEndpoint,
+		liveSettings.globalVoice, liveSettings.affect, &typingIndicator, &perceptionChannel,
+		&groupContextService, decisionRecorder.get(), &groupImageAssets, decisionPolicy.get());
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,

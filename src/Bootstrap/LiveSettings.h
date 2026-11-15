@@ -34,6 +34,7 @@ struct LiveSettings
     Live<DockOptions> dock;
     Live<GlanceOptions> glance;
     Live<MessageOptions> message;
+    Live<AffectOptions> affect;
 };
 
 #endif // LIVE_SETTINGS_H

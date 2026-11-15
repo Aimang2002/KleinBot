@@ -27,19 +27,20 @@ std::mt19937 mt_rand(1000);
 
 Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                  MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
-                 CommandRegistry &registry, Voice &voice, MessageOptions options,
+                 CommandRegistry &registry, Voice &voice, const Live<MessageOptions> &options,
                  EndpointProvider visionModel, const Live<bool> &globalVoice,
+                 const Live<AffectOptions> &affectOptions,
                  TypingIndicator *typingIndicator, PerceptionChannel *perception,
                  GroupContextService *groupContext,
                  affect::DecisionRecorder *decisionRecorder,
                  ImageAssetStore *sharedAssets,
-                 affect::DecisionPolicy *decisionPolicy, bool enforcePlan)
+                 affect::DecisionPolicy *decisionPolicy)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry), voice(voice),
-      options(std::move(options)), visionModel(std::move(visionModel)),
+      options(options), visionModel(std::move(visionModel)),
       global_Voice(globalVoice), typingIndicator(typingIndicator), perception(perception),
       groupContext(groupContext), decisionRecorder(decisionRecorder), sharedAssets(sharedAssets),
-      decisionPolicy(decisionPolicy), enforcePlan(enforcePlan)
+      decisionPolicy(decisionPolicy), affectOptions(affectOptions)
 {
 }
 
@@ -188,8 +189,10 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		const bool recording = this->decisionRecorder != nullptr && this->decisionRecorder->enabled();
 		const bool policyDecides = recording && isGroup &&
 			!affect::isBaselinePolicy(this->decisionPolicy);
-		const bool shadowPolicy = policyDecides && !this->enforcePlan;
-		const bool enforcedPolicy = policyDecides && this->enforcePlan;
+		// enforce 每条消息取一次（配置实时生效）：影子与生效的判定都出自这一份
+		const bool enforcePlan = this->affectOptions.get()->enforce;
+		const bool shadowPolicy = policyDecides && !enforcePlan;
+		const bool enforcedPolicy = policyDecides && enforcePlan;
 		const std::string triggerMessageId = !current_data.message_id_raw.empty()
 			? current_data.message_id_raw
 			: std::to_string(current_data.message_id);
@@ -352,7 +355,7 @@ void Message::dispatch(const InboundMessage &data, const OutboundMessage &msg,
 			this->groupContext->recordOutbound(data.group_id, msg, correlationId);
 		// 指向性回复：本轮第一条出站被 @ 才引用+@ 回发起人；
 		// 同一轮后续分条/多消息是裸消息，不再重复引用（固定行为，无配置开关）
-		delivery.reply = buildReplyContext(data, options.bot, withReplyContext);
+		delivery.reply = buildReplyContext(data, options.get()->bot, withReplyContext);
 		if (delivery.reply)
 		{
 			const bool quoteable = delivery.reply->message_id != 0 ||
@@ -412,14 +415,16 @@ bool Message::messageFilter(const InboundMessage &data)
 
 	if (data.message_type == "group")
 	{
-		if (!options.groupChatEnabled)
+		// 一次过滤取一次快照：群聊开关实时生效，bot 身份保持运行值（决定 9）
+		const Live<MessageOptions>::Snapshot current = options.get();
+		if (!current->groupChatEnabled)
 		{
 			return false; // 群消息是否开启
 		}
 
 		// 触发门槛：消息段里明确 @ 了 bot（@全体成员是广播，解码器不记录）
 		if (std::find(data.mentioned_ids.begin(), data.mentioned_ids.end(),
-					  options.bot.id) == data.mentioned_ids.end())
+					  current->bot.id) == data.mentioned_ids.end())
 		{
 			return false;
 		}

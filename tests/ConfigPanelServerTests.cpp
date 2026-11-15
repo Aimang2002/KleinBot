@@ -22,6 +22,7 @@ using json = nlohmann::json;
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -330,7 +331,8 @@ TEST_F(PanelServerFixture, PostArrayAliasesIsRejectedAndKeepsString)
                                    [this]() { return readFile(); }, *store);
 }
 
-// R1 affect 三键经面板 GET→POST 往返落盘、进快照，三键都分级为 Restart
+// R1 affect 三键经面板 GET→POST 往返落盘、进快照（policy、judge_model 分级为 Restart；
+// enforce 自配置实时生效 L1.f 起为 dynamic，见 PostLiveSwitchesReportsDynamicAndAppliesToLiveValues）
 TEST_F(PanelServerFixture, PostAffectDecisionKeysRoundtripClassifiesRestart)
 {
     httplib::Client client("127.0.0.1", port);
@@ -361,6 +363,38 @@ TEST_F(PanelServerFixture, PostAffectDecisionKeysRoundtripClassifiesRestart)
     EXPECT_EQ(written["affect"]["judge_model"], "judge-model");
     EXPECT_EQ(store->current()->schema->affect.policy, "judge");
     EXPECT_EQ(store->current()->schema->affect.judgeModel, "judge-model");
+}
+
+// 配置实时生效 L1.f：面板保存群聊开关、affect.enforce、瞥视预算，三项都按 dynamic 返回，
+// 并经注入的重载入口（产品规则表）换进活值。affect、glance 在页面上不展示，接口照常接收
+TEST_F(PanelServerFixture, PostLiveSwitchesReportsDynamicAndAppliesToLiveValues)
+{
+    httplib::Client client("127.0.0.1", port);
+    const auto fetched = client.Get("/api/config", authHeaders());
+    ASSERT_TRUE(fetched != nullptr);
+    ASSERT_EQ(fetched->status, 200);
+    nlohmann::json candidate = nlohmann::json::parse(fetched->body);
+    candidate["bot"]["group_chat_enabled"] = false;
+    candidate["affect"]["enforce"] = true;
+    candidate["glance"]["per_group_per_minute"] = 12;
+    const auto posted = client.Post("/api/config", authHeaders(), candidate.dump(),
+                                    "application/json");
+    ASSERT_TRUE(posted != nullptr);
+    ASSERT_EQ(posted->status, 200);
+
+    const nlohmann::json body = nlohmann::json::parse(posted->body);
+    EXPECT_TRUE(body["reloadSuccess"].get<bool>());
+    std::map<std::string, std::string> impacts;
+    for (const auto &change : body["diff"])
+        impacts[change["path"].get<std::string>()] = change["impact"].get<std::string>();
+    EXPECT_EQ(impacts, (std::map<std::string, std::string>{{"affect.enforce", "dynamic"},
+                                                           {"bot.group_chat_enabled", "dynamic"},
+                                                           {"glance.per_group_per_minute", "dynamic"}}));
+    EXPECT_EQ(body["counts"]["dynamic"], 3);
+    EXPECT_EQ(body["counts"]["restart"], 0);
+    EXPECT_FALSE(live->message.get()->groupChatEnabled);
+    EXPECT_TRUE(live->affect.get()->enforce);
+    EXPECT_EQ(live->glance.get()->perGroupPerMinute, 12);
 }
 
 TEST_F(PanelServerFixture, PostInvalidConfigReturns422AndKeepsFile)

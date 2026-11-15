@@ -46,7 +46,8 @@ TEST(ConfigRulesTest, PathsAreUniqueAndEveryRowIsComplete)
 // 接通实时生效的键，按表的顺序：每行都带应用函数、档位 Dynamic。
 // L1.a：chat 组除 top_p 与 worker_threads 外的 6 个；L1.b：models 的三个端点各 4 个字段；
 // L1.c：voice 的 5 个键（开关与合成参数）；L1.d：memory 除 enabled 外的 4 个；
-// L1.e：web_search 除 enabled、provider 外的 8 个，web_fetch 除 enabled 外的 6 个，network.proxy
+// L1.e：web_search 除 enabled、provider 外的 8 个，web_fetch 除 enabled 外的 6 个，network.proxy；
+// L1.f：群聊开关、affect.enforce、瞥视预算
 TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
 {
     std::vector<std::string> wired;
@@ -59,6 +60,8 @@ TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
         EXPECT_TRUE(rule.effect.impact() == ConfigChangeImpact::Dynamic) << rule.path;
     }
     const std::vector<std::string> expected = {
+        // L1.f（bot 节在表的最前面）
+        "bot.group_chat_enabled",
         // L1.a
         "chat.default_model", "chat.temperature", "chat.frequency_penalty", "chat.presence_penalty",
         "chat.max_message_tokens", "chat.message_survival_seconds",
@@ -72,6 +75,8 @@ TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
         "voice.reference_text",
         // L1.d
         "memory.model", "memory.batch_turns", "memory.idle_minutes", "memory.recall_limit",
+        // L1.f
+        "affect.enforce", "glance.per_group_per_minute",
         // L1.e
         "web_search.endpoint", "web_search.api_key", "web_search.search_depth",
         "web_search.max_results", "web_search.max_content_chars", "web_search.max_response_bytes",
@@ -80,7 +85,7 @@ TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
         "web_fetch.request_timeout_ms", "web_fetch.cache_ttl_seconds", "web_fetch.cache_max_entries",
         "network.proxy",
     };
-    EXPECT_EQ(wired.size(), 42U);
+    EXPECT_EQ(wired.size(), 45U);
     EXPECT_EQ(wired, expected);
 }
 

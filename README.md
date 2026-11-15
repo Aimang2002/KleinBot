@@ -111,7 +111,7 @@ KleinBot 使用 Schema 化 JSON 配置，运行时读取当前工作目录的 `.
 | `voice` | TTS 开关、服务地址和参考音频（音频写入系统临时目录） |
 | `features` | 可选业务功能开关 |
 | `memory` | 长期记忆模型、批次和召回限制 |
-| `affect` | 决策层：`enabled` 决策记录开关（默认关闭）；`policy` 取 `baseline`（默认，复现既有行为）或 `judge`（worker 模型为每轮产出行为计划）；`enforce` 默认 `false`，即只记录计划不改变回应（影子）；`judge_model` 留空用 `models.worker`。**面板不展示，只在 `.config.json` 手改**（面板保存时原样带回）。开影子：`enabled=true, policy=judge, enforce=false`，改动需重启。R1.b 起 @ 回复与话题会话轮都接入决策点：影子期 judge 只写计划（执行记录标 `shadow`），实际回应不变；关闭影子把 `policy` 改回 `baseline` 并重启。`enforce=true`（R1.c）让计划生效：冷场/冷启动轮 judge 说不开口就不请求主模型，其余轮按计划给分寸提示并收窄工具；影子期达标前不要打开 |
+| `affect` | 决策层：`enabled` 决策记录开关（默认关闭）；`policy` 取 `baseline`（默认，复现既有行为）或 `judge`（worker 模型为每轮产出行为计划）；`enforce` 默认 `false`，即只记录计划不改变回应（影子）；`judge_model` 留空用 `models.worker`。**面板不展示，只在 `.config.json` 手改**（面板保存时原样带回）。开影子：`enabled=true, policy=judge, enforce=false`；`enabled`、`policy`、`judge_model` 改动需重启，`enforce` 改了即生效（下一次群回应决策起）。R1.b 起 @ 回复与话题会话轮都接入决策点：影子期 judge 只写计划（执行记录标 `shadow`），实际回应不变；关闭影子把 `policy` 改回 `baseline` 并重启。`enforce=true`（R1.c）让计划生效：冷场/冷启动轮 judge 说不开口就不请求主模型，其余轮按计划给分寸提示并收窄工具；影子期达标前不要打开 |
 | `glance` | 群聊瞥视开关与每群每分钟预算，默认关闭。面板不展示，只在 `.config.json` 手改（面板保存时原样带回） |
 | `web_search` | Tavily 联网搜索、超时和单次结果裁剪配置 |
 | `web_fetch` | 网页抓取工具的正文上限、超时和缓存配置 |
@@ -196,7 +196,7 @@ export KLEIN_TAVILY_API_KEY="tvly-..."
 ```
 
 - `enabled`：总开关，默认 `false`。需要同时开启观察通道并配置好视觉模型，否则启动日志会说明原因并自动不启用。改动需重启。
-- `per_group_per_minute`：每个群每分钟最多瞥视几张图（1–60，默认 6）。刷屏超出的图标记为「未看（刷屏）」；同一张图（如反复刷的表情包）只看一次，重复出现不计数。改动需重启。
+- `per_group_per_minute`：每个群每分钟最多瞥视几张图（1–60，默认 6）。刷屏超出的图标记为「未看（刷屏）」；同一张图（如反复刷的表情包）只看一次，重复出现不计数。改了即生效（下一张图起，已用的次数照常计入一分钟窗口）。
 - 表情包与系统表情不额外花钱：QQ 标记为表情包的图片会带上 `sticker` 标记，商城表情/小黄脸直接以 `[表情 …]` 文字记入缓冲。
 
 ### 通信配置
@@ -244,6 +244,9 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 - `memory.model`（没写时跟着 `chat.default_model` 走）、`memory.batch_turns`、`memory.idle_minutes`、`memory.recall_limit`：后台提取最迟一两秒内按新的批次条件挑下一批、用新模型，召回从下一次起按新条数。`memory.enabled` 仍要重启。
 - `web_search`、`web_fetch` 除 `enabled`（以及 `web_search.provider`）以外的参数：下一次搜索、抓取就用新值；抓取缓存里已有的条目按存入时的有效期过期，条目上限在下一次存入时按新值淘汰。两个 `enabled` 与 `provider` 仍要重启；启动时没开的工具，参数改了也要等重启开启后才用得上。
 - `network.proxy`：模型调用、联网搜索、网页抓取三处一起换，下一次请求就走新代理。
+- `bot.group_chat_enabled`：下一条群消息起按新开关处理。
+- `affect.enforce`：下一次群回应决策起按新值在影子期与生效期之间切换；`affect` 的另外三项仍要重启。
+- `glance.per_group_per_minute`：下一张图起按新预算；`glance.enabled` 仍要重启。
 
 其余配置仍需重启机器人才生效（`chat.top_p` 目前没有送进模型请求，配置了也不起作用）。
 

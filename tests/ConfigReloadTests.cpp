@@ -262,7 +262,8 @@ TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)
     EXPECT_TRUE(loaded.config->affect.judgeModel.empty());
 }
 
-// R1 决策层三键：解析、非法 policy 回默认 + 诊断、无未知字段告警、三键 Restart
+// R1 决策层三键：解析、非法 policy 回默认 + 诊断、无未知字段告警；policy、judge_model 为
+// Restart，enforce 自配置实时生效 L1.f 起接通应用、为 Dynamic
 TEST(ConfigLoaderAffectTest, ParsesDecisionLayerKeysAndClassifiesRestart)
 {
     const std::string base = R"({
@@ -305,7 +306,7 @@ TEST(ConfigLoaderAffectTest, ParsesDecisionLayerKeysAndClassifiesRestart)
     candidate.affect.judgeModel = "other";
     const ConfigDiff diff = compareConfig(*loaded.config, candidate);
     EXPECT_TRUE(containsChange(diff, "affect.policy", ConfigChangeImpact::Restart));
-    EXPECT_TRUE(containsChange(diff, "affect.enforce", ConfigChangeImpact::Restart));
+    EXPECT_TRUE(containsChange(diff, "affect.enforce", ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(diff, "affect.judge_model", ConfigChangeImpact::Restart));
 
     file.write(withAffect(R"({"enabled": true, "policy": "smart"})"));
@@ -320,7 +321,8 @@ TEST(ConfigLoaderAffectTest, ParsesDecisionLayerKeysAndClassifiesRestart)
     EXPECT_TRUE(warned);
 }
 
-// R1.1 群聊瞥视配置节：缺省默认值、解析、越界回默认 + 诊断、Restart 级
+// R1.1 群聊瞥视配置节：缺省默认值、解析、越界回默认 + 诊断；enabled 为 Restart 级，
+// 预算自配置实时生效 L1.f 起为 Dynamic
 TEST(ConfigLoaderGlanceTest, DefaultsWhenSectionMissing)
 {
     ConfigLoader loader;
@@ -366,7 +368,8 @@ TEST(ConfigLoaderGlanceTest, ParsesSectionAndClassifiesRestart)
     const ConfigDiff diff = compareConfig(*loaded.config, candidate);
     EXPECT_EQ(diff.size(), 2U);
     EXPECT_TRUE(containsChange(diff, "glance.enabled", ConfigChangeImpact::Restart));
-    EXPECT_TRUE(containsChange(diff, "glance.per_group_per_minute", ConfigChangeImpact::Restart));
+    // 预算自配置实时生效 L1.f 起接通应用；enabled 仍为 Restart（L2.b）
+    EXPECT_TRUE(containsChange(diff, "glance.per_group_per_minute", ConfigChangeImpact::Dynamic));
 }
 
 TEST(ConfigLoaderGlanceTest, OutOfRangeBudgetFallsBackToDefaultWithDiagnostic)

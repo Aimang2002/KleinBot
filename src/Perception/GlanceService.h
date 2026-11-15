@@ -26,6 +26,7 @@
  * ≤80 码点），不做语义过滤。
  */
 #include "GlanceOptions.h"
+#include "../utils/Live.h"
 #include "../Asset/ImageAsset.h"
 
 #include <atomic>
@@ -66,7 +67,10 @@ public:
     static constexpr std::size_t kMaxCacheEntries = 512;
     static constexpr std::size_t kMaxCaptionCodePoints = 80;
 
-    GlanceService(GroupContextStore *store, const ImageAssetStore *assets, GlanceOptions options);
+    // options：组合根的活值（ADR-023）。每张图开头取一次预算；enabled 只在 start() 时读
+    //（运行中不跟随重载，L2.b 再改）
+    GlanceService(GroupContextStore *store, const ImageAssetStore *assets,
+                  const Live<GlanceOptions> &options);
     ~GlanceService();
 
     GlanceService(const GlanceService &) = delete;
@@ -96,15 +100,16 @@ public:
 private:
     void workerLoop();
     void process(const GlanceJob &job);
-    // 每群滚动 60 秒窗口预算：有余量则记一次并返回 true（仅 worker 线程访问）
-    bool takeBudget(std::uint64_t groupId);
+    // 每群滚动 60 秒窗口预算：有余量则记一次并返回 true（仅 worker 线程访问）。
+    // perGroupPerMinute 是这张图开头取到的预算，改小后已记的调用照常计入窗口
+    bool takeBudget(std::uint64_t groupId, int perGroupPerMinute);
     void writeCaption(const GlanceJob &job, const std::string &caption);
     void markUnseen(const GlanceJob &job);
     std::string readFingerprintSource(const ImageAsset &asset) const;
 
     GroupContextStore *const store;
     const ImageAssetStore *const assets;
-    const GlanceOptions options;
+    const Live<GlanceOptions> &options;
     Vision vision;
 
     std::thread worker;

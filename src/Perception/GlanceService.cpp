@@ -39,7 +39,7 @@ std::uint64_t fnv1a64(const std::string &bytes)
 } // namespace
 
 GlanceService::GlanceService(GroupContextStore *store, const ImageAssetStore *assets,
-                             GlanceOptions options)
+                             const Live<GlanceOptions> &options)
     : store(store), assets(assets), options(options)
 {
 }
@@ -51,7 +51,8 @@ GlanceService::~GlanceService()
 
 void GlanceService::start()
 {
-    if (!options.enabled)
+    const Live<GlanceOptions>::Snapshot current = options.get();
+    if (!current->enabled)
     {
         LOG_WARNING("群聊瞥视未启用（glance.enabled=false）");
         return;
@@ -73,7 +74,7 @@ void GlanceService::start()
         running.store(true);
     }
     worker = std::thread(&GlanceService::workerLoop, this);
-    LOG_INFO("群聊瞥视已启动（每群每分钟 " + std::to_string(options.perGroupPerMinute) + " 次）");
+    LOG_INFO("群聊瞥视已启动（每群每分钟 " + std::to_string(current->perGroupPerMinute) + " 次）");
 }
 
 void GlanceService::enqueue(GlanceJob job)
@@ -167,7 +168,8 @@ void GlanceService::process(const GlanceJob &job)
         return;
     }
 
-    if (!takeBudget(job.groupId))
+    // 预算每张图取一次（配置实时生效，在队列锁之外取）
+    if (!takeBudget(job.groupId, options.get()->perGroupPerMinute))
     {
         LOG_DEBUG("群聊瞥视超出预算，标记未看：群 " + std::to_string(job.groupId) + " " +
                   job.asset.asset_id);
@@ -196,13 +198,13 @@ void GlanceService::process(const GlanceJob &job)
     writeCaption(job, caption);
 }
 
-bool GlanceService::takeBudget(std::uint64_t groupId)
+bool GlanceService::takeBudget(std::uint64_t groupId, int perGroupPerMinute)
 {
     const auto now = std::chrono::steady_clock::now();
     auto &history = budgetHistory[groupId];
     while (!history.empty() && now - history.front() >= kBudgetWindow)
         history.pop_front();
-    if (history.size() >= static_cast<std::size_t>(options.perGroupPerMinute))
+    if (history.size() >= static_cast<std::size_t>(perGroupPerMinute))
         return false;
     history.push_back(now);
     return true;

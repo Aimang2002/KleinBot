@@ -1,6 +1,7 @@
 #ifndef RUNTIME_SETTINGS_H
 #define RUNTIME_SETTINGS_H
 
+#include "../Affect/AffectOptions.h"
 #include "../Application/BotIdentity.h"
 #include "../Application/MessageExecutionOptions.h"
 #include "../ChatService/ChatOptions.h"
@@ -39,14 +40,6 @@ struct WebUiSettings
     std::string accessToken;
 };
 
-struct AffectSettings
-{
-    bool enabled = false;
-    std::string policy = "baseline"; // baseline / judge
-    bool enforce = false;            // false = judge 只记录计划（影子）
-    std::string judgeModel;          // 空 = 用 models.worker
-};
-
 struct RuntimeSettings
 {
     int schemaVersion = 1;
@@ -55,7 +48,7 @@ struct RuntimeSettings
     ModelRuntimeSettings models;
     VoiceOptions voice;
     MemoryOptions memory;
-    AffectSettings affect;
+    AffectOptions affect;
     GlanceOptions glance;
     WebSearchOptions webSearch;
     WebFetchOptions webFetch;

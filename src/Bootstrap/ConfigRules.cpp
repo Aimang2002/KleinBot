@@ -76,6 +76,31 @@ void applyWebFetch(LiveSettings &live, const RuntimeSettings &next)
     live.webFetch.set(std::move(webFetch));
 }
 
+// bot.group_chat_enabled：MessageOptions 里只换群聊开关；bot 身份保持运行值（决定 9：
+// id、manager_id 只能重启，name、aliases 到 L2.d 才接通）
+void applyGroupChat(LiveSettings &live, const RuntimeSettings &next)
+{
+    MessageOptions message = *live.message.get();
+    message.groupChatEnabled = next.message.groupChatEnabled;
+    live.message.set(std::move(message));
+}
+
+// affect：这一组只接通 enforce；enabled、policy、judge_model 到 L2.c 才接通，保持运行值
+void applyAffect(LiveSettings &live, const RuntimeSettings &next)
+{
+    AffectOptions affect = *live.affect.get();
+    affect.enforce = next.affect.enforce;
+    live.affect.set(std::move(affect));
+}
+
+// glance：每群每分钟预算换成新值；enabled 决定是否起瞥视线程（L2.b 前未接通），保持运行值
+void applyGlance(LiveSettings &live, const RuntimeSettings &next)
+{
+    GlanceOptions glance = next.glance;
+    glance.enabled = live.glance.get()->enabled;
+    live.glance.set(std::move(glance));
+}
+
 // network.proxy：一个键作用于三处——模型调用（Dock 的两个适配器）、搜索、抓取。
 // 三个活值一起换，每个只换 proxy，其余字段保持当前值（同一次重载里别的应用函数已换过的也不动）
 void applyProxy(LiveSettings &live, const RuntimeSettings &next)
@@ -100,7 +125,7 @@ constexpr ConfigRule kProductRules[] = {
     {"bot.manager_id",         restart(),       field<&SchemaConfig::bot, &BotSchema::managerId>},
     {"bot.name",               notYet(Restart), field<&SchemaConfig::bot, &BotSchema::name>},
     {"bot.aliases",            notYet(Restart), field<&SchemaConfig::bot, &BotSchema::aliases>},
-    {"bot.group_chat_enabled", notYet(Dynamic), field<&SchemaConfig::bot, &BotSchema::groupChatEnabled>},
+    {"bot.group_chat_enabled", applies(applyGroupChat), field<&SchemaConfig::bot, &BotSchema::groupChatEnabled>},
 
     // chat：top_p 还没送进请求、修法待定，尚未接通；worker_threads 只能重启
     {"chat.default_model",            applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::defaultModel>},
@@ -154,15 +179,15 @@ constexpr ConfigRule kProductRules[] = {
     {"memory.idle_minutes", applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::idleMinutes>},
     {"memory.recall_limit", applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::recallLimit>},
 
-    // affect
-    {"affect.enabled",     notYet(Restart), field<&SchemaConfig::affect, &AffectSchema::enabled>},
-    {"affect.policy",      notYet(Restart), field<&SchemaConfig::affect, &AffectSchema::policy>},
-    {"affect.enforce",     notYet(Restart), field<&SchemaConfig::affect, &AffectSchema::enforce>},
-    {"affect.judge_model", notYet(Restart), field<&SchemaConfig::affect, &AffectSchema::judgeModel>},
+    // affect：enabled、policy、judge_model 到 L2.c 才接通
+    {"affect.enabled",     notYet(Restart),     field<&SchemaConfig::affect, &AffectSchema::enabled>},
+    {"affect.policy",      notYet(Restart),     field<&SchemaConfig::affect, &AffectSchema::policy>},
+    {"affect.enforce",     applies(applyAffect), field<&SchemaConfig::affect, &AffectSchema::enforce>},
+    {"affect.judge_model", notYet(Restart),     field<&SchemaConfig::affect, &AffectSchema::judgeModel>},
 
-    // glance
-    {"glance.enabled",              notYet(Restart), field<&SchemaConfig::glance, &GlanceSchema::enabled>},
-    {"glance.per_group_per_minute", notYet(Restart), field<&SchemaConfig::glance, &GlanceSchema::perGroupPerMinute>},
+    // glance：enabled 到 L2.b 才接通
+    {"glance.enabled",              notYet(Restart),     field<&SchemaConfig::glance, &GlanceSchema::enabled>},
+    {"glance.per_group_per_minute", applies(applyGlance), field<&SchemaConfig::glance, &GlanceSchema::perGroupPerMinute>},
 
     // web_search：enabled 到 L2.a 才接通；provider 决定构造哪一种搜索实现，只能重启生效，
     // 档位保持改造前的 Rebuild

@@ -161,6 +161,7 @@ struct LiveSnapshots
     Live<DockOptions>::Snapshot dock;
     Live<GlanceOptions>::Snapshot glance;
     Live<MessageOptions>::Snapshot message;
+    Live<AffectOptions>::Snapshot affect;
 };
 
 LiveSnapshots snapshotsOf(const LiveSettings &live)
@@ -168,7 +169,8 @@ LiveSnapshots snapshotsOf(const LiveSettings &live)
     return {live.chat.get(),         live.drawingModel.get(), live.visionModel.get(),
             live.workerModel.get(),  live.voice.get(),        live.globalVoice.get(),
             live.memory.get(),       live.webSearch.get(),    live.webFetch.get(),
-            live.dock.get(),         live.glance.get(),       live.message.get()};
+            live.dock.get(),         live.glance.get(),       live.message.get(),
+            live.affect.get()};
 }
 
 void expectAllUnchanged(const LiveSnapshots &before, const LiveSettings &live)
@@ -186,6 +188,7 @@ void expectAllUnchanged(const LiveSnapshots &before, const LiveSettings &live)
     EXPECT_EQ(now.dock, before.dock);
     EXPECT_EQ(now.glance, before.glance);
     EXPECT_EQ(now.message, before.message);
+    EXPECT_EQ(now.affect, before.affect);
 }
 
 class ConfigReloaderFixture : public ::testing::Test
@@ -304,7 +307,8 @@ TEST_F(ConfigReloaderFixture, ParsedButInvalidCandidateAppliesNothing)
 
 // 产品规则表（默认）：只有接通的行把新值换进活值（L1.a 起 chat 组 6 个键，L1.b 起
 // models 的 12 个键，L1.c 起 voice 的 5 个键，L1.d 起 memory 除 enabled 外的 4 个键，
-// L1.e 起搜索、抓取参数与 network.proxy），其余活值的快照指针不变；还没接通的字段在活值里
+// L1.e 起搜索、抓取参数与 network.proxy，L1.f 起群聊开关、affect.enforce、瞥视预算），
+// 其余活值的快照指针不变；还没接通的字段在活值里
 // 保持运行值（决定 9 的同一做法）；
 // 反馈如实列出已生效、需重启与尚未接通的键
 TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
@@ -330,13 +334,12 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_EQ(report.result.diff.size(), 11U);
     EXPECT_EQ(store->current(), report.result.snapshot);
     EXPECT_EQ(report.applied,
-              (std::vector<std::string>{"chat.temperature", "models.vision.model", "voice.enabled",
-                                        "voice.host", "voice.port", "memory.recall_limit",
-                                        "network.proxy"}));
+              (std::vector<std::string>{"bot.group_chat_enabled", "chat.temperature",
+                                        "models.vision.model", "voice.enabled", "voice.host",
+                                        "voice.port", "memory.recall_limit", "network.proxy"}));
     EXPECT_EQ(report.restartOnly,
               (std::vector<std::string>{"chat.worker_threads", "storage.conversation_database"}));
-    EXPECT_EQ(report.notWired,
-              (std::vector<std::string>{"bot.group_chat_enabled", "memory.enabled"}));
+    EXPECT_EQ(report.notWired, (std::vector<std::string>{"memory.enabled"}));
 
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_NE(after.chat, before.chat);
@@ -359,11 +362,14 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_EQ(after.webFetch->proxy, "http://127.0.0.1:7890");
     EXPECT_TRUE(before.dock->proxy.empty()) << "替换前取到的快照不变";
     EXPECT_EQ(after.glance, before.glance);
-    EXPECT_EQ(after.message, before.message);
+    EXPECT_NE(after.message, before.message);
+    EXPECT_FALSE(after.message->groupChatEnabled);
+    EXPECT_EQ(after.message->bot.id, before.message->bot.id) << "bot 身份保持运行值（决定 9）";
+    EXPECT_EQ(after.affect, before.affect);
     EXPECT_EQ(summarizeReload(report),
-              "配置已刷新：11 项变化，已生效 7 项。\n"
+              "配置已刷新：11 项变化，已生效 8 项。\n"
               "需重启才能生效 2 项：chat.worker_threads、storage.conversation_database。\n"
-              "尚未接通实时生效、需重启 2 项：bot.group_chat_enabled、memory.enabled。");
+              "尚未接通实时生效、需重启 1 项：memory.enabled。");
 }
 
 // 端到端（L1.a）：真实的重载入口 + 产品规则表 + 持活值的 UserSessionService。
@@ -625,6 +631,40 @@ TEST_F(ConfigReloaderFixture, ProxyChangeReachesModelSearchAndFetchTogether)
     EXPECT_TRUE(live->webSearch.get()->proxy.empty());
     EXPECT_TRUE(live->webFetch.get()->proxy.empty());
     EXPECT_EQ(live->webSearch.get()->maxResults, 7U);
+}
+
+// 端到端（L1.f）：群聊开关、affect.enforce、瞥视预算接通应用；同一个结构里还没接通的字段
+// （bot.name、affect.enabled/policy、glance.enabled）在活值里保持运行值，反馈里如实列为尚未接通
+TEST_F(ConfigReloaderFixture, GroupChatEnforceAndGlanceBudgetApplyKeepingRunningFields)
+{
+    ConfigReloader reloader(*store, *live);
+    const LiveSnapshots before = snapshotsOf(*live);
+    writeEdited([](nlohmann::json &config) {
+        config["bot"]["group_chat_enabled"] = false;
+        config["bot"]["name"] = "Alice";
+        config["affect"] = {{"enabled", true}, {"policy", "judge"}, {"enforce", true}};
+        config["glance"] = {{"enabled", true}, {"per_group_per_minute", 12}};
+    });
+
+    const ConfigReloadReport report = reloader.reload();
+
+    ASSERT_TRUE(report.result.success);
+    EXPECT_EQ(report.applied, (std::vector<std::string>{"bot.group_chat_enabled", "affect.enforce",
+                                                        "glance.per_group_per_minute"}));
+    EXPECT_EQ(report.notWired, (std::vector<std::string>{"bot.name", "affect.enabled", "affect.policy",
+                                                         "glance.enabled"}));
+    const LiveSnapshots after = snapshotsOf(*live);
+    EXPECT_FALSE(after.message->groupChatEnabled);
+    EXPECT_EQ(after.message->bot.name, "Klein") << "bot 身份保持运行值（决定 9）";
+    EXPECT_EQ(after.message->bot.id, 10001U);
+    EXPECT_TRUE(after.affect->enforce);
+    EXPECT_FALSE(after.affect->enabled) << "affect.enabled 尚未接通：保持运行值";
+    EXPECT_EQ(after.affect->policy, "baseline");
+    EXPECT_EQ(after.glance->perGroupPerMinute, 12);
+    EXPECT_FALSE(after.glance->enabled) << "glance.enabled 尚未接通：保持运行值";
+    EXPECT_TRUE(before.message->groupChatEnabled) << "替换前取到的快照不变";
+    EXPECT_FALSE(before.affect->enforce);
+    EXPECT_EQ(after.chat, before.chat);
 }
 
 // 带应用函数的行：新快照发布之后换进活值，同一个应用函数只调一次；
