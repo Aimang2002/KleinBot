@@ -761,7 +761,8 @@ TEST(ConfigLoaderBotTest, ParsesStringAliasesAndClassifiesRestart)
     candidate.bot.aliases = "Kc";
     const ConfigDiff diff = compareConfig(*loaded.config, candidate);
     EXPECT_EQ(diff.size(), 1U);
-    EXPECT_TRUE(containsChange(diff, "bot.aliases", ConfigChangeImpact::Restart));
+    // 配置实时生效 L2.d 起重载即生效
+    EXPECT_TRUE(containsChange(diff, "bot.aliases", ConfigChangeImpact::Dynamic));
 }
 
 TEST(ConfigLoaderBotTest, EmptyStringAliasesMeansNoneWithoutDiagnostic)

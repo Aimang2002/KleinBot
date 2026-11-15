@@ -45,8 +45,9 @@ public:
     // soulFile：默认人格文件，用户无持久化人格时读取；文件缺失/为空时
     // 退回内置默认 "你是<bot.name>，部署者的AI助手。"
     // soul.md 原文直接作为 system prompt（人格编译链路已于 2026-09-18 移除）
-    // chat：活值（ADR-023），每次操作开头取一份快照，重载后下一次操作即用新值
-    UserSessionService(const ModelRegistry &mr, ConversationStore &store, const BotIdentity &bot,
+    // chat、bot：活值（ADR-023），每次操作开头在业务锁外各取一份快照，重载后下一次操作即用新值
+    //（bot 只用名字：内置默认人格、滚动摘要里她的发言人标签；id、manager_id 只能重启）
+    UserSessionService(const ModelRegistry &mr, ConversationStore &store, const Live<BotIdentity> &bot,
                        const Live<ChatOptions> &chat, const std::string &soulFile = "source/soul.md");
     void setMemoryService(MemoryService *service);
     void setImageAssetStore(ImageAssetStore *store);
@@ -90,17 +91,16 @@ public:
 
 private:
     std::mutex mutex_message;
-    std::string default_personality;
     std::unique_ptr<std::unordered_map<uint64_t, Person>> user_messages; // key = QQ,second = 用户信息
     std::unordered_set<uint64_t> first_contact_seen_;
 
 private:
-    void ensureUserExistsUnlock(const uint64_t user_id);
-    Person createDefaultPerson(const uint64_t user_id);
-    // 读取 soul.md 作为默认人格；不可用时退回 default_personality
-    std::string loadSoulFallback() const;
+    void ensureUserExistsUnlock(const uint64_t user_id, const BotIdentity &bot);
+    Person createDefaultPerson(const uint64_t user_id, const BotIdentity &bot);
+    // 读取 soul.md 作为默认人格；不可用时退回内置默认人格（用 bot 的名字）
+    std::string loadSoulFallback(const BotIdentity &bot) const;
     const ModelRegistry &registry;
-    BotIdentity botIdentity;
+    const Live<BotIdentity> &botIdentity;
     const Live<ChatOptions> &chatOptions;
     std::string soul_file;
     ConversationStore &store;

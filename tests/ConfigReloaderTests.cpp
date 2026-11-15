@@ -149,6 +149,7 @@ private:
 // 全部活值的快照：持有 shared_ptr，旧快照不会被释放，指针比较不会撞上复用的地址
 struct LiveSnapshots
 {
+    Live<BotIdentity>::Snapshot bot;
     Live<ChatOptions>::Snapshot chat;
     Live<ModelEndpointOptions>::Snapshot drawingModel;
     Live<ModelEndpointOptions>::Snapshot visionModel;
@@ -166,7 +167,8 @@ struct LiveSnapshots
 
 LiveSnapshots snapshotsOf(const LiveSettings &live)
 {
-    return {live.chat.get(),         live.drawingModel.get(), live.visionModel.get(),
+    return {live.bot.get(),
+            live.chat.get(),         live.drawingModel.get(), live.visionModel.get(),
             live.workerModel.get(),  live.voice.get(),        live.globalVoice.get(),
             live.memory.get(),       live.webSearch.get(),    live.webFetch.get(),
             live.dock.get(),         live.glance.get(),       live.message.get(),
@@ -176,6 +178,7 @@ LiveSnapshots snapshotsOf(const LiveSettings &live)
 void expectAllUnchanged(const LiveSnapshots &before, const LiveSettings &live)
 {
     const LiveSnapshots now = snapshotsOf(live);
+    EXPECT_EQ(now.bot, before.bot);
     EXPECT_EQ(now.chat, before.chat);
     EXPECT_EQ(now.drawingModel, before.drawingModel);
     EXPECT_EQ(now.visionModel, before.visionModel);
@@ -386,7 +389,7 @@ TEST_F(ConfigReloaderFixture, ReloadedChatKeyReachesUserSessionOnNextRequest)
     {
         ModelRegistry registry(registryPath);
         ConversationStore conversations((directory / "conversation.db").string());
-        UserSessionService session(registry, conversations, BotIdentity{}, live->chat);
+        UserSessionService session(registry, conversations, live->bot, live->chat);
         ConfigReloader reloader(*store, *live);
 
         const std::optional<ChatCallBundle> before = session.buildChatRequest(10);
@@ -465,7 +468,7 @@ TEST_F(ConfigReloaderFixture, VoiceSwitchFollowsConfigChangesAndCommandsLastWrit
     {
         ModelRegistry registry(registryPath);
         ConversationStore conversations((directory / "conversation.db").string());
-        UserSessionService session(registry, conversations, BotIdentity{}, live->chat);
+        UserSessionService session(registry, conversations, live->bot, live->chat);
         ComputerStatus computerStatus;
         VoiceModeAction voiceMode(session, live->globalVoice);
         AdminControlAction admin(computerStatus, live->globalVoice, [] { return std::string(); });
@@ -636,8 +639,8 @@ TEST_F(ConfigReloaderFixture, ProxyChangeReachesModelSearchAndFetchTogether)
     EXPECT_EQ(live->webSearch.get()->maxResults, 7U);
 }
 
-// 端到端（L1.f）：群聊开关、affect.enforce、瞥视预算接通应用；同一个结构里还没接通的字段
-// （bot.name）在活值里保持运行值，反馈里如实列为尚未接通；glance.enabled 自 L2.b、affect 其余三键自 L2.c 起接通
+// 端到端（L1.f 起）：群聊开关、affect.enforce、瞥视预算接通应用；glance.enabled 自 L2.b、
+// affect 其余三键自 L2.c、bot.name 自 L2.d 起接通；bot.id 等只能重启的字段保持运行值（决定 9）
 TEST_F(ConfigReloaderFixture, GroupChatEnforceAndGlanceBudgetApplyKeepingRunningFields)
 {
     ConfigReloader reloader(*store, *live);
@@ -653,13 +656,17 @@ TEST_F(ConfigReloaderFixture, GroupChatEnforceAndGlanceBudgetApplyKeepingRunning
 
     ASSERT_TRUE(report.result.success);
     EXPECT_EQ(report.applied,
-              (std::vector<std::string>{"bot.group_chat_enabled", "affect.enabled", "affect.policy",
-                                        "affect.enforce", "glance.enabled", "glance.per_group_per_minute"}));
-    EXPECT_EQ(report.notWired, (std::vector<std::string>{"bot.name"}));
+              (std::vector<std::string>{"bot.name", "bot.group_chat_enabled", "affect.enabled",
+                                        "affect.policy", "affect.enforce", "glance.enabled",
+                                        "glance.per_group_per_minute"}));
+    EXPECT_TRUE(report.notWired.empty());
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_FALSE(after.message->groupChatEnabled);
-    EXPECT_EQ(after.message->bot.name, "Klein") << "bot 身份保持运行值（决定 9）";
-    EXPECT_EQ(after.message->bot.id, 10001U);
+    EXPECT_EQ(after.message->bot.name, "Alice") << "bot.name 自 L2.d 起接通，MessageOptions 里同步";
+    EXPECT_EQ(after.message->bot.id, 10001U) << "id 只能重启，保持运行值（决定 9）";
+    EXPECT_EQ(after.bot->name, "Alice");
+    EXPECT_EQ(after.bot->id, 10001U);
+    EXPECT_EQ(after.bot->managerId, 10002U);
     EXPECT_TRUE(after.affect->enforce);
     EXPECT_TRUE(after.affect->enabled) << "affect.enabled、policy 自 L2.c 起接通";
     EXPECT_EQ(after.affect->policy, "judge");

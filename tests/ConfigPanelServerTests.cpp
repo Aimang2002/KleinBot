@@ -220,7 +220,9 @@ TEST_F(PanelServerFixture, PostSentinelRoundtripWritesFileAndReloadsStore)
 
         const nlohmann::json body = nlohmann::json::parse(posted->body);
         EXPECT_TRUE(body["reloadSuccess"].get<bool>());
-        EXPECT_EQ(body["counts"]["restart"], 1);
+        // bot.name 自配置实时生效 L2.d 起重载即生效
+        EXPECT_EQ(body["counts"]["dynamic"], 1);
+        EXPECT_EQ(body["counts"]["restart"], 0);
         bool foundBotName = false;
         for (const auto &change : body["diff"])
         {
@@ -239,8 +241,8 @@ TEST_F(PanelServerFixture, PostSentinelRoundtripWritesFileAndReloadsStore)
     EXPECT_EQ(store->current()->schema->bot.name, "Alice");
 }
 
-// bot.aliases 字符串经面板 GET→POST 往返原样落盘、进快照，分级为 Restart
-TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsStringAndClassifiesRestart)
+// bot.aliases 字符串经面板 GET→POST 往返原样落盘、进快照，分级为 Dynamic（配置实时生效 L2.d 起）
+TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsStringAndClassifiesDynamic)
 {
     httplib::Client client("127.0.0.1", port);
     {
@@ -264,7 +266,8 @@ TEST_F(PanelServerFixture, PostBotAliasesRoundtripKeepsStringAndClassifiesRestar
                 foundAliases = true;
         }
         EXPECT_TRUE(foundAliases);
-        EXPECT_EQ(body["counts"]["restart"], 1);
+        EXPECT_EQ(body["counts"]["dynamic"], 1);
+        EXPECT_EQ(body["counts"]["restart"], 0);
     }
 
     const nlohmann::json written = nlohmann::json::parse(readFile());

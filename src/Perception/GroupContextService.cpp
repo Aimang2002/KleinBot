@@ -33,9 +33,9 @@ std::string formatClock(std::int64_t ts)
 }
 }
 
-GroupContextService::GroupContextService(GroupListService *state, BotIdentity bot,
+GroupContextService::GroupContextService(GroupListService *state, const Live<BotIdentity> &bot,
                                          GroupContextStore *store, MessageSenderPort *sender)
-    : state(state), bot(bot), store(store), sender(sender)
+    : state(state), botIdentity(bot), store(store), sender(sender)
 {
 }
 
@@ -50,6 +50,9 @@ void GroupContextService::observe(const InboundMessage &message)
         store == nullptr)
         return;
 
+    // 一条消息取一次名字快照：@ 判定、裸 @ 的记法、点名判定都用这一份
+    const Live<BotIdentity>::Snapshot current = botIdentity.get();
+    const BotIdentity &bot = *current;
     GroupMessageRecord record;
     record.groupId = message.group_id;
     record.userId = message.user_id;
@@ -118,10 +121,12 @@ void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMe
     if (!observingGroup(groupId) || store == nullptr)
         return;
 
+    // 她的发言以当时的名字入库（之后改名不回改）
+    const Live<BotIdentity>::Snapshot bot = botIdentity.get();
     GroupMessageRecord record;
     record.groupId = groupId;
-    record.userId = bot.id;
-    record.nickname = bot.name;
+    record.userId = bot->id;
+    record.nickname = bot->name;
     record.correlationId = correlationId;
     if (const auto *text = std::get_if<TextMessage>(&outbound))
         record.text = text->content;
@@ -252,13 +257,15 @@ std::string GroupContextService::assemble(std::uint64_t groupId,
     if (chosen.empty())
         return {};
 
-    const std::string formatted = formatRecords(chosen, now);
+    const Live<BotIdentity>::Snapshot bot = botIdentity.get();
+    const std::string formatted = formatRecords(*bot, chosen, now);
     if (formatted.size() <= kDirectInjectChars)
         return formatted;
-    return digestRecords(chosen);
+    return digestRecords(*bot, chosen);
 }
 
-std::string GroupContextService::formatRecords(const std::vector<GroupMessageRecord> &records,
+std::string GroupContextService::formatRecords(const BotIdentity &bot,
+                                               const std::vector<GroupMessageRecord> &records,
                                                std::int64_t watermarkTs) const
 {
     std::string block =
@@ -278,7 +285,8 @@ std::string GroupContextService::formatRecords(const std::vector<GroupMessageRec
     return block;
 }
 
-std::string GroupContextService::digestRecords(const std::vector<GroupMessageRecord> &records) const
+std::string GroupContextService::digestRecords(const BotIdentity &bot,
+                                               const std::vector<GroupMessageRecord> &records) const
 {
     std::string lines;
     for (const GroupMessageRecord &record : records)
@@ -300,7 +308,7 @@ std::string GroupContextService::digestRecords(const std::vector<GroupMessageRec
     }
 
     // 无摘要器或摘要失败：退化为截断原文（保底有内容，不空手而归）
-    std::string truncated = formatRecords(records, records.back().timestamp);
+    std::string truncated = formatRecords(bot, records, records.back().timestamp);
     if (truncated.size() > kDirectInjectChars * 2)
         truncated.resize(kDirectInjectChars * 2);
     LOG_WARNING("群上下文摘要层不可用，退化为截断原文注入");

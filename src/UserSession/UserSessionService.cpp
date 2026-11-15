@@ -31,11 +31,19 @@ const char *const kServiceContractFrame =
 
 }
 
+namespace
+{
+// soul.md 缺失或为空时的内置默认人格（名字取本次操作的快照）
+std::string defaultPersonality(const BotIdentity &bot)
+{
+    return "你是" + bot.name + "，部署者的AI助手。";
+}
+}
+
 UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store,
-                                       const BotIdentity &bot, const Live<ChatOptions> &chat,
+                                       const Live<BotIdentity> &bot, const Live<ChatOptions> &chat,
                                        const std::string &soulFile)
     : registry(mr), botIdentity(bot), chatOptions(chat),
-      default_personality("你是" + bot.name + "，部署者的AI助手。"),
       user_messages(std::make_unique<std::unordered_map<uint64_t, Person>>()),
       soul_file(soulFile), store(store)
 {
@@ -53,26 +61,26 @@ void UserSessionService::setImageAssetStore(ImageAssetStore *store)
     this->imageAssetStore = store;
 }
 
-Person UserSessionService::createDefaultPerson(const uint64_t user_id)
+Person UserSessionService::createDefaultPerson(const uint64_t user_id, const BotIdentity &bot)
 {
     Person person;
     // 优先恢复持久化的人格（#设置人格），没有记录再回退 soul.md 默认人格
     person.system_prompt = this->store.loadPersona(user_id);
     if (person.system_prompt.empty())
-        person.system_prompt = this->loadSoulFallback();
+        person.system_prompt = this->loadSoulFallback(bot);
     // 模型不在这里复制：current_model 留空 = 跟随默认模型，见 resolveModelName
     person.isOpenVoiceMode = false;
 
     return person;
 }
 
-std::string UserSessionService::loadSoulFallback() const
+std::string UserSessionService::loadSoulFallback(const BotIdentity &bot) const
 {
     std::ifstream input(this->soul_file);
     if (!input.is_open())
     {
         LOG_WARNING("默认人格文件缺失：" + this->soul_file + "，使用内置默认人格");
-        return this->default_personality;
+        return defaultPersonality(bot);
     }
     std::ostringstream buffer;
     buffer << input.rdbuf();
@@ -80,18 +88,18 @@ std::string UserSessionService::loadSoulFallback() const
     if (soul.empty())
     {
         LOG_WARNING("默认人格文件为空：" + this->soul_file + "，使用内置默认人格");
-        return this->default_personality;
+        return defaultPersonality(bot);
     }
     return soul;
 }
 
-void UserSessionService::ensureUserExistsUnlock(const uint64_t user_id)
+void UserSessionService::ensureUserExistsUnlock(const uint64_t user_id, const BotIdentity &bot)
 {
     // 找到用户
     if (user_messages->find(user_id) != user_messages->end())
         return;
 
-    Person p = this->createDefaultPerson(user_id);
+    Person p = this->createDefaultPerson(user_id, bot);
     // 冷启动只读回上下文起点之后的消息：轻重置留下的旧话题行
     // 留在库里供召回，但不再进入内存镜像和模型窗口
     p.user_chatHistory = this->store.loadFrom(user_id, this->store.contextStartId(user_id));
@@ -100,8 +108,9 @@ void UserSessionService::ensureUserExistsUnlock(const uint64_t user_id)
 
 void UserSessionService::ensureUserExists(const uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
 }
 
 bool UserSessionService::takeFirstContact(const uint64_t user_id)
@@ -112,16 +121,18 @@ bool UserSessionService::takeFirstContact(const uint64_t user_id)
 
 bool UserSessionService::hasChatHistory(const uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     auto user = this->user_messages->find(user_id);
     return !user->second.user_chatHistory.empty();
 }
 
 void UserSessionService::resetChat(const uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     auto user = this->user_messages->find(user_id);
     auto &history = user->second.user_chatHistory;
     // 轻重置：只丢弃内存镜像，并把起点持久化为最后一条消息的下一个 id，
@@ -137,8 +148,9 @@ void UserSessionService::resetChat(const uint64_t user_id)
 
 void UserSessionService::resetContext(const uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     auto user = this->user_messages->find(user_id);
     // 彻底重置会删除之前的所有信息，但不包括人格信息
     user->second.user_chatHistory.clear();
@@ -153,21 +165,23 @@ void UserSessionService::resetContext(const uint64_t user_id)
     // 人格回归手动人格/soul.md 原文；手动人格保留（#设置人格 的明确意志）
     user->second.system_prompt = this->store.loadPersona(user_id);
     if (user->second.system_prompt.empty())
-        user->second.system_prompt = this->loadSoulFallback();
+        user->second.system_prompt = this->loadSoulFallback(*bot);
 }
 
 std::string UserSessionService::getModelName(uint64_t user_id)
 {
     const Live<ChatOptions>::Snapshot chat = this->chatOptions.get();
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     return resolveModelName(this->user_messages->find(user_id)->second, *chat);
 }
 
 void UserSessionService::setPersonality(const uint64_t user_id, const std::string &Personality)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     auto user = this->user_messages->find(user_id);
     user->second.system_prompt = Personality;
     this->store.savePersona(user_id, Personality);
@@ -175,12 +189,13 @@ void UserSessionService::setPersonality(const uint64_t user_id, const std::strin
 
 void UserSessionService::resetPersonality(const uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> locker(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     auto user = this->user_messages->find(user_id);
     this->store.clearPersona(user_id);
     // 每次重读 soul.md：管理员改默认人格后，#人格还原 无需重启即可生效
-    user->second.system_prompt = this->loadSoulFallback();
+    user->second.system_prompt = this->loadSoulFallback(*bot);
     // 人格切换即新对话起点：RAM 镜像清空 + 起点持久化（重启不回读旧话题，
     // 旧话题行仍留库供召回），与 resetChat 的轻量清空同语义——
     // 否则旧人格口吻的上下文会压在新人格上
@@ -194,30 +209,34 @@ void UserSessionService::resetPersonality(const uint64_t user_id)
 
 void UserSessionService::switchModel(const uint64_t user_id, const std::string &newModel)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     this->user_messages->find(user_id)->second.current_model = newModel;
 }
 
 void UserSessionService::voiceSwitch(const uint64_t user_id, const bool tag)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     auto user = this->user_messages->find(user_id);
     user->second.isOpenVoiceMode = tag;
 }
 
 bool UserSessionService::isVoiceMode(const uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     return this->user_messages->find(user_id)->second.isOpenVoiceMode;
 }
 
 std::string UserSessionService::removePreviousContext(const uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     auto &user_context = this->user_messages->find(user_id)->second.user_chatHistory;
 
     for (auto it = user_context.rbegin(); it != user_context.rend(); ++it)
@@ -240,22 +259,25 @@ std::string UserSessionService::removePreviousContext(const uint64_t user_id)
 
 std::vector<TimestampedMessage> UserSessionService::getChatHistory(const uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> locker(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     return this->user_messages->find(user_id)->second.user_chatHistory;
 }
 
 void UserSessionService::updateChatHistory(const uint64_t user_id, const std::vector<TimestampedMessage> &history)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> locker(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     this->user_messages->find(user_id)->second.user_chatHistory = history;
 }
 
 int64_t UserSessionService::appendMessage(const uint64_t user_id, const std::string &role, const std::string &content)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> locker(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     const time_t ts = std::time(nullptr);
     // 锁内：先改内存，再写库，保证两者一致；行 id 回填镜像，
     // 供 resetChat 计算上下文起点边界
@@ -268,22 +290,25 @@ int64_t UserSessionService::appendMessage(const uint64_t user_id, const std::str
 
 Person UserSessionService::getUserConfig(const uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> locker(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     return this->user_messages->find(user_id)->second;
 }
 
 void UserSessionService::setContextDigest(uint64_t user_id, const std::string &digest)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> locker(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     this->user_messages->find(user_id)->second.context_digest = digest;
 }
 
 std::string UserSessionService::getContextDigest(uint64_t user_id)
 {
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> locker(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     return this->user_messages->find(user_id)->second.context_digest;
 }
 
@@ -293,8 +318,9 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     // 本次装配用的配置快照：模型解析、采样参数、存活时间都取这一份（ADR-023）。
     // 在业务锁外取，活值的锁不与 mutex_message 嵌套
     const Live<ChatOptions>::Snapshot chat = this->chatOptions.get();
+    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
     std::lock_guard<std::mutex> locker(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id);
+    this->ensureUserExistsUnlock(user_id, *bot);
     Person &p = this->user_messages->find(user_id)->second;
 
     // 模型查找：找不到直接返回 nullopt，让上层报错
@@ -381,7 +407,7 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
                     std::string line = filtered[index].content;
                     std::replace(line.begin(), line.end(), '\n', ' ');
                     result.evicted_lines +=
-                        (filtered[index].role == "user" ? std::string("用户") : botIdentity.name) +
+                        (filtered[index].role == "user" ? std::string("用户") : bot->name) +
                         ": " + line + "\n";
                 }
                 p.history_anchor = cut;

@@ -194,7 +194,7 @@ struct PrivateChatFixture
     Dock dock;
     Live<MemoryOptions> liveMemory;
     MemoryService memory;
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat;
     UserSessionService session;
     ToolRegistry tools;

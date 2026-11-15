@@ -192,11 +192,11 @@ std::string truncateColloquial(const std::string &text, std::size_t maxChars)
 }
 } // namespace
 
-EngagementService::EngagementService(BotIdentity bot, GroupContextStore *store,
+EngagementService::EngagementService(const Live<BotIdentity> &bot, GroupContextStore *store,
                                      const Live<AffectOptions> &affectOptions,
                                      MessageSenderPort *sender,
                                      std::function<std::int64_t()> clock)
-    : bot(bot), store(store), affectOptions(affectOptions), sender(sender),
+    : botIdentity(bot), store(store), affectOptions(affectOptions), sender(sender),
       clock(clock ? std::move(clock)
                   : [] { return static_cast<std::int64_t>(std::time(nullptr)); })
 {
@@ -491,7 +491,7 @@ void EngagementService::persistColdLocked(std::uint64_t groupId)
 }
 
 EngagementService::PreparedContext EngagementService::prepareContext(
-    const std::vector<GroupMessageRecord> &records, const std::string &digest,
+    const BotIdentity &bot, const std::vector<GroupMessageRecord> &records, const std::string &digest,
     std::int64_t compressedUpToTs, const std::string &moodLine) const
 {
     // 情绪基调置顶：给每轮一个带惯性的情绪起点（跨轮平滑，别当场归零）
@@ -630,7 +630,7 @@ void EngagementService::setTools(const ToolRegistry *tools, std::vector<std::str
     }
 }
 
-std::string EngagementService::runContextRecall(const nlohmann::json &arguments,
+std::string EngagementService::runContextRecall(const BotIdentity &bot, const nlohmann::json &arguments,
                                                 std::uint64_t groupId,
                                                 const std::vector<std::int64_t> &shownSeqs) const
 {
@@ -700,6 +700,8 @@ void EngagementService::runTurn(std::uint64_t groupId)
     const bool recording = decisionRecorder != nullptr && decisionRecorder->enabled();
     affect::DecisionPolicy *const activePolicy =
         policy != nullptr ? &policy->resolve(*affectNow) : nullptr;
+    // 名字同样一轮取一次（锁外）：材料与召回里她的发言人标签用这一份
+    const Live<BotIdentity>::Snapshot bot = botIdentity.get();
 
     enum class TurnKind
     {
@@ -760,7 +762,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     }
 
     // 材料装配（可能调 worker 压缩，在锁外）
-    PreparedContext context = prepareContext(records, digest, compressedUpToTs, moodLine);
+    PreparedContext context = prepareContext(*bot, records, digest, compressedUpToTs, moodLine);
     if (context.digestUpdated)
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -896,7 +898,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     hooks.stopsBeforeExecution = [](const ResponseToolCall &call)
     { return call.name == "group_say" || call.name == "leave_topic"; };
     hooks.localToolNames = {"recall_context"};
-    hooks.runLocalTool = [this, groupId, startTs, &shownSeqs](const ResponseToolCall &call)
+    hooks.runLocalTool = [this, groupId, startTs, &shownSeqs, &bot](const ResponseToolCall &call)
     {
         ToolResult result;
         // 预算检查与扣减（同群 lane 串行，这里仍以防万一加锁校验）
@@ -917,7 +919,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
         }
         else
         {
-            result.model_content = runContextRecall(parseToolArguments(call.arguments),
+            result.model_content = runContextRecall(*bot, parseToolArguments(call.arguments),
                                                     groupId, shownSeqs);
             LOG_INFO("上下文召回执行：群 " + std::to_string(groupId) + "，回灌 " +
                      std::to_string(result.model_content.size()) + " 字符");

@@ -123,7 +123,8 @@ public:
                                                 const std::string &correlationId)>;
 
     // affectOptions：组合根的活值（ADR-023），每个会话轮开头取一次快照（策略选择与 enforce）
-    EngagementService(BotIdentity bot, GroupContextStore *store,
+    // bot：组合根的活值（ADR-023），每个会话轮开头取一次（只用名字）
+    EngagementService(const Live<BotIdentity> &bot, GroupContextStore *store,
                       const Live<AffectOptions> &affectOptions,
                       MessageSenderPort *sender = nullptr,
                       std::function<std::int64_t()> clock = {});
@@ -209,11 +210,12 @@ private:
     bool allowNameActivationLocked(std::uint64_t groupId, std::int64_t now);
     // 材料装配：原文窗口（超长保头截断）+ 预算内直灌；超预算把最旧一段经
     // worker 合并进滚动摘要，只留原文尾巴。worker 调用在锁外由调用方保证
-    PreparedContext prepareContext(const std::vector<GroupMessageRecord> &records,
+    PreparedContext prepareContext(const BotIdentity &bot, const std::vector<GroupMessageRecord> &records,
                                    const std::string &digest,
                                    std::int64_t compressedUpToTs,
                                    const std::string &moodLine) const;
-    std::string runContextRecall(const nlohmann::json &arguments, std::uint64_t groupId,
+    std::string runContextRecall(const BotIdentity &bot, const nlohmann::json &arguments,
+                                 std::uint64_t groupId,
                                  const std::vector<std::int64_t> &shownSeqs) const;
     // 冷启动每群状态（纯内存，重启即失）
     struct ColdState
@@ -234,7 +236,7 @@ private:
     // 学习/频控状态落库（UPSERT engagement_cold；锁内调用，低频）
     void persistColdLocked(std::uint64_t groupId);
 
-    const BotIdentity bot;
+    const Live<BotIdentity> &botIdentity;
     GroupContextStore *const store;
     const Live<AffectOptions> &affectOptions;
     MessageSenderPort *const sender;

@@ -1,7 +1,8 @@
 #include "LiveSettings.h"
 
 LiveSettings::LiveSettings(const RuntimeSettings &startup)
-    : chat(startup.chat),
+    : bot(startup.bot),
+      chat(startup.chat),
       drawingModel(startup.models.drawing),
       visionModel(startup.models.vision),
       workerModel(startup.models.worker),

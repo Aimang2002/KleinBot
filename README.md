@@ -247,13 +247,14 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 - `web_search`、`web_fetch` 的其余参数（`web_search.provider` 除外，它仍要重启）：下一次搜索、抓取就用新值；抓取缓存里已有的条目按存入时的有效期过期，条目上限在下一次存入时按新值淘汰。
 - `network.proxy`：模型调用、联网搜索、网页抓取三处一起换，下一次请求就走新代理。
 - `bot.group_chat_enabled`：下一条群消息起按新开关处理。
+- `bot.name`、`bot.aliases`：下一条群消息起按新名字和别名判断是不是在叫她，她之后的发言以新名字记入群聊缓冲；之前的发言保留当时的名字。`bot.id`、`bot.manager_id` 仍要重启。
 - `affect.enabled`：打开后下一次群回应起开始写决策记录（第一次打开时才建决策表，从没打开过的库里没有这三张表），关掉后不再写新记录、回应与从未开启时完全一致；`#好`/`#坏` 随之可用或回“未启用”。
 - `affect.policy`、`affect.judge_model`：下一次决策起按新策略、新 judge 模型；judge 调用的模型与记录里的 `judge_model` 每次决策按当前配置一起解析，二者一致。judge 每群每小时的调用预算跨切换保留。
 - `affect.enforce`：下一次群回应决策起按新值在影子期与生效期之间切换。
 - `glance.enabled`：下一张图起开始或停止瞥视（已排队的图照常看完）；仍需要启动时观察通道已开启（群内容缓冲在启动时建立）、视觉模型就绪。
 - `glance.per_group_per_minute`：下一张图起按新预算。
 
-其余配置仍需重启机器人才生效（`chat.top_p` 目前没有送进模型请求，配置了也不起作用）。
+其余配置仍需重启机器人才生效：`schema_version`、`bot.id`、`bot.manager_id`、`chat.worker_threads`、`web_search.provider`、`storage`、通信配置 `communication`、`webui`、`push`。`chat.top_p` 目前没有送进模型请求，配置了也不起作用。
 
 ### Web 配置面板（可选）
 

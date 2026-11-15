@@ -22,6 +22,7 @@ struct LiveSettings
 {
     explicit LiveSettings(const RuntimeSettings &startup);
 
+    Live<BotIdentity> bot;  // 只有 name、aliases 实时生效；id、manager_id 保持启动值（决定 9）
     Live<ChatOptions> chat;
     Live<ModelEndpointOptions> drawingModel; // models.drawing
     Live<ModelEndpointOptions> visionModel;  // models.vision

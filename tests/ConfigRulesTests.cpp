@@ -49,7 +49,7 @@ TEST(ConfigRulesTest, PathsAreUniqueAndEveryRowIsComplete)
 // L1.e：web_search 除 enabled、provider 外的 8 个，web_fetch 除 enabled 外的 6 个，network.proxy；
 // L1.f：群聊开关、affect.enforce、瞥视预算；
 // L2.a：web_search.enabled、web_fetch.enabled；L2.b：memory.enabled、glance.enabled；
-// L2.c：affect.enabled、affect.policy、affect.judge_model
+// L2.c：affect.enabled、affect.policy、affect.judge_model；L2.d：bot.name、bot.aliases
 TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
 {
     std::vector<std::string> wired;
@@ -62,8 +62,8 @@ TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
         EXPECT_TRUE(rule.effect.impact() == ConfigChangeImpact::Dynamic) << rule.path;
     }
     const std::vector<std::string> expected = {
-        // L1.f（bot 节在表的最前面）
-        "bot.group_chat_enabled",
+        // L2.d 与 L1.f（bot 节在表的最前面）
+        "bot.name", "bot.aliases", "bot.group_chat_enabled",
         // L1.a
         "chat.default_model", "chat.temperature", "chat.frequency_penalty", "chat.presence_penalty",
         "chat.max_message_tokens", "chat.message_survival_seconds",
@@ -88,7 +88,7 @@ TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
         "web_fetch.request_timeout_ms", "web_fetch.cache_ttl_seconds", "web_fetch.cache_max_entries",
         "network.proxy",
     };
-    EXPECT_EQ(wired.size(), 52U);
+    EXPECT_EQ(wired.size(), 54U);
     EXPECT_EQ(wired, expected);
 }
 

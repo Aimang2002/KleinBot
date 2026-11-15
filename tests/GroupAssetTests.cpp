@@ -228,7 +228,8 @@ TEST(GroupContextImageTest, ObserveImportsImageIntoSharedStoreAndWritesPlacehold
     BotIdentity bot;
     bot.id = 10086;
     bot.name = "Klein";
-    GroupContextService service(&state, bot, &store, nullptr);
+    const Live<BotIdentity> liveBot{bot};
+    GroupContextService service(&state, liveBot, &store, nullptr);
     service.setSharedAssets(&group);
     // 免网络：导入 seam 直接把"下载结果"存进群库
     service.setImageImporter([&group](std::uint64_t groupId, const std::string &url, std::int64_t messageId) {
@@ -294,7 +295,8 @@ TEST(GroupContextImageTest, ObserveWritesAttachmentLabelsInsteadOfBarePlaceholde
     BotIdentity bot;
     bot.id = 10086;
     bot.name = "Klein";
-    GroupContextService service(&state, bot, &store, nullptr);
+    const Live<BotIdentity> liveBot{bot};
+    GroupContextService service(&state, liveBot, &store, nullptr);
 
     InboundMessage video;
     video.post_type = "message";
@@ -333,7 +335,8 @@ TEST(GroupContextImageTest, ObserveMarksStickerAndAppendsFaceSummaries)
     BotIdentity bot;
     bot.id = 10086;
     bot.name = "Klein";
-    GroupContextService service(&state, bot, &store, nullptr);
+    const Live<BotIdentity> liveBot{bot};
+    GroupContextService service(&state, liveBot, &store, nullptr);
     service.setSharedAssets(&group);
     service.setImageImporter([&group](std::uint64_t groupId, const std::string &, std::int64_t messageId) {
         return group.saveBase64(groupId, "aGk=", "inbound", "", messageId);
@@ -426,7 +429,8 @@ TEST(GroupContextMentionTest, ObserveDetectsAliasesAndLabelsEmptyMessages)
     bot.id = 10086;
     bot.name = "Klein";
     bot.aliases = "克莱茵";
-    GroupContextService service(&state, bot, &store, nullptr);
+    const Live<BotIdentity> liveBot{bot};
+    GroupContextService service(&state, liveBot, &store, nullptr);
 
     InboundMessage base;
     base.post_type = "message";

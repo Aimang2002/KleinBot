@@ -5,9 +5,7 @@
 
 namespace
 {
-constexpr ConfigChangeImpact Dynamic = ConfigChangeImpact::Dynamic;
 constexpr ConfigChangeImpact Rebuild = ConfigChangeImpact::Rebuild;
-constexpr ConfigChangeImpact Restart = ConfigChangeImpact::Restart;
 
 // 应用函数：重载成功后，把新的运行时设置换进对应的活值（只替换快照，不会失败）。
 // 一组一个；同组几个键一起变化时，ConfigReloader 只调一次。结构里有模块在读、但还没接通
@@ -70,8 +68,22 @@ void applyWebFetch(LiveSettings &live, const RuntimeSettings &next)
     live.webFetch.set(next.webFetch);
 }
 
+// bot.name、bot.aliases：换进机器人身份的活值，并同步 MessageOptions 里的那份；id、manager_id
+// 只能重启，两处都保持运行值（决定 9）。群聊开关不动
+void applyBotNames(LiveSettings &live, const RuntimeSettings &next)
+{
+    BotIdentity bot = *live.bot.get();
+    bot.name = next.bot.name;
+    bot.aliases = next.bot.aliases;
+    live.bot.set(bot);
+    MessageOptions message = *live.message.get();
+    message.bot.name = next.bot.name;
+    message.bot.aliases = next.bot.aliases;
+    live.message.set(std::move(message));
+}
+
 // bot.group_chat_enabled：MessageOptions 里只换群聊开关；bot 身份保持运行值（决定 9：
-// id、manager_id 只能重启，name、aliases 到 L2.d 才接通）
+// id、manager_id 只能重启，name、aliases 由 applyBotNames 换）
 void applyGroupChat(LiveSettings &live, const RuntimeSettings &next)
 {
     MessageOptions message = *live.message.get();
@@ -114,8 +126,8 @@ constexpr ConfigRule kProductRules[] = {
     // bot
     {"bot.id",                 restart(),       field<&SchemaConfig::bot, &BotSchema::id>},
     {"bot.manager_id",         restart(),       field<&SchemaConfig::bot, &BotSchema::managerId>},
-    {"bot.name",               notYet(Restart), field<&SchemaConfig::bot, &BotSchema::name>},
-    {"bot.aliases",            notYet(Restart), field<&SchemaConfig::bot, &BotSchema::aliases>},
+    {"bot.name",               applies(applyBotNames), field<&SchemaConfig::bot, &BotSchema::name>},
+    {"bot.aliases",            applies(applyBotNames), field<&SchemaConfig::bot, &BotSchema::aliases>},
     {"bot.group_chat_enabled", applies(applyGroupChat), field<&SchemaConfig::bot, &BotSchema::groupChatEnabled>},
 
     // chat：top_p 还没送进请求、修法待定，尚未接通；worker_threads 只能重启

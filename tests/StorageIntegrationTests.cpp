@@ -127,7 +127,7 @@ TEST(UserSessionContractTest, ServiceContractWrapsPersonaAndCustomPersona)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
 
@@ -162,7 +162,7 @@ TEST(UserSessionFirstContactTest, ReportsTrueOnlyOncePerUser)
     ConversationStore store(temporaryDirectory.path() + "/conversation.db");
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
 
@@ -184,7 +184,7 @@ TEST(UserSessionFirstContactTest, ChatHistoryPersistsForEveryUser)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
 
     UserSessionService session(registry, store, bot, liveChat);
@@ -235,7 +235,7 @@ TEST(UserSessionContextBoundaryTest, RequestOnlyContextStaysOutOfPersistedHistor
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
 
@@ -297,7 +297,7 @@ TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
     const std::size_t unit = UserSessionService::kContextHighTokens / 10;
@@ -357,7 +357,7 @@ TEST(UserSessionWindowTest, AnchorMovesToNextUserMessage)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
     const std::size_t unit = UserSessionService::kContextLowTokens / 4;
@@ -381,7 +381,7 @@ TEST(UserSessionWindowTest, DigestCountsTowardWatermarkAndFollowsResetSemantics)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
     const std::size_t unit = UserSessionService::kContextHighTokens / 10;
@@ -424,7 +424,7 @@ TEST(UserSessionWindowTest, BuildWithoutTrimLeavesAnchorForNextReply)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
     const std::size_t unit = UserSessionService::kContextHighTokens / 10;
@@ -450,7 +450,7 @@ TEST(UserSessionWindowTest, DropsExpiredMessagesOnColdStartLoad)
     ChatOptions options;
     options.defaultModel = "test-model";
     options.messageSurvivalSeconds = 3600;
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
 
     const time_t now = std::time(nullptr);
@@ -499,7 +499,7 @@ TEST(UserSessionWindowTest, LightResetClearsWindowKeepsHistoryAndPersistsAcrossR
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
 
     {
@@ -545,7 +545,7 @@ TEST(UserSessionWindowTest, HeavyResetClearsBoundaryAndAllHistory)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
 
     UserSessionService session(registry, store, bot, liveChat);
@@ -590,7 +590,7 @@ TEST(UserSessionWindowTest, PersonaPersistsAcrossRestartAndResetRestoresSoulFile
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
 
     const std::string soulPath = temporaryDirectory.path() + "/soul.md";
@@ -645,7 +645,7 @@ TEST(UserSessionWindowTest, MissingSoulFileFallsBackToBuiltinDefault)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
 
     UserSessionService session(registry, store, bot, liveChat,
@@ -667,7 +667,7 @@ TEST(UserSessionLiveConfigTest, NextRequestUsesReloadedSamplingAndSurvival)
     options.frequencyPenalty = 0.1;
     options.presencePenalty = 0.2;
     options.messageSurvivalSeconds = 3600;
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
 
@@ -713,7 +713,7 @@ TEST(UserSessionLiveConfigTest, UsersWithoutManualChoiceFollowTheDefaultModel)
     ModelRegistry registry(registryPath);
     ChatOptions options;
     options.defaultModel = "old-default";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
 
@@ -750,7 +750,7 @@ TEST(UserSessionLiveConfigTest, UnregisteredDefaultModelKeepsTheExistingErrorPat
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
     session.switchModel(20, "test-model");
@@ -772,7 +772,7 @@ TEST(ResetCommandsIntegrationTest, MapsTriggersToLightAndHeavyResets)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     options.defaultModel = "test-model";
-    BotIdentity bot;
+    Live<BotIdentity> bot{BotIdentity{}};
     Live<ChatOptions> liveChat(options);
     UserSessionService session(registry, store, bot, liveChat);
 

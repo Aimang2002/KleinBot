@@ -192,6 +192,13 @@ BotIdentity testBot()
     return bot;
 }
 
+// 服务持活值（配置实时生效 L2.d）：测试共用一份不变的
+const Live<BotIdentity> &liveTestBot()
+{
+    static const Live<BotIdentity> live{testBot()};
+    return live;
+}
+
 InboundMessage chat(std::uint64_t user, const std::string &nickname, const std::string &text,
                     std::int64_t ts, bool atBot = false,
                     const std::string &replyTo = "")
@@ -221,7 +228,7 @@ TEST(GroupContextServiceTest, AssembleSeparatesParallelTopicsByRelevance)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
     auto state = observingState(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(state.get(), testBot(), &store);
+    GroupContextService service(state.get(), liveTestBot(), &store);
 
     // 话题 A：原神剧情（A/B/C/E）
     for (int index = 0; index < 6; ++index)
@@ -254,7 +261,7 @@ TEST(GroupContextServiceTest, AssembleAlwaysIncludesWatermarkAndMailbox)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
     auto state = observingState(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(state.get(), testBot(), &store);
+    GroupContextService service(state.get(), liveTestBot(), &store);
 
     service.observe(chat(10, "甲", "原神深渊十二层阵容讨论", 1000));
     service.observe(chat(20, "乙", "完全无关的天气闲聊", 1100));
@@ -280,7 +287,7 @@ TEST(GroupContextServiceTest, OutboundRecordedAndAlwaysIncluded)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
     auto state = observingState(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(state.get(), testBot(), &store);
+    GroupContextService service(state.get(), liveTestBot(), &store);
 
     service.observe(chat(10, "甲", "原神抽卡保底歪了", 1000));
     service.recordOutbound(8823, TextMessage{"哎呀歪了呀，下一个up值得等"}); // 时间戳取 now
@@ -299,7 +306,7 @@ TEST(GroupContextServiceTest, EmptyTriggerYieldsEmptyAssembly)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
     auto state = observingState(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(state.get(), testBot(), &store);
+    GroupContextService service(state.get(), liveTestBot(), &store);
 
     service.observe(chat(10, "甲", "原神深渊阵容", 1000));
     EXPECT_TRUE(service.assemble(8823, "").empty());
@@ -308,11 +315,11 @@ TEST(GroupContextServiceTest, EmptyTriggerYieldsEmptyAssembly)
 
     // 总开关关闭 / 该群未监控：一律空（状态实时查询，无需重启）
     auto disabledState = observingState(temporaryDirectory.path() + "/disabled.db", false);
-    GroupContextService disabled(disabledState.get(), testBot(), &store);
+    GroupContextService disabled(disabledState.get(), liveTestBot(), &store);
     EXPECT_TRUE(disabled.assemble(8823, "原神深渊阵容").empty());
 
     auto otherGroupState = observingState(temporaryDirectory.path() + "/other.db", true, 9999);
-    GroupContextService otherGroup(otherGroupState.get(), testBot(), &store);
+    GroupContextService otherGroup(otherGroupState.get(), liveTestBot(), &store);
     EXPECT_TRUE(otherGroup.assemble(8823, "原神深渊阵容").empty());
 }
 
@@ -323,7 +330,7 @@ TEST(GroupContextServiceTest, LargeMaterialGoesThroughSummarizer)
     ASSERT_FALSE(temporaryDirectory.path().empty());
     GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
     auto state = observingState(temporaryDirectory.path() + "/conversation.db");
-    GroupContextService service(state.get(), testBot(), &store);
+    GroupContextService service(state.get(), liveTestBot(), &store);
 
     std::string filler(600, 'x');
     for (int index = 0; index < 10; ++index)
@@ -435,4 +442,34 @@ TEST(GroupContextStoreTest, UpdateTextAndFindTextRoundtripAndPersist)
                   "看 [image asset_id=gimg_a source=inbound | 照片：猫]");
         EXPECT_EQ(reopened.findText(8823, otherSeq).value_or(""), "前一条");
     }
+}
+
+// 配置实时生效（L2.d）：名字与别名是活值。改别名后下一条消息就按新别名判点名、
+// 她的新发言以新名字入库；她以前的发言保留当时的昵称，不回改
+TEST(GroupContextServiceTest, RenamedBotAppliesToNextMessageAndKeepsOldSelfRecords)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
+    auto state = observingState(temporaryDirectory.path() + "/conversation.db");
+    Live<BotIdentity> bot{testBot()};
+    GroupContextService service(state.get(), bot, &store);
+
+    service.recordOutbound(8823, TextMessage{"我是旧名字说的话"}, "");
+    service.observe(chat(10, "甲", "小克在吗", 1000));
+
+    BotIdentity renamed = testBot();
+    renamed.name = "Alice";
+    renamed.aliases = "小克";
+    bot.set(renamed);
+    service.observe(chat(10, "甲", "小克在吗", 1001));
+    service.recordOutbound(8823, TextMessage{"我是新名字说的话"}, "");
+
+    const auto records = store.snapshot(8823);
+    ASSERT_EQ(records.size(), 4U);
+    EXPECT_EQ(records[0].nickname, "Klein") << "改名前的发言保留当时的昵称";
+    EXPECT_FALSE(records[1].mentionsBot) << "改别名前不算点名";
+    EXPECT_TRUE(records[2].mentionsBot) << "改别名后下一条即按新别名";
+    EXPECT_EQ(records[3].nickname, "Alice");
+    EXPECT_EQ(records[3].userId, 10086U) << "id 不随改名变化";
 }

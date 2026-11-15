@@ -597,7 +597,8 @@ TEST(GlanceServiceTest, ObservePathEnqueuesInboundStickerWithHintButNotOutbound)
     BotIdentity bot;
     bot.id = 10086;
     bot.name = "Klein";
-    GroupContextService context(&state, bot, harness.store.get(), nullptr);
+    const Live<BotIdentity> liveBot{bot};
+    GroupContextService context(&state, liveBot, harness.store.get(), nullptr);
     ImageAssetStore *assets = harness.assets.get();
     context.setSharedAssets(assets);
     context.setImageImporter([assets](std::uint64_t groupId, const std::string &, std::int64_t messageId) {

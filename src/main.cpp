@@ -418,7 +418,7 @@ int main(int argc, char **argv)
 	ReminderService reminderService(reminderStore);
 	// 默认人格来自 source/soul.md，用户人格持久化在会话库 user_persona 表；
 	// chat 组配置持活值（ADR-023），重载后下一次请求即用新值
-	UserSessionService userSession(models, conversationStore, settings.bot, liveSettings.chat,
+	UserSessionService userSession(models, conversationStore, liveSettings.bot, liveSettings.chat,
 	                                "source/soul.md");
 	// 两个模型适配器每次请求开头从活值取代理（network.proxy 改了下一次请求即用新代理）
 	Dock dock(liveSettings.dock, &running);
@@ -626,7 +626,7 @@ int main(int argc, char **argv)
 	SelfMessageReceiptSink selfMessageReceiptSink(groupContextStore.get());
 	receiptFanout.addSink(&selfMessageReceiptSink);
 	PerceptionChannel perceptionChannel(groupListService.get(), perceptionStore.get());
-	GroupContextService groupContextService(groupListService.get(), settings.bot,
+	GroupContextService groupContextService(groupListService.get(), liveSettings.bot,
 											groupContextStore.get(), &messageSender);
 	groupContextService.setSummarizer([&chatService](const std::string &systemPrompt,
 													 const std::string &userPrompt)
@@ -669,7 +669,7 @@ int main(int argc, char **argv)
 	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=压缩/情绪基调），未配管理员
 	// 则无主模型、跟进自动停摆（与主动发言同一底线）
 	// affect 持活值，每个会话轮取一次快照；决策记录器与策略外壳都读同一组活值
-	EngagementService engagementService(settings.bot, groupContextStore.get(), liveSettings.affect,
+	EngagementService engagementService(liveSettings.bot, groupContextStore.get(), liveSettings.affect,
 										&messageSender);
 	engagementService.setDecisionRecorder(&decisionRecorder);
 	engagementService.setPolicy(&decisionPolicy);

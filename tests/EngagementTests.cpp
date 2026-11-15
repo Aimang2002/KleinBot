@@ -140,6 +140,7 @@ struct Harness
     std::unique_ptr<GroupContextStore> store;
     std::unique_ptr<FakeSender> sender;
     Live<AffectOptions> affect{AffectOptions{}};
+    Live<BotIdentity> identity; // 服务持活值（配置实时生效 L2.d）
     std::unique_ptr<EngagementService> service;
     std::int64_t now = 1'000'000;
     std::vector<std::uint64_t> submittedTurns;
@@ -153,8 +154,9 @@ struct Harness
     explicit Harness(BotIdentity bot = {987654321, 123456789, "Klein"})
         : store(std::make_unique<GroupContextStore>(directory.path() + "/conversation.db")),
           sender(std::make_unique<FakeSender>()),
+          identity(bot),
           service(std::make_unique<EngagementService>(
-              bot, store.get(), affect, sender.get(), [this] { return now; }))
+              identity, store.get(), affect, sender.get(), [this] { return now; }))
     {
         service->setSubmitTurn([this](std::uint64_t group) { submittedTurns.push_back(group); });
         // 与组合根一致：她的出站经 recorder 入群缓冲并算会话活动（GroupContextService::
@@ -1445,9 +1447,10 @@ TEST(EngagementIntegrationTest, ObserveFeedsEngagementAndNameMentionActivates)
     BotIdentity bot;
     bot.id = 10086;
     bot.name = "Klein";
-    GroupContextService contextService(&state, bot, &store, &sender);
+    const Live<BotIdentity> liveBot{bot};
+    GroupContextService contextService(&state, liveBot, &store, &sender);
     Live<AffectOptions> affect{AffectOptions{}};
-    EngagementService engagement(bot, &store, affect, &sender, [] { return std::int64_t(1000); });
+    EngagementService engagement(liveBot, &store, affect, &sender, [] { return std::int64_t(1000); });
     contextService.setEngagement(&engagement);
     int workerCalls = 0;
     engagement.setWorker([&workerCalls](const std::string &, const std::string &)
@@ -1494,9 +1497,10 @@ TEST(EngagementIntegrationTest, AtMentionHardActivatesSession)
     BotIdentity bot;
     bot.id = 10086;
     bot.name = "Klein";
-    GroupContextService contextService(&state, bot, &store, &sender);
+    const Live<BotIdentity> liveBot{bot};
+    GroupContextService contextService(&state, liveBot, &store, &sender);
     Live<AffectOptions> affect{AffectOptions{}};
-    EngagementService engagement(bot, &store, affect, &sender, [] { return std::int64_t(1000); });
+    EngagementService engagement(liveBot, &store, affect, &sender, [] { return std::int64_t(1000); });
     contextService.setEngagement(&engagement);
 
     // @ 消息：Message 路径调用 onAtActivated 硬激活（observe 只管入库）
@@ -1657,12 +1661,13 @@ TEST(EngagementColdTest, LearningStateSurvivesRestart)
     BotIdentity bot;
     bot.id = 987654321;
     bot.name = "Klein";
+    const Live<BotIdentity> liveBot{bot};
     const std::uint64_t group = 77501;
 
     std::int64_t now = 1'000'000;
     auto store1 = std::make_unique<GroupContextStore>(dbPath);
     Live<AffectOptions> affect{AffectOptions{}};
-    EngagementService first(bot, store1.get(), affect, nullptr, [&now] { return now; });
+    EngagementService first(liveBot, store1.get(), affect, nullptr, [&now] { return now; });
     first.setMemberProvider([](std::uint64_t) { return 100L; });
 
     // 学习基线 4 小时（每小时 40 条）
@@ -1681,7 +1686,7 @@ TEST(EngagementColdTest, LearningStateSurvivesRestart)
 
     // 重启后：武装期与基线从库恢复 → 立即武装，小尖峰直接触发（无需再等 2 小时）
     auto store2 = std::make_unique<GroupContextStore>(dbPath);
-    EngagementService second(bot, store2.get(), affect, nullptr, [&now] { return now; });
+    EngagementService second(liveBot, store2.get(), affect, nullptr, [&now] { return now; });
     second.setMemberProvider([](std::uint64_t) { return 100L; });
     std::vector<std::uint64_t> submitted;
     second.setSubmitTurn([&](std::uint64_t g) { submitted.push_back(g); });
@@ -1707,12 +1712,13 @@ TEST(EngagementColdTest, DailyCapSurvivesRestart)
     BotIdentity bot;
     bot.id = 987654321;
     bot.name = "Klein";
+    const Live<BotIdentity> liveBot{bot};
     const std::uint64_t group = 77502;
 
     std::int64_t now = 2'000'000;
     auto store1 = std::make_unique<GroupContextStore>(dbPath);
     Live<AffectOptions> affect{AffectOptions{}};
-    EngagementService first(bot, store1.get(), affect, nullptr, [&now] { return now; });
+    EngagementService first(liveBot, store1.get(), affect, nullptr, [&now] { return now; });
     first.setMemberProvider([](std::uint64_t) { return 100L; });
 
     auto feedBurst = [&](GroupContextStore &store, EngagementService &service, int count)
@@ -1749,7 +1755,7 @@ TEST(EngagementColdTest, DailyCapSurvivesRestart)
 
     // 重启后当日帽仍在（不再有 3 次机会）
     auto store2 = std::make_unique<GroupContextStore>(dbPath);
-    EngagementService second(bot, store2.get(), affect, nullptr, [&now] { return now; });
+    EngagementService second(liveBot, store2.get(), affect, nullptr, [&now] { return now; });
     second.setMemberProvider([](std::uint64_t) { return 100L; });
     std::vector<std::uint64_t> submitted;
     second.setSubmitTurn([&](std::uint64_t g) { submitted.push_back(g); });

@@ -19,6 +19,7 @@
 #include "GroupContextStore.h"
 #include "GroupListService.h"
 #include "../Application/BotIdentity.h"
+#include "../utils/Live.h"
 #include "../Asset/ImageAsset.h"
 #include "../Port/InboundMessage.h"
 #include "../Port/OutboundMessage.h"
@@ -43,8 +44,10 @@ public:
     using Summarizer = std::function<std::string(const std::string &systemPrompt,
                                                   const std::string &userPrompt)>;
 
-    // state：观察状态（总开关 + 监控群集）唯一真值来源，逐步查询以支持即时生效
-    GroupContextService(GroupListService *state, BotIdentity bot,
+    // state：观察状态（总开关 + 监控群集）唯一真值来源，逐步查询以支持即时生效。
+    // bot：组合根的活值（ADR-023），每次操作开头取一份快照（bot.name/aliases 重载即生效；
+    // 已入库的她的发言保留当时的昵称，不回改）
+    GroupContextService(GroupListService *state, const Live<BotIdentity> &bot,
                         GroupContextStore *store, MessageSenderPort *sender = nullptr);
 
     void setSummarizer(Summarizer summarizer) { this->summarizer = std::move(summarizer); }
@@ -93,12 +96,13 @@ private:
 
     // 该群此刻是否在观察（总开关 + 监控集，实时查询以便即时生效）
     bool observingGroup(std::uint64_t groupId) const;
-    std::string formatRecords(const std::vector<GroupMessageRecord> &records,
+    std::string formatRecords(const BotIdentity &bot, const std::vector<GroupMessageRecord> &records,
                               std::int64_t watermarkTs) const;
-    std::string digestRecords(const std::vector<GroupMessageRecord> &records) const;
+    std::string digestRecords(const BotIdentity &bot,
+                              const std::vector<GroupMessageRecord> &records) const;
 
     GroupListService *const state;
-    const BotIdentity bot;
+    const Live<BotIdentity> &botIdentity;
     GroupContextStore *const store;
     MessageSenderPort *const sender;
     Summarizer summarizer;
