@@ -206,7 +206,7 @@ public:
     ReminderStore reminderStore;
     ReminderService reminderService;
     ComputerStatus computerStatus;
-    bool globalVoice = false;
+    Live<bool> globalVoice{false};
     NoSearchProvider searchProvider;
     WebSearchAction webSearch;
     WebFetchAction webFetch;

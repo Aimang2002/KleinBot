@@ -8,11 +8,13 @@
 #include <atomic>
 #include "VoiceOptions.h"
 #include "../../Log/Log.h"
+#include "../../utils/Live.h"
 
 class Voice
 {
 public:
-    explicit Voice(VoiceOptions config, const std::atomic<bool> *running = nullptr);
+    // config 是组合根的活值（ADR-023）：每次合成开头取一份快照，改了参数下一次合成即用新值
+    explicit Voice(const Live<VoiceOptions> &config, const std::atomic<bool> *running = nullptr);
     /**
      * @brief 文本转语音
      *
@@ -32,7 +34,7 @@ public:
     ~Voice();
 
 private:
-    VoiceOptions config;
+    const Live<VoiceOptions> &config;
     const std::atomic<bool> *running;
 };
 

@@ -67,12 +67,13 @@ bool containsChange(const ConfigDiff &diff, const std::string &path,
 }
 }
 
+// 三档各取一个键（voice.host 自 L1.c 起实时生效，Rebuild 的代表换成通信超时）
 TEST(ConfigDiffTest, ClassifiesDynamicRebuildAndRestartChanges)
 {
     SchemaConfig current;
     SchemaConfig candidate = current;
     candidate.bot.groupChatEnabled = false;
-    candidate.voice.host = "http://127.0.0.1";
+    candidate.communication.requestTimeoutMs = current.communication.requestTimeoutMs + 1000;
     candidate.chat.workerThreads = 8;
 
     const ConfigDiff diff = compareConfig(current, candidate);
@@ -83,7 +84,8 @@ TEST(ConfigDiffTest, ClassifiesDynamicRebuildAndRestartChanges)
     EXPECT_EQ(diff.count(ConfigChangeImpact::Restart), 1U);
     EXPECT_TRUE(containsChange(diff, "bot.group_chat_enabled",
                                ConfigChangeImpact::Dynamic));
-    EXPECT_TRUE(containsChange(diff, "voice.host", ConfigChangeImpact::Rebuild));
+    EXPECT_TRUE(containsChange(diff, "communication.defaults.request_timeout_ms",
+                               ConfigChangeImpact::Rebuild));
     EXPECT_TRUE(containsChange(diff, "chat.worker_threads",
                                ConfigChangeImpact::Restart));
 }
@@ -141,6 +143,26 @@ TEST(ConfigDiffTest, ModelEndpointKeysAreDynamic)
             EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Dynamic)) << path;
         }
     }
+}
+
+// 配置实时生效 L1.c：voice 的 5 个键接通应用（开关与合成参数），档位变为 Dynamic
+TEST(ConfigDiffTest, VoiceKeysAreDynamic)
+{
+    SchemaConfig current;
+    SchemaConfig candidate = current;
+    candidate.voice.enabled = !current.voice.enabled;
+    candidate.voice.host = "127.0.0.2";
+    candidate.voice.port = "9881";
+    candidate.voice.referenceAudioPath = "next.wav";
+    candidate.voice.referenceText = "next";
+
+    const ConfigDiff diff = compareConfig(current, candidate);
+
+    EXPECT_EQ(diff.size(), 5U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 5U);
+    for (const char *path : {"voice.enabled", "voice.host", "voice.port", "voice.reference_audio_path",
+                             "voice.reference_text"})
+        EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Dynamic)) << path;
 }
 
 TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)

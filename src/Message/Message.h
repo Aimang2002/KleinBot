@@ -14,6 +14,7 @@
 #include "../Action/Action.h"
 #include "MessageOptions.h"
 #include "../ModelApiCaller/ModelEndpointOptions.h"
+#include "../utils/Live.h"
 #include <iostream>
 #include <random>
 #include <memory>
@@ -34,10 +35,11 @@ public:
     // perception 可空：注入时白名单群被 @ 的回复带上话题背景注记（T7），关闭时内部 no-op
     // groupContext 可空：注入时白名单群启用内容级上下文装配与收敛契约（T7b）
     // visionModel：视觉端点来源，每次调用时取一次（models.vision 可只填注册名）
+    // globalVoice：语音总开关（活值，只读），每次回复投递时取一次
     explicit Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                      MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                      CommandRegistry &registry, Voice &voice, MessageOptions options,
-                     EndpointProvider visionModel, bool &globalVoice,
+                     EndpointProvider visionModel, const Live<bool> &globalVoice,
                      class TypingIndicator *typingIndicator = nullptr,
                      class PerceptionChannel *perception = nullptr,
                      class GroupContextService *groupContext = nullptr,
@@ -137,7 +139,7 @@ private:
 private:
 	std::string help_message;
 
-	bool &global_Voice;															 // true为开启
+	const Live<bool> &global_Voice; // 语音总开关，true 为开启
 
 	Dock &dock;
 	UserSessionService &userSession;

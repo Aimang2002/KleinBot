@@ -44,7 +44,8 @@ TEST(ConfigRulesTest, PathsAreUniqueAndEveryRowIsComplete)
 }
 
 // 接通实时生效的键，按表的顺序：每行都带应用函数、档位 Dynamic。
-// L1.a：chat 组除 top_p 与 worker_threads 外的 6 个；L1.b：models 的三个端点各 4 个字段
+// L1.a：chat 组除 top_p 与 worker_threads 外的 6 个；L1.b：models 的三个端点各 4 个字段；
+// L1.c：voice 的 5 个键（开关与合成参数）
 TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
 {
     std::vector<std::string> wired;
@@ -65,8 +66,11 @@ TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
         "models.drawing.api_standard", "models.vision.model", "models.vision.endpoint",
         "models.vision.api_key", "models.vision.api_standard", "models.worker.model",
         "models.worker.endpoint", "models.worker.api_key", "models.worker.api_standard",
+        // L1.c
+        "voice.enabled", "voice.host", "voice.port", "voice.reference_audio_path",
+        "voice.reference_text",
     };
-    EXPECT_EQ(wired.size(), 18U);
+    EXPECT_EQ(wired.size(), 23U);
     EXPECT_EQ(wired, expected);
 }
 

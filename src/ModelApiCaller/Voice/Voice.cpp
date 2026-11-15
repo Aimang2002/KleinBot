@@ -3,8 +3,8 @@
 #include "../../Network/CurlRequestControl.h"
 #include <filesystem>
 
-Voice::Voice(VoiceOptions config, const std::atomic<bool> *running)
-    : config(std::move(config)), running(running) {}
+Voice::Voice(const Live<VoiceOptions> &config, const std::atomic<bool> *running)
+    : config(config), running(running) {}
 
 // 回调函数，用于处理HTTP响应数据
 size_t so_VIST_WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
@@ -21,6 +21,8 @@ std::string Voice::toAudio(const std::string &text)
     /*
      * 目前文本转语音仅支持中文
      */
+    // 一次合成取一次配置快照，之后都用这一份
+    const Live<VoiceOptions>::Snapshot options = config.get();
 
     // 语音文件写入系统临时目录（Linux /tmp、Windows %TEMP%）下的专用子目录，
     // 发送成功后由 transport 层删除；文件名带毫秒时间戳 + 进程内序号，
@@ -67,12 +69,12 @@ std::string Voice::toAudio(const std::string &text)
     CURLcode res;
 
     // 指定必要内容
-    std::string url = config.host + ":" + config.port + "/tts"; // "127.0.0.1:9880/tts";
+    std::string url = options->host + ":" + options->port + "/tts"; // "127.0.0.1:9880/tts";
     nlohmann::json doc = {
         {"text", text},
         {"text_lang", "zh"},
-        {"ref_audio_path", config.referenceAudioPath},
-        {"prompt_text", config.referenceText},
+        {"ref_audio_path", options->referenceAudioPath},
+        {"prompt_text", options->referenceText},
         {"prompt_lang", "zh"},
         {"streaming_mode", false}};
     std::string postData = doc.dump();

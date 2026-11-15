@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
+#include "Action/AdminControlAction.h"
+#include "Action/VoiceModeAction.h"
 #include "Bootstrap/ConfigReloader.h"
 #include "Bootstrap/ConfigRules.h"
 #include "Bootstrap/ConfigSnapshotStore.h"
 #include "Bootstrap/LiveSettings.h"
+#include "ComputerStatus/ComputerStatus.h"
 #include "Configuration/ConfigLoader.h"
 #include "ModelApiCaller/ModelEndpointResolver.h"
 #include "ModelRegistry/ModelRegistry.h"
@@ -94,6 +97,7 @@ struct LiveSnapshots
     Live<ModelEndpointOptions>::Snapshot visionModel;
     Live<ModelEndpointOptions>::Snapshot workerModel;
     Live<VoiceOptions>::Snapshot voice;
+    Live<bool>::Snapshot globalVoice;
     Live<MemoryOptions>::Snapshot memory;
     Live<WebSearchOptions>::Snapshot webSearch;
     Live<WebFetchOptions>::Snapshot webFetch;
@@ -105,9 +109,9 @@ struct LiveSnapshots
 LiveSnapshots snapshotsOf(const LiveSettings &live)
 {
     return {live.chat.get(),         live.drawingModel.get(), live.visionModel.get(),
-            live.workerModel.get(),  live.voice.get(),        live.memory.get(),
-            live.webSearch.get(),    live.webFetch.get(),     live.dock.get(),
-            live.glance.get(),       live.message.get()};
+            live.workerModel.get(),  live.voice.get(),        live.globalVoice.get(),
+            live.memory.get(),       live.webSearch.get(),    live.webFetch.get(),
+            live.dock.get(),         live.glance.get(),       live.message.get()};
 }
 
 void expectAllUnchanged(const LiveSnapshots &before, const LiveSettings &live)
@@ -118,6 +122,7 @@ void expectAllUnchanged(const LiveSnapshots &before, const LiveSettings &live)
     EXPECT_EQ(now.visionModel, before.visionModel);
     EXPECT_EQ(now.workerModel, before.workerModel);
     EXPECT_EQ(now.voice, before.voice);
+    EXPECT_EQ(now.globalVoice, before.globalVoice);
     EXPECT_EQ(now.memory, before.memory);
     EXPECT_EQ(now.webSearch, before.webSearch);
     EXPECT_EQ(now.webFetch, before.webFetch);
@@ -241,7 +246,8 @@ TEST_F(ConfigReloaderFixture, ParsedButInvalidCandidateAppliesNothing)
 }
 
 // 产品规则表（默认）：只有接通的行把新值换进活值（L1.a 起 chat 组 6 个键，L1.b 起
-// models 的 12 个键），其余活值的快照指针不变；反馈如实列出已生效、需重启与尚未接通的键
+// models 的 12 个键，L1.c 起 voice 的 5 个键），其余活值的快照指针不变；
+// 反馈如实列出已生效、需重启与尚未接通的键
 TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
 {
     ConfigReloader reloader(*store, *live);
@@ -261,12 +267,13 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     ASSERT_TRUE(report.result.success);
     EXPECT_EQ(report.result.diff.size(), 9U);
     EXPECT_EQ(store->current(), report.result.snapshot);
-    EXPECT_EQ(report.applied, (std::vector<std::string>{"chat.temperature", "models.vision.model"}));
+    EXPECT_EQ(report.applied,
+              (std::vector<std::string>{"chat.temperature", "models.vision.model", "voice.enabled",
+                                        "voice.host", "voice.port"}));
     EXPECT_EQ(report.restartOnly,
               (std::vector<std::string>{"chat.worker_threads", "storage.conversation_database"}));
     EXPECT_EQ(report.notWired,
-              (std::vector<std::string>{"bot.group_chat_enabled", "voice.enabled", "voice.host",
-                                        "voice.port", "network.proxy"}));
+              (std::vector<std::string>{"bot.group_chat_enabled", "network.proxy"}));
 
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_NE(after.chat, before.chat);
@@ -277,7 +284,10 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_TRUE(before.visionModel->model.empty()) << "替换前取到的快照不变";
     EXPECT_EQ(after.drawingModel, before.drawingModel) << "三个端点各自替换，没变的不动";
     EXPECT_EQ(after.workerModel, before.workerModel);
-    EXPECT_EQ(after.voice, before.voice);
+    EXPECT_NE(after.voice, before.voice);
+    EXPECT_EQ(after.voice->host, "127.0.0.1");
+    EXPECT_TRUE(*after.globalVoice) << "voice.enabled 变了：总开关置为新值";
+    EXPECT_FALSE(*before.globalVoice);
     EXPECT_EQ(after.memory, before.memory);
     EXPECT_EQ(after.webSearch, before.webSearch);
     EXPECT_EQ(after.webFetch, before.webFetch);
@@ -285,10 +295,9 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_EQ(after.glance, before.glance);
     EXPECT_EQ(after.message, before.message);
     EXPECT_EQ(summarizeReload(report),
-              "配置已刷新：9 项变化，已生效 2 项。\n"
+              "配置已刷新：9 项变化，已生效 5 项。\n"
               "需重启才能生效 2 项：chat.worker_threads、storage.conversation_database。\n"
-              "尚未接通实时生效、需重启 5 项：bot.group_chat_enabled、voice.enabled、voice.host、"
-              "voice.port、network.proxy。");
+              "尚未接通实时生效、需重启 2 项：bot.group_chat_enabled、network.proxy。");
 }
 
 // 端到端（L1.a）：真实的重载入口 + 产品规则表 + 持活值的 UserSessionService。
@@ -369,6 +378,74 @@ TEST_F(ConfigReloaderFixture, ReloadedModelEndpointReachesProviderOnNextCall)
     }
     std::error_code error;
     std::filesystem::remove(registryPath, error);
+}
+
+// 端到端（L1.c）：语音总开关跟着 voice.enabled 的变化走，管理员命令也能改，后写者生效；
+// 只改合成参数时总开关不动。读开关的 VoiceModeAction 每次执行时现取
+TEST_F(ConfigReloaderFixture, VoiceSwitchFollowsConfigChangesAndCommandsLastWriterWins)
+{
+    const std::filesystem::path directory =
+        path.parent_path() / (path.stem().string() + "-voice");
+    std::filesystem::create_directories(directory);
+    const std::string registryPath = (directory / "models.json").string();
+    std::ofstream(registryPath) << R"({"Models":[{"ModelName":["test-model"],"api_key":"k",)"
+                                   R"("api_endpoint":"https://example.test/chat","APIStandard":"OpenAI"}]})";
+    {
+        ModelRegistry registry(registryPath);
+        ConversationStore conversations((directory / "conversation.db").string());
+        UserSessionService session(registry, conversations, BotIdentity{}, live->chat);
+        ComputerStatus computerStatus;
+        VoiceModeAction voiceMode(session, live->globalVoice);
+        AdminControlAction admin(computerStatus, live->globalVoice, [] { return std::string(); });
+        ConfigReloader reloader(*store, *live);
+        const nlohmann::json turnOn = {{"enabled", true}};
+        const nlohmann::json freeze = {{"action", "freeze_global_voice"}};
+        const nlohmann::json activate = {{"action", "activate_global_voice"}};
+        ActionContext user;
+        user.user_id = 10;
+        const auto userTurnsVoiceOn = [&]() { return voiceMode.execute(turnOn, user).content; };
+        const auto writeVoice = [this](bool enabled, const std::string &host) {
+            writeEdited([enabled, host](nlohmann::json &config) {
+                config["voice"] = {{"enabled", enabled}, {"host", host}, {"port", "9880"}};
+            });
+        };
+
+        // 启动时没配 voice：总开关关着，用户开不了语音
+        EXPECT_EQ(userTurnsVoiceOn(), "管理员尚未激活语音功能。");
+
+        // 配置打开语音：重载后总开关打开，下一次执行即放行
+        writeVoice(true, "127.0.0.1");
+        ConfigReloadReport report = reloader.reload();
+        ASSERT_TRUE(report.result.success);
+        EXPECT_EQ(report.applied,
+                  (std::vector<std::string>{"voice.enabled", "voice.host", "voice.port"}));
+        EXPECT_EQ(userTurnsVoiceOn(), "语音已开启。");
+        EXPECT_TRUE(session.isVoiceMode(10));
+
+        // 管理员冻结：命令后写，开关关上
+        EXPECT_EQ(admin.execute(freeze, ActionContext{}).content, "全局语音已冻结。");
+        EXPECT_EQ(userTurnsVoiceOn(), "管理员尚未激活语音功能。");
+
+        // 只改合成参数：voice.enabled 没变，总开关保持命令设的值
+        writeVoice(true, "127.0.0.2");
+        report = reloader.reload();
+        ASSERT_TRUE(report.result.success);
+        EXPECT_EQ(report.applied, (std::vector<std::string>{"voice.host"}));
+        EXPECT_EQ(live->voice.get()->host, "127.0.0.2");
+        EXPECT_FALSE(*live->globalVoice.get());
+        EXPECT_EQ(userTurnsVoiceOn(), "管理员尚未激活语音功能。");
+
+        // 管理员再激活，之后配置把 voice.enabled 改成 false：配置后写，开关关上
+        EXPECT_EQ(admin.execute(activate, ActionContext{}).content, "全局语音已激活。");
+        EXPECT_EQ(userTurnsVoiceOn(), "语音已开启。");
+        writeVoice(false, "127.0.0.2");
+        report = reloader.reload();
+        ASSERT_TRUE(report.result.success);
+        EXPECT_EQ(report.applied, (std::vector<std::string>{"voice.enabled"}));
+        EXPECT_EQ(userTurnsVoiceOn(), "管理员尚未激活语音功能。");
+    }
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
 }
 
 // 带应用函数的行：新快照发布之后换进活值，同一个应用函数只调一次；

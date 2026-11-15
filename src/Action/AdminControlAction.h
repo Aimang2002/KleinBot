@@ -4,13 +4,16 @@
 #include "Action.h"
 #include "../Port/ToolNames.h"
 #include "../ComputerStatus/ComputerStatus.h"
+#include "../utils/Live.h"
 #include <functional>
 
 class AdminControlAction : public Action
 {
 public:
+    // globalVoice：语音总开关（活值）。#激活语音/#冻结语音 在这里改它；配置里的 voice.enabled
+    // 变化时重载也会改它，后写者生效
     AdminControlAction(ComputerStatus &computerStatus,
-                       bool &globalVoice, std::function<std::string()> refresh)
+                       Live<bool> &globalVoice, std::function<std::string()> refresh)
         : computerStatus(computerStatus),
           globalVoice(globalVoice), refresh(std::move(refresh)) {}
 
@@ -41,12 +44,12 @@ public:
             return {refresh(), {}, {}, true};
         if (action == "activate_global_voice")
         {
-            globalVoice = true;
+            globalVoice.set(true);
             return {"全局语音已激活。", {}, {}, true};
         }
         if (action == "freeze_global_voice")
         {
-            globalVoice = false;
+            globalVoice.set(false);
             return {"全局语音已冻结。", {}, {}, true};
         }
         if (action == "get_inet4")
@@ -60,7 +63,7 @@ public:
 
 private:
     ComputerStatus &computerStatus;
-    bool &globalVoice;
+    Live<bool> &globalVoice;
     std::function<std::string()> refresh;
 };
 

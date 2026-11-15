@@ -430,13 +430,15 @@ int main(int argc, char **argv)
 	std::unique_ptr<WebSearchAction> webSearchAction;
 	std::unique_ptr<WebFetchAction> webFetchAction;
 	ToolRegistry tools;
-	bool globalVoice = settings.voice.enabled;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
 		{ return userSession.getModelName(userId); });
-	VoiceModeAction voiceModeAction(userSession, globalVoice);
+	// 语音总开关是活值 liveSettings.globalVoice（决定 10）：启动时取 voice.enabled；
+	// AdminControlAction（#激活语音/#冻结语音）与配置重载（voice.enabled 变化时）都会改它，
+	// 后写者生效。VoiceModeAction 与 Message 只读
+	VoiceModeAction voiceModeAction(userSession, liveSettings.globalVoice);
 	AdminControlAction adminControlAction(adminComputerStatus,
-		globalVoice, [&configReloader]()
+		liveSettings.globalVoice, [&configReloader]()
 		{
 			const ConfigReloadReport report = configReloader.reload();
 			logConfigDiagnostics(report.result.diagnostics);
@@ -591,7 +593,7 @@ int main(int argc, char **argv)
 	CapabilityBroker capabilityBroker(activeApiChannel);
 	// 私聊"正在输入"（T5）：仅聊天路径，能力位门控
 	TypingIndicator typingIndicator(capabilityBroker, activeApiChannel);
-	Voice voice(settings.voice, &running);
+	Voice voice(liveSettings.voice, &running);
 	CommandRegistry commandRegistry(settings.bot.managerId);
 	commandRegistry.registryCommand(std::make_unique<HelpCommand>());
 	commandRegistry.registryCommand(std::make_unique<ModelListCommand>(models));
@@ -711,7 +713,7 @@ int main(int argc, char **argv)
 		});
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, settings.message, visionEndpoint,
-		globalVoice, &typingIndicator, &perceptionChannel, &groupContextService,
+		liveSettings.globalVoice, &typingIndicator, &perceptionChannel, &groupContextService,
 		decisionRecorder.get(), &groupImageAssets, decisionPolicy.get(), settings.affect.enforce);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证

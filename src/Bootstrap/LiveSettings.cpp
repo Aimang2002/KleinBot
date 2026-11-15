@@ -6,6 +6,7 @@ LiveSettings::LiveSettings(const RuntimeSettings &startup)
       visionModel(startup.models.vision),
       workerModel(startup.models.worker),
       voice(startup.voice),
+      globalVoice(startup.voice.enabled),
       memory(startup.memory),
       webSearch(startup.webSearch),
       webFetch(startup.webFetch),

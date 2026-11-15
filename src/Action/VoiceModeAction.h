@@ -4,11 +4,13 @@
 #include "Action.h"
 #include "../Port/ToolNames.h"
 #include "../UserSession/UserSessionService.h"
+#include "../utils/Live.h"
 
 class VoiceModeAction : public Action
 {
 public:
-    VoiceModeAction(UserSessionService &userSession, bool &globalVoice)
+    // globalVoice：语音总开关（活值，只读；由 AdminControlAction 与配置重载改）
+    VoiceModeAction(UserSessionService &userSession, const Live<bool> &globalVoice)
         : userSession(userSession), globalVoice(globalVoice) {}
 
     const ActionDescriptor &descriptor() const override
@@ -39,7 +41,7 @@ public:
     ActionResult execute(const nlohmann::json &arguments, const ActionContext &context) override
     {
         const bool enabled = arguments.value("enabled", false);
-        if (!globalVoice)
+        if (!*globalVoice.get())
             return {"管理员尚未激活语音功能。", {}, {}, true};
         userSession.voiceSwitch(context.user_id, enabled);
         return {enabled ? "语音已开启。" : "语音已关闭。", {}, {}, true};
@@ -47,7 +49,7 @@ public:
 
 private:
     UserSessionService &userSession;
-    bool &globalVoice;
+    const Live<bool> &globalVoice;
 };
 
 #endif // VOICE_MODE_ACTION_H

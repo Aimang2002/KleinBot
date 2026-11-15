@@ -28,7 +28,7 @@ std::mt19937 mt_rand(1000);
 Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                  MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                  CommandRegistry &registry, Voice &voice, MessageOptions options,
-                 EndpointProvider visionModel, bool &globalVoice,
+                 EndpointProvider visionModel, const Live<bool> &globalVoice,
                  TypingIndicator *typingIndicator, PerceptionChannel *perception,
                  GroupContextService *groupContext,
                  affect::DecisionRecorder *decisionRecorder,
@@ -300,7 +300,7 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 			}
 
 			// 语音模式：text → TTS → VoiceMessage；否则直接 TextMessage 走分段
-			if (this->global_Voice && this->userSession.isVoiceMode(current_data.user_id))
+			if (*this->global_Voice.get() && this->userSession.isVoiceMode(current_data.user_id))
 			{
 				std::string audioPath = this->textToVoice(llm_text);
 				if (audioPath.empty())

@@ -32,6 +32,19 @@ void applyWorkerModel(LiveSettings &live, const RuntimeSettings &next)
     live.workerModel.set(next.models.worker);
 }
 
+// voice.enabled：变化时把语音总开关置为新值。之后 #激活语音/#冻结语音 还能再改，
+// 后写者生效（决定 10）；只改合成参数时不调这个函数，总开关不动
+void applyVoiceSwitch(LiveSettings &live, const RuntimeSettings &next)
+{
+    live.globalVoice.set(next.voice.enabled);
+}
+
+// voice 的合成参数（host、port、参考音频与文本）：整份替换
+void applyVoice(LiveSettings &live, const RuntimeSettings &next)
+{
+    live.voice.set(next.voice);
+}
+
 // 每行：差异里的路径、生效方式、比较的 Schema 字段。表的顺序就是差异条目的输出顺序。
 // applies(应用函数) 的键重载成功后立即生效；restart() 的键只能重启生效；
 // notYet(档位) 的键还没接通实时生效，档位保持改造前的值
@@ -82,12 +95,12 @@ constexpr ConfigRule kProductRules[] = {
     {"models.worker.api_standard", applies(applyWorkerModel),
      field<&SchemaConfig::models, &ModelSchema::worker, &ModelEndpointSchema::apiStandard>},
 
-    // voice
-    {"voice.enabled",              notYet(Dynamic), field<&SchemaConfig::voice, &VoiceSchema::enabled>},
-    {"voice.host",                 notYet(Rebuild), field<&SchemaConfig::voice, &VoiceSchema::host>},
-    {"voice.port",                 notYet(Rebuild), field<&SchemaConfig::voice, &VoiceSchema::port>},
-    {"voice.reference_audio_path", notYet(Rebuild), field<&SchemaConfig::voice, &VoiceSchema::referenceAudioPath>},
-    {"voice.reference_text",       notYet(Rebuild), field<&SchemaConfig::voice, &VoiceSchema::referenceText>},
+    // voice：开关与合成参数各有应用函数，只改参数时不碰总开关
+    {"voice.enabled",              applies(applyVoiceSwitch), field<&SchemaConfig::voice, &VoiceSchema::enabled>},
+    {"voice.host",                 applies(applyVoice),       field<&SchemaConfig::voice, &VoiceSchema::host>},
+    {"voice.port",                 applies(applyVoice),       field<&SchemaConfig::voice, &VoiceSchema::port>},
+    {"voice.reference_audio_path", applies(applyVoice),       field<&SchemaConfig::voice, &VoiceSchema::referenceAudioPath>},
+    {"voice.reference_text",       applies(applyVoice),       field<&SchemaConfig::voice, &VoiceSchema::referenceText>},
 
     // memory
     {"memory.enabled",      notYet(Rebuild), field<&SchemaConfig::memory, &MemorySchema::enabled>},
