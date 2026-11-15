@@ -1,5 +1,6 @@
 #include "ConfigPanelServer.h"
 #include "ModelCatalog.h"
+#include "../Bootstrap/ConfigRules.h"
 #include "../Configuration/ConfigWriter.h"
 #include "../Log/Log.h"
 #include "../ModelRegistry/ModelRegistry.h"
@@ -413,6 +414,17 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
                            {"diagnostics", diagnosticsToArray(reload.diagnostics)},
                            {"warnings", diagnosticsToArray(written.diagnostics)}};
         response.set_content(body.dump(), "application/json");
+    });
+
+    // 每个配置键的生效方式，直接取自产品规则表（与保存后差异里的档位同源）：
+    // {"effects": {"chat.temperature": "applies", "bot.id": "restart", ...}}。
+    // 面板据此在字段说明末尾写“保存后立即生效”或“需重启生效”，不在页面里另记一份
+    server->Get("/api/config/effects", [](const httplib::Request &, httplib::Response &response) {
+        json effects = json::object();
+        for (const ConfigRule &rule : productConfigRules())
+            effects[rule.path] =
+                rule.effect.kind() == ConfigEffect::Kind::Applies ? "applies" : "restart";
+        response.set_content(json({{"effects", effects}}).dump(), "application/json");
     });
 
     server->Get("/api/models", [&store](const httplib::Request &, httplib::Response &response) {

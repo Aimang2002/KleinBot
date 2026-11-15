@@ -25,6 +25,7 @@ using json = nlohmann::json;
 #include <map>
 #include <memory>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <set>
 #include <string>
@@ -540,6 +541,88 @@ TEST_F(PanelServerFixture, RootServesPageFileWithoutAuth)
     // chat.top_p 已删除：旧配置里的残留不渲染，保存后随收集从文件里消失
     EXPECT_NE(result->body.find("chat: [\"top_p\"]"), std::string::npos);
     EXPECT_EQ(result->body.find("\"chat.top_p\":"), std::string::npos);
+}
+
+// 字段说明里的生效方式由规则表推出（L2.e）：/api/config/effects 逐键给出规则表的生效方式
+TEST_F(PanelServerFixture, ConfigEffectsMirrorProductRules)
+{
+    httplib::Client client("127.0.0.1", port);
+    const auto rejected = client.Get("/api/config/effects");
+    ASSERT_TRUE(rejected != nullptr);
+    EXPECT_EQ(rejected->status, 401);
+
+    const auto result = client.Get("/api/config/effects", authHeaders());
+    ASSERT_TRUE(result != nullptr);
+    ASSERT_EQ(result->status, 200);
+    const nlohmann::json effects = nlohmann::json::parse(result->body).at("effects");
+    ASSERT_TRUE(effects.is_object());
+    EXPECT_EQ(effects.size(), productConfigRules().size());
+    for (const ConfigRule &rule : productConfigRules())
+    {
+        ASSERT_TRUE(effects.contains(rule.path)) << rule.path;
+        const char *expected =
+            rule.effect.kind() == ConfigEffect::Kind::Applies ? "applies" : "restart";
+        EXPECT_EQ(effects[rule.path], expected) << rule.path;
+    }
+    EXPECT_EQ(effects["chat.default_model"], "applies");
+    EXPECT_EQ(effects["bot.name"], "applies");
+    EXPECT_EQ(effects["chat.worker_threads"], "restart");
+    EXPECT_EQ(effects["communication.active_transport"], "restart");
+    EXPECT_EQ(effects["web_search.provider"], "restart");
+}
+
+// 防漂移：面板页面里各张字段说明表与通信视图的说明不写生效方式（“重启”“生效”都不出现），
+// 生效方式只由 /api/config/effects 推出；FIELD_HINTS 的每个路径都能对上规则表的一行
+TEST_F(PanelServerFixture, PanelHintsLeaveEffectsToRuleTable)
+{
+    httplib::Client client("127.0.0.1", port);
+    const auto result = client.Get("/");
+    ASSERT_TRUE(result != nullptr);
+    ASSERT_EQ(result->status, 200);
+    const std::string &page = result->body;
+
+    const auto region = [&page](const std::string &from, const std::string &to) {
+        const std::size_t begin = page.find(from);
+        const std::size_t end = begin == std::string::npos ? std::string::npos : page.find(to, begin);
+        EXPECT_NE(begin, std::string::npos) << from;
+        EXPECT_NE(end, std::string::npos) << to;
+        if (begin == std::string::npos || end == std::string::npos)
+            return std::string();
+        return page.substr(begin, end - begin);
+    };
+    const std::string hints = region("const SECTION_HINTS = {", "// 模块与字段的固定展示顺序");
+    const std::string transports = region("const TRANSPORT_FIELD_SETS = {", "let communicationDraft");
+    const std::string communicationView =
+        region("function renderCommunicationFields()", "function switchTransportType(");
+    for (const std::string *text : {&hints, &transports, &communicationView})
+    {
+        EXPECT_FALSE(text->empty());
+        EXPECT_EQ(text->find("重启"), std::string::npos) << text->substr(0, 40);
+        EXPECT_EQ(text->find("生效"), std::string::npos) << text->substr(0, 40);
+    }
+
+    EXPECT_NE(page.find("\"/api/config/effects\""), std::string::npos);
+    EXPECT_NE(page.find("applies: \"保存后立即生效。\""), std::string::npos);
+    EXPECT_NE(page.find("restart: \"需重启生效。\""), std::string::npos);
+    EXPECT_NE(page.find("\"voice.reference_audio\": \"voice.reference_audio_path\""),
+              std::string::npos);
+
+    std::set<std::string> rulePaths;
+    for (const ConfigRule &rule : productConfigRules())
+        rulePaths.insert(rule.path);
+    const std::string fieldHints = region("const FIELD_HINTS = {", "};");
+    const std::regex key("\"([a-z_]+(\\.[a-z_]+)+)\":");
+    std::size_t checked = 0;
+    for (auto match = std::sregex_iterator(fieldHints.begin(), fieldHints.end(), key);
+         match != std::sregex_iterator(); ++match)
+    {
+        std::string path = (*match)[1].str();
+        if (path == "voice.reference_audio")
+            path = "voice.reference_audio_path";
+        EXPECT_EQ(rulePaths.count(path), 1U) << "面板字段对不上规则表：" << path;
+        ++checked;
+    }
+    EXPECT_GT(checked, 50U);
 }
 
 TEST_F(PanelServerFixture, RootReturns500WhenPageFileMissing)

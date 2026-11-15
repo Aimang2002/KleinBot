@@ -23,7 +23,8 @@ class ConfigPanelServer
 public:
     // 构建带完整路由与鉴权的面板服务器；测试可自行 bind 到临时端口。
     // store 只读（GET /api/botinfo 取当前快照）；保存配置后的重载只经注入的 reloader
-    // （与 #刷新配置文件 同一个入口，ADR-023）；
+    // （与 #刷新配置文件 同一个入口，ADR-023）；GET /api/config/effects 按产品规则表
+    // 返回每个键的生效方式，面板的字段说明由它推出；
     // models 用于模型注册表保存后的进程内热重载；
     // groups 可空：注入时提供 GET /api/groups 群列表选择器数据（T7c）；
     // apiChannel 可空：注入时提供 GET /api/botinfo 的协议端登录信息查询

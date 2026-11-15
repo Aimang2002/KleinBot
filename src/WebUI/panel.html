@@ -1571,7 +1571,7 @@
         <p class="pane-hint">白名单群的只读观察与话题跟进。总开关与群选择都是<b>运行时状态</b>，改动写入数据库并<b>立即生效</b>，无需保存配置、无需重启。私聊与非监控群完全不被观察。</p>
         <div id="perceptionBody"></div>
       </div>
-      <footer>保存后立即写盘并刷新内存快照；标注“需重启”的项在机器人重启后生效。密钥字段留空表示保持原值。
+      <footer>保存后立即写盘并重载配置：字段说明里写“保存后立即生效”的项马上生效，写“需重启生效”的项在机器人重启后生效。密钥字段留空表示保持原值。
         <span class="tagline">KLEIN · MOBIUS LAB TERMINAL</span>
       </footer>
     </main>
@@ -1662,10 +1662,10 @@
       memory: "长期记忆：提取批次、空闲触发时机与召回数量。",
       web_search: "Tavily 联网搜索工具，由模型在需要时自主调用。",
       web_fetch: "网页抓取工具，无需第三方 Key，结果按 URL 缓存。",
-      storage: "SQLite 数据库与图片资产的位置（改动需重启）。",
+      storage: "SQLite 数据库与图片资产的位置。",
       network: "出站请求的公共代理（模型调用、搜索等），留空不使用。",
-      communication: "选择与 OneBot 协议端（NapCat / LagRange 等）的连接方式：服务器模式（协议端作服务器）、客户端模式（协议端作客户端）或 HTTP 组合。切换后仅显示所选方式的字段，其余档案保留在配置文件中；改动需重启生效。",
-      webui: "本配置面板自身的监听配置（改动需重启生效）。"
+      communication: "选择与 OneBot 协议端（NapCat / LagRange 等）的连接方式：服务器模式（协议端作服务器）、客户端模式（协议端作客户端）或 HTTP 组合。切换后仅显示所选方式的字段，其余档案保留在配置文件中。",
+      webui: "本配置面板自身的监听配置。"
     };
     const KEY_HINTS = {
       type: "传输类型：forward_websocket = 服务器模式（协议端作服务器，Klein 主动连出）；reverse_websocket = 客户端模式（协议端作客户端，主动连入 Klein）；http = API 调用 + 事件上报组合。",
@@ -1688,16 +1688,16 @@
       api_standard: "请求协议标准：OpenAI 或 Anthropic。"
     };
     const FIELD_HINTS = {
-      "bot.id": "机器人的 QQ 号，用于识别 @ 消息与发送消息（改动需重启）。",
+      "bot.id": "机器人的 QQ 号，用于识别 @ 消息与发送消息。",
       "bot.manager_id": "管理员 QQ，可执行 #刷新配置文件 等管理命令；0 表示不设置。",
-      "bot.name": "机器人昵称，用于群聊点名与人格提示词（保存即生效）。",
-      "bot.group_chat_enabled": "是否响应群聊消息，关闭后仅私聊可用（保存即生效）。",
-      "chat.default_model": "默认对话模型：从模型注册表下拉选择（模型在「模型供应商」页维护）；需重启生效。",
+      "bot.name": "机器人昵称，用于群聊点名与人格提示词。",
+      "bot.group_chat_enabled": "是否响应群聊消息，关闭后仅私聊可用。",
+      "chat.default_model": "默认对话模型：从模型注册表下拉选择（模型在「模型供应商」页维护）；没手动选过模型的用户跟着改。",
       "chat.temperature": "采样温度 0~2：越高回答越随机，常用 0.7~1.0。",
       "chat.frequency_penalty": "频率惩罚 -2~2：正值降低字词重复倾向。",
       "chat.presence_penalty": "存在惩罚 -2~2：正值鼓励引入新话题。",
       "chat.max_message_tokens": "单条消息的 token 上限，超出会提示用户精简。",
-      "chat.worker_threads": "消息处理线程数；留空 = 按 CPU 核心数自动（需重启）。",
+      "chat.worker_threads": "消息处理线程数；留空 = 按 CPU 核心数自动。",
       "chat.message_survival_seconds": "消息在处理队列中的最长存活秒数。",
       "models.drawing.model": "画图模型名（配合 #画图 命令与画图工具）。",
       "models.drawing.endpoint": "画图模型的 API 端点地址。",
@@ -1708,7 +1708,7 @@
       "models.vision.api_key": "视觉模型的 API Key；留空表示保持原值（掩码显示）。",
       "models.vision.api_standard": "视觉模型的请求协议标准。",
       "models.worker.model": "轻量模型名（话题介入判定、上下文压缩等后台任务）；留空回退默认模型。",
-      "voice.enabled": "语音功能总开关（保存即生效）。",
+      "voice.enabled": "语音功能总开关；之后 #激活语音 / #冻结语音 还能再改，以最后一次为准。",
       "voice.host": "GPT-SoVITS 服务地址。",
       "voice.port": "GPT-SoVITS 服务端口。",
       "voice.reference_audio": "参考音频文件路径（音色克隆用）。",
@@ -1736,15 +1736,15 @@
       "web_fetch.request_timeout_ms": "抓取请求超时（毫秒）。",
       "web_fetch.cache_ttl_seconds": "抓取结果按 URL 缓存的秒数。",
       "web_fetch.cache_max_entries": "抓取缓存的最大条目数。",
-      "storage.conversation_database": "会话 SQLite 数据库路径（改动需重启）。",
-      "storage.image_assets": "图片资产（元数据 + 文件）的存储目录（改动需重启）。",
+      "storage.conversation_database": "会话 SQLite 数据库路径。",
+      "storage.image_assets": "图片资产（元数据 + 文件）的存储目录。",
       "network.proxy": "出站 HTTP(S) 代理地址（模型调用、搜索、抓取共用），留空直连。",
       "communication.protocol.type": "通信协议类型，当前仅支持 onebot。",
-      "communication.active_transport": "下拉选择连接方式：服务器模式（协议端作服务器，Klein 连出）/ 客户端模式（协议端作客户端，连入 Klein）/ HTTP；切换后仅显示对应字段并启用对应档案（需重启）。",
+      "communication.active_transport": "下拉选择连接方式：服务器模式（协议端作服务器，Klein 连出）/ 客户端模式（协议端作客户端，连入 Klein）/ HTTP；切换后仅显示对应字段并启用对应档案。",
       "communication.defaults.connect_timeout_ms": "通信连接超时（毫秒）。",
       "communication.defaults.request_timeout_ms": "通信请求超时（毫秒）。",
       "communication.defaults.max_event_body_bytes": "事件上报请求体的大小上限（字节）。",
-      "webui.enabled": "Web 配置面板开关（需重启生效）。",
+      "webui.enabled": "Web 配置面板开关。",
       "webui.bind": "面板监听地址：127.0.0.1 仅本机可访问；改为 0.0.0.0 会暴露给局域网/公网并产生安全警告。",
       "webui.port": "面板端口，默认 55346（KLEIN 的九宫格键盘映射）。",
       "webui.access_token": "面板访问令牌；留空表示保持原值（掩码显示），支持环境变量引用。"
@@ -1810,8 +1810,48 @@
       return known.concat(rest);
     }
 
+    // 生效方式：GET /api/config/effects 按服务端规则表返回 {规则表路径: "applies" | "restart"}，
+    // 字段说明末尾的“保存后立即生效 / 需重启生效”只由它推出——上面几张说明表里不写生效方式
+    // （ConfigPanelServerTests 机检），规则表改了这里跟着变。取不到时不写，不猜
+    let configEffects = {};
+    const EFFECT_TEXT = { applies: "保存后立即生效。", restart: "需重启生效。" };
+    const SECTION_EFFECT_TEXT = { applies: "本组改动保存后立即生效。", restart: "本组改动需重启生效。" };
+    // 面板字段路径与规则表路径不同的几处：参考音频在配置文件里叫 reference_audio
+    const EFFECT_PATH_ALIASES = { "voice.reference_audio": "voice.reference_audio_path" };
+    // 展示上独立成区、但键属于别的分组的模块
+    const SECTION_EFFECT_PATHS = { features: ["bot.group_chat_enabled"] };
+
+    async function refreshConfigEffects() {
+      try {
+        const response = await request("/api/config/effects", { method: "GET" });
+        if (!response.ok) return;
+        const body = await response.json();
+        if (isPlainObject(body.effects)) configEffects = body.effects;
+      } catch (error) {
+        // 取不到时保留旧值（首次为空）：字段说明不带生效方式
+      }
+    }
+
+    function withEffect(hint, rulePath) {
+      const effect = EFFECT_TEXT[configEffects[rulePath]] || "";
+      if (!effect) return hint;
+      return hint ? hint + " " + effect : effect;
+    }
+
     function hintFor(path, key) {
-      return FIELD_HINTS[path] || KEY_HINTS[key] || "";
+      return withEffect(FIELD_HINTS[path] || KEY_HINTS[key] || "", EFFECT_PATH_ALIASES[path] || path);
+    }
+
+    // 分区说明：分区里的键生效方式一致时补一句，混合时各看字段说明
+    function sectionHint(key) {
+      const base = SECTION_HINTS[key] || "";
+      const paths = SECTION_EFFECT_PATHS[key] ||
+        Object.keys(configEffects).filter((path) => path.startsWith(key + "."));
+      const kinds = new Set(paths.map((path) => configEffects[path]));
+      if (paths.length === 0 || kinds.size !== 1) return base;
+      const effect = SECTION_EFFECT_TEXT[[...kinds][0]] || "";
+      if (!effect) return base;
+      return base ? base + effect : effect;
     }
 
     const $ = (id) => document.getElementById(id);
@@ -1964,7 +2004,12 @@
     // target 是相对 communication 根的键数组（JSON 序列化挂在 dataset 上），
     // 避免档案名里出现“.”时按路径字符串拆分写错位置；path 仅用于展示与后端诊断定位
     function transportFieldRow(field, value, path, target) {
-      const row = rowFor(path, field.label, field.hint || FIELD_HINTS[path] || KEY_HINTS[field.key] || "");
+      // 传输档案的字段在规则表里按“当前启用的档案”记：transports.<档案>.x → active_profile.x
+      const rulePath = target[0] === "transports"
+        ? "communication.active_profile." + target.slice(2).join(".")
+        : "communication." + target.join(".");
+      const row = rowFor(path, field.label,
+        withEffect(field.hint || FIELD_HINTS[path] || KEY_HINTS[field.key] || "", rulePath));
       const input = transportInputFor(field, value);
       input.dataset.path = path;
       input.dataset.target = JSON.stringify(target);
@@ -1996,8 +2041,9 @@
       const modePath = modeLabel.querySelector(".path");
       modePath.textContent = "communication.active_transport";
       modePath.title = "communication.active_transport";
-      modeLabel.dataset.hint =
-        "选择与协议端的连接形态，下方仅显示该形态的字段；切换会启用对应档案（不存在时按默认值新建）。改动需重启生效。";
+      modeLabel.dataset.hint = withEffect(
+        "选择与协议端的连接形态，下方仅显示该形态的字段；切换会启用对应档案（不存在时按默认值新建）。",
+        "communication.active_transport");
       const control = document.createElement("div");
       control.className = "row-control";
       const select = document.createElement("select");
@@ -2495,21 +2541,22 @@
 
     function saveResultParts(body) {
       // 保存结果的生效摘要：只产出通知用的"标题 + 一句话生效情况"，
-      // 不再附字段清单与诊断横幅（用户定规 2026-09-19：不展示）
+      // 不再附字段清单与诊断横幅（用户定规 2026-09-19：不展示）。
+      // 档位来自服务端规则表：dynamic = 已立即生效，restart = 需重启（rebuild 自 L2.e 起不再产生）
       const counts = body.counts || {};
-      const total = (counts.dynamic || 0) + (counts.rebuild || 0) + (counts.restart || 0);
+      const total = (counts.dynamic || 0) + (counts.restart || 0);
 
       if (body.reloadSuccess === false)
         return {
-          title: "已写盘，快照刷新失败",
-          body: "本次变更需重启机器人后才能生效",
+          title: "已写盘，重载失败",
+          body: "本次变更尚未生效：可用 #刷新配置文件 重试，或重启机器人",
           isError: true
         };
       if (total === 0)
         return { title: "保存成功", body: "配置内容没有变化", isError: false };
 
       const effective = counts.dynamic || 0;
-      const delayed = (counts.rebuild || 0) + (counts.restart || 0);
+      const delayed = counts.restart || 0;
       let headline = "";
       if (effective > 0)
         headline += effective + " 项已生效";
@@ -2532,7 +2579,7 @@
       pane.appendChild(heading);
       const hint = document.createElement("p");
       hint.className = "pane-hint";
-      hint.textContent = SECTION_HINTS.features || "";
+      hint.textContent = sectionHint("features");
       pane.appendChild(hint);
       const fields = document.createElement("div");
       fields.className = "fields";
@@ -2966,6 +3013,8 @@
         extractTransportOptions(document_);
         // 模型名类字段是注册表下拉：渲染配置面板前先刷新注册表模型名缓存
         await refreshRegistryNames();
+        // 字段说明里的生效方式来自服务端规则表：同样先取再渲染
+        await refreshConfigEffects();
         const nav = $("sideNav");
         nav.textContent = "";
         // 基础信息固定在最顶层（配置模块上方），无 M 编号
@@ -3003,7 +3052,7 @@
           pane.appendChild(heading);
           const hint = document.createElement("p");
           hint.className = "pane-hint";
-          hint.textContent = SECTION_HINTS[key] || "";
+          hint.textContent = sectionHint(key);
           pane.appendChild(hint);
           const fields = document.createElement("div");
           fields.className = "fields";
