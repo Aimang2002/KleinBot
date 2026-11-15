@@ -424,7 +424,8 @@ int main(int argc, char **argv)
 	                                "source/soul.md");
 	// 两个模型适配器每次请求开头从活值取代理（network.proxy 改了下一次请求即用新代理）
 	Dock dock(liveSettings.dock, &running);
-	// 记忆参数持活值；memory.enabled 仍按启动值决定是否起后台线程（L2.b 再改）
+	// 记忆参数与开关都持活值：记忆库可用时后台线程常驻，memory.enabled 只决定收不收新的轮次、
+	// 召回查不查长期记忆（ADR-023 稳定外壳）
 	MemoryService memoryService(dbPath, conversationStore, dock, models, liveSettings.memory);
 	userSession.setMemoryService(&memoryService);
 	userSession.setImageAssetStore(&imageAssetStore);
@@ -638,39 +639,37 @@ int main(int argc, char **argv)
 		{ return chatService.buildOnce(systemPrompt, userPrompt); });
 	groupContextService.setSharedAssets(&groupImageAssets);
 	// 群聊瞥视（R1.1，ADR-020）：群图异步瞥视成一行派生描述写回群缓冲占位符，
-	// 零行为变化（只丰富文本、不触发回应）。视觉复用 models.vision：启动时按解析后的
-	// 端点判定就绪（注册表形态只填名字也算），未就绪时不设 seam，start() 报"视觉模型
-	// 未配置"并保持 no-op；观察通道关闭时 store 为空同理。
-	// 已知限制（L2.b 解除）：seam 每次调用按活值解析端点，改 models.vision 下一张图即用新端点；
-	// 但设不设 seam 只看启动时的就绪状态，启动时未就绪、之后才补配的要重启才开始瞥视
-	// 每群每分钟预算持活值（每张图取一次）；glance.enabled 仍按启动值决定是否起线程（L2.b）
+	// 零行为变化（只丰富文本、不触发回应）。视觉复用 models.vision。
+	// 稳定外壳（ADR-023）：视觉 seam 始终设置，群内容库存在时瞥视线程常驻（观察通道关闭时
+	// store 为空，不起线程）；glance.enabled 与视觉是否就绪（按活值与注册表现判，注册表形态
+	// 只填名字也算）都在每张图入队时判断，改了下一张图即生效。seam 每次调用按活值解析端点；
+	// 每群每分钟预算每张图取一次
 	GlanceService glanceService(groupContextStore.get(), &groupImageAssets, liveSettings.glance);
-	if (modelEndpointReadinessText(visionEndpoint(), "视觉", "models.vision").empty())
-	{
-		glanceService.setVision(
-			[&dock, &groupImageAssets, visionEndpoint](
-				const ImageAsset &asset, const std::string &hint) -> std::string
+	glanceService.setVisionReady([visionEndpoint]()
+		{ return modelEndpointReadinessText(visionEndpoint(), "视觉", "models.vision").empty(); });
+	glanceService.setVision(
+		[&dock, &groupImageAssets, visionEndpoint](
+			const ImageAsset &asset, const std::string &hint) -> std::string
+		{
+			const std::string base64 = groupImageAssets.readBase64(asset);
+			if (base64.empty())
+				return {};
+			const VisionResponse response = dock.RequestVision(
+				visionEndpoint(), GlanceService::visionPrompt(hint), base64);
+			if (response.cancelled)
+				return {};
+			if (response.code != 200)
 			{
-				const std::string base64 = groupImageAssets.readBase64(asset);
-				if (base64.empty())
-					return {};
-				const VisionResponse response = dock.RequestVision(
-					visionEndpoint(), GlanceService::visionPrompt(hint), base64);
-				if (response.cancelled)
-					return {};
-				if (response.code != 200)
-				{
-					// 失败原因进日志（生产只留 WARNING+），否则排障只能看到"无结果"
-					LOG_WARNING("群聊瞥视视觉调用失败：HTTP " + std::to_string(response.code) +
-								(response.error_message.empty() ? "" : "，" + response.error_message) +
-								"（" + asset.asset_id + "）");
-					return {};
-				}
-				if (response.content.empty() && !response.refusal.empty())
-					LOG_WARNING("群聊瞥视视觉拒绝：" + response.refusal + "（" + asset.asset_id + "）");
-				return response.content;
-			});
-	}
+				// 失败原因进日志（生产只留 WARNING+），否则排障只能看到"无结果"
+				LOG_WARNING("群聊瞥视视觉调用失败：HTTP " + std::to_string(response.code) +
+							(response.error_message.empty() ? "" : "，" + response.error_message) +
+							"（" + asset.asset_id + "）");
+				return {};
+			}
+			if (response.content.empty() && !response.refusal.empty())
+				LOG_WARNING("群聊瞥视视觉拒绝：" + response.refusal + "（" + asset.asset_id + "）");
+			return response.content;
+		});
 	groupContextService.setGlance(&glanceService);
 	// 话题会话（意志层 v2）：每群至多一个存活会话，激活→轮次→保留 2h；
 	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=压缩/情绪基调），未配管理员

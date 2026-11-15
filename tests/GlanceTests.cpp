@@ -544,16 +544,28 @@ TEST(GlanceServiceTest, DisabledOrUnconfiguredStaysNoop)
     };
     const GlanceJob job = harness.addImage(88, "noop-bytes");
 
-    // 未启用
+    // 未启用：线程照常常驻（L2.b 稳定外壳），入队时按开关拒收
     {
         Live<GlanceOptions> options{GlanceOptions{}};
         GlanceService service(harness.store.get(), harness.assets.get(), options);
         service.setVision(fakeVision);
         service.start();
-        EXPECT_FALSE(service.isRunning());
+        EXPECT_TRUE(service.isRunning());
         service.enqueue(job);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    // 启用但视觉模型未配置（不设 seam）
+    // 启用、有视觉 seam，但视觉模型未就绪：入队时拒收
+    {
+        Live<GlanceOptions> options(enabledOptions());
+        GlanceService service(harness.store.get(), harness.assets.get(), options);
+        service.setVision(fakeVision);
+        service.setVisionReady([] { return false; });
+        service.start();
+        EXPECT_TRUE(service.isRunning());
+        service.enqueue(job);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    // 没有视觉调用（不设 seam）
     {
         Live<GlanceOptions> options(enabledOptions());
         GlanceService service(harness.store.get(), harness.assets.get(), options);
@@ -637,6 +649,55 @@ TEST(GlanceServiceTest, ObservePathEnqueuesInboundStickerWithHintButNotOutbound)
     std::lock_guard<std::mutex> lock(hintMutex);
     ASSERT_EQ(hints.size(), 1U);
     EXPECT_EQ(hints[0], "发送者以表情包形式发送");
+}
+
+// 配置实时生效（L2.b）：瞥视线程常驻，glance.enabled 与视觉是否就绪在每张图入队时判断。
+// 关着/未就绪时的图不入队（队列先进先出：后面那张看完时，前面被拒的一定没看）；
+// 打开/就绪后下一张图即瞥视
+TEST(GlanceServiceTest, SwitchAndVisionReadinessApplyOnNextImage)
+{
+    Harness harness;
+    std::atomic<int> calls{0};
+    std::atomic<bool> ready{true};
+    GlanceOptions disabled = enabledOptions();
+    disabled.enabled = false;
+    Live<GlanceOptions> options(disabled);
+    GlanceService service(harness.store.get(), harness.assets.get(), options);
+    service.setVision([&calls](const ImageAsset &, const std::string &) {
+        ++calls;
+        return std::string("照片：一张图");
+    });
+    service.setVisionReady([&ready] { return ready.load(); });
+    service.start();
+    ASSERT_TRUE(service.isRunning()) << "关着也起线程";
+
+    const GlanceJob whileOff = harness.addImage(88, "switch-off");
+    service.enqueue(whileOff);
+
+    options.set(enabledOptions());
+    const GlanceJob afterOn = harness.addImage(88, "switch-on");
+    service.enqueue(afterOn);
+    ASSERT_TRUE(waitFor([&] { return harness.glanced(afterOn); }));
+    EXPECT_FALSE(harness.glanced(whileOff));
+    EXPECT_EQ(calls.load(), 1);
+
+    ready = false;
+    const GlanceJob whileUnready = harness.addImage(88, "switch-unready");
+    service.enqueue(whileUnready);
+    ready = true;
+    const GlanceJob afterReady = harness.addImage(88, "switch-ready");
+    service.enqueue(afterReady);
+    ASSERT_TRUE(waitFor([&] { return harness.glanced(afterReady); }));
+    EXPECT_FALSE(harness.glanced(whileUnready));
+    EXPECT_EQ(calls.load(), 2);
+
+    options.set(disabled);
+    const GlanceJob offAgain = harness.addImage(88, "switch-off-again");
+    service.enqueue(offAgain);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(harness.glanced(offAgain));
+    EXPECT_EQ(calls.load(), 2);
+    service.shutdown();
 }
 
 // 配置实时生效（L1.f）：每群每分钟预算在每张图开头取当前值。预算 1 时第二张图记为未看；

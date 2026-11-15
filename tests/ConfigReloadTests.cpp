@@ -166,8 +166,8 @@ TEST(ConfigDiffTest, VoiceKeysAreDynamic)
 }
 
 // 配置实时生效 L1.d：memory 除 enabled 外的 4 个键接通应用，档位变为 Dynamic；
-// enabled 决定是否起后台线程，尚未接通（仍为 Rebuild）
-TEST(ConfigDiffTest, MemoryKeysAreDynamicExceptEnabled)
+// L2.b 起 enabled 也接通（后台线程常驻，开关只决定收不收新轮次）
+TEST(ConfigDiffTest, MemoryKeysAreDynamic)
 {
     SchemaConfig current;
     SchemaConfig candidate = current;
@@ -180,11 +180,10 @@ TEST(ConfigDiffTest, MemoryKeysAreDynamicExceptEnabled)
     const ConfigDiff diff = compareConfig(current, candidate);
 
     EXPECT_EQ(diff.size(), 5U);
-    EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 4U);
-    for (const char *path : {"memory.model", "memory.batch_turns", "memory.idle_minutes",
-                             "memory.recall_limit"})
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 5U);
+    for (const char *path : {"memory.enabled", "memory.model", "memory.batch_turns",
+                             "memory.idle_minutes", "memory.recall_limit"})
         EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Dynamic)) << path;
-    EXPECT_TRUE(containsChange(diff, "memory.enabled", ConfigChangeImpact::Rebuild));
 }
 
 // 配置实时生效 L1.e：web_search（除 enabled、provider）、web_fetch（除 enabled）与 network.proxy
@@ -322,8 +321,8 @@ TEST(ConfigLoaderAffectTest, ParsesDecisionLayerKeysAndClassifiesRestart)
     EXPECT_TRUE(warned);
 }
 
-// R1.1 群聊瞥视配置节：缺省默认值、解析、越界回默认 + 诊断；enabled 为 Restart 级，
-// 预算自配置实时生效 L1.f 起为 Dynamic
+// R1.1 群聊瞥视配置节：缺省默认值、解析、越界回默认 + 诊断；预算自配置实时生效 L1.f、
+// enabled 自 L2.b 起为 Dynamic
 TEST(ConfigLoaderGlanceTest, DefaultsWhenSectionMissing)
 {
     ConfigLoader loader;
@@ -368,8 +367,8 @@ TEST(ConfigLoaderGlanceTest, ParsesSectionAndClassifiesRestart)
     candidate.glance.perGroupPerMinute = 3;
     const ConfigDiff diff = compareConfig(*loaded.config, candidate);
     EXPECT_EQ(diff.size(), 2U);
-    EXPECT_TRUE(containsChange(diff, "glance.enabled", ConfigChangeImpact::Restart));
-    // 预算自配置实时生效 L1.f 起接通应用；enabled 仍为 Restart（L2.b）
+    // 预算自配置实时生效 L1.f 起接通应用，enabled 自 L2.b 起接通
+    EXPECT_TRUE(containsChange(diff, "glance.enabled", ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(diff, "glance.per_group_per_minute", ConfigChangeImpact::Dynamic));
 }
 

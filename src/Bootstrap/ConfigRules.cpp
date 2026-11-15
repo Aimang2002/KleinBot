@@ -48,13 +48,10 @@ void applyVoice(LiveSettings &live, const RuntimeSettings &next)
     live.voice.set(next.voice);
 }
 
-// memory：model、batch_turns、idle_minutes、recall_limit 换成新值；enabled 还没接通
-// （L2.b 前只按启动值决定是否起线程），保持运行值，与决定 9 同一做法
+// memory：整份替换。enabled 只决定收不收新的轮次、召回查不查长期记忆（后台线程常驻）
 void applyMemory(LiveSettings &live, const RuntimeSettings &next)
 {
-    MemoryOptions memory = next.memory;
-    memory.enabled = live.memory.get()->enabled;
-    live.memory.set(std::move(memory));
+    live.memory.set(next.memory);
 }
 
 // web_search：provider 决定构造哪一种搜索实现（只能重启），保持运行值；enabled 与其余参数
@@ -90,12 +87,10 @@ void applyAffect(LiveSettings &live, const RuntimeSettings &next)
     live.affect.set(std::move(affect));
 }
 
-// glance：每群每分钟预算换成新值；enabled 决定是否起瞥视线程（L2.b 前未接通），保持运行值
+// glance：整份替换。enabled 在每张图入队时判断（瞥视线程常驻）
 void applyGlance(LiveSettings &live, const RuntimeSettings &next)
 {
-    GlanceOptions glance = next.glance;
-    glance.enabled = live.glance.get()->enabled;
-    live.glance.set(std::move(glance));
+    live.glance.set(next.glance);
 }
 
 // network.proxy：一个键作用于三处——模型调用（Dock 的两个适配器）、搜索、抓取。
@@ -168,9 +163,9 @@ constexpr ConfigRule kProductRules[] = {
     {"voice.reference_audio_path", applies(applyVoice),       field<&SchemaConfig::voice, &VoiceSchema::referenceAudioPath>},
     {"voice.reference_text",       applies(applyVoice),       field<&SchemaConfig::voice, &VoiceSchema::referenceText>},
 
-    // memory：enabled 决定是否起后台线程，L2.b 前尚未接通。没写 memory.model 时加载阶段
-    // 取 chat.default_model，所以改默认模型时这一行也会变、一并应用
-    {"memory.enabled",      notYet(Rebuild),     field<&SchemaConfig::memory, &MemorySchema::enabled>},
+    // memory：没写 memory.model 时加载阶段取 chat.default_model，所以改默认模型时这一行
+    // 也会变、一并应用
+    {"memory.enabled",      applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::enabled>},
     {"memory.model",        applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::model>},
     {"memory.batch_turns",  applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::batchTurns>},
     {"memory.idle_minutes", applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::idleMinutes>},
@@ -182,8 +177,8 @@ constexpr ConfigRule kProductRules[] = {
     {"affect.enforce",     applies(applyAffect), field<&SchemaConfig::affect, &AffectSchema::enforce>},
     {"affect.judge_model", notYet(Restart),     field<&SchemaConfig::affect, &AffectSchema::judgeModel>},
 
-    // glance：enabled 到 L2.b 才接通
-    {"glance.enabled",              notYet(Restart),     field<&SchemaConfig::glance, &GlanceSchema::enabled>},
+    // glance
+    {"glance.enabled",              applies(applyGlance), field<&SchemaConfig::glance, &GlanceSchema::enabled>},
     {"glance.per_group_per_minute", applies(applyGlance), field<&SchemaConfig::glance, &GlanceSchema::perGroupPerMinute>},
 
     // web_search：enabled 决定工具是否开放（对象始终构造、始终注册）；provider 决定构造哪一种

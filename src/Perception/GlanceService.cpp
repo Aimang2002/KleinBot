@@ -52,11 +52,6 @@ GlanceService::~GlanceService()
 void GlanceService::start()
 {
     const Live<GlanceOptions>::Snapshot current = options.get();
-    if (!current->enabled)
-    {
-        LOG_WARNING("群聊瞥视未启用（glance.enabled=false）");
-        return;
-    }
     if (store == nullptr)
     {
         LOG_WARNING("群聊瞥视未启动：观察通道关闭（无群内容缓冲）");
@@ -64,7 +59,7 @@ void GlanceService::start()
     }
     if (!vision)
     {
-        LOG_WARNING("群聊瞥视未启动：视觉模型未配置（models.vision）");
+        LOG_WARNING("群聊瞥视未启动：没有视觉调用");
         return;
     }
     {
@@ -74,11 +69,42 @@ void GlanceService::start()
         running.store(true);
     }
     worker = std::thread(&GlanceService::workerLoop, this);
-    LOG_INFO("群聊瞥视已启动（每群每分钟 " + std::to_string(current->perGroupPerMinute) + " 次）");
+    if (current->enabled)
+    {
+        LOG_INFO("群聊瞥视已启动（每群每分钟 " + std::to_string(current->perGroupPerMinute) + " 次）");
+        noteVisionReadiness(!visionReady || visionReady());
+    }
+    else
+    {
+        LOG_WARNING("群聊瞥视未启用（glance.enabled=false；瞥视线程常驻，打开后即生效）");
+    }
+}
+
+void GlanceService::noteVisionReadiness(bool ready)
+{
+    const int now = ready ? 1 : 0;
+    const int before = lastVisionReady.exchange(now);
+    if (before == now)
+        return;
+    if (!ready)
+        LOG_WARNING("群聊瞥视暂停：视觉模型未就绪（models.vision 未配置或缺少 API Key），新图片不瞥视");
+    else if (before == 0)
+        LOG_INFO("群聊瞥视恢复：视觉模型已就绪");
 }
 
 void GlanceService::enqueue(GlanceJob job)
 {
+    // 开关与视觉就绪在队列锁之外判断（活值的锁不与 queueMutex 嵌套）；
+    // 未运行时（没有群缓冲或视觉调用）不判断、不打日志
+    if (!running.load())
+        return;
+    if (!options.get()->enabled)
+        return;
+    const bool ready = !visionReady || visionReady();
+    noteVisionReadiness(ready);
+    if (!ready)
+        return;
+
     bool dropped = false;
     std::string droppedAssetId;
     {

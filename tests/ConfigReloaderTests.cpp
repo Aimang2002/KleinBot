@@ -336,10 +336,11 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_EQ(report.applied,
               (std::vector<std::string>{"bot.group_chat_enabled", "chat.temperature",
                                         "models.vision.model", "voice.enabled", "voice.host",
-                                        "voice.port", "memory.recall_limit", "network.proxy"}));
+                                        "voice.port", "memory.enabled", "memory.recall_limit",
+                                        "network.proxy"}));
     EXPECT_EQ(report.restartOnly,
               (std::vector<std::string>{"chat.worker_threads", "storage.conversation_database"}));
-    EXPECT_EQ(report.notWired, (std::vector<std::string>{"memory.enabled"}));
+    EXPECT_TRUE(report.notWired.empty());
 
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_NE(after.chat, before.chat);
@@ -356,7 +357,7 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_FALSE(*before.globalVoice);
     EXPECT_NE(after.memory, before.memory);
     EXPECT_EQ(after.memory->recallLimit, 5U);
-    EXPECT_TRUE(after.memory->enabled) << "memory.enabled 尚未接通：活值里保持运行值";
+    EXPECT_FALSE(after.memory->enabled) << "memory.enabled 自 L2.b 起接通";
     EXPECT_EQ(after.dock->proxy, "http://127.0.0.1:7890") << "network.proxy 一个键换三个活值";
     EXPECT_EQ(after.webSearch->proxy, "http://127.0.0.1:7890");
     EXPECT_EQ(after.webFetch->proxy, "http://127.0.0.1:7890");
@@ -367,9 +368,8 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_EQ(after.message->bot.id, before.message->bot.id) << "bot 身份保持运行值（决定 9）";
     EXPECT_EQ(after.affect, before.affect);
     EXPECT_EQ(summarizeReload(report),
-              "配置已刷新：11 项变化，已生效 8 项。\n"
-              "需重启才能生效 2 项：chat.worker_threads、storage.conversation_database。\n"
-              "尚未接通实时生效、需重启 1 项：memory.enabled。");
+              "配置已刷新：11 项变化，已生效 9 项。\n"
+              "需重启才能生效 2 项：chat.worker_threads、storage.conversation_database。");
 }
 
 // 端到端（L1.a）：真实的重载入口 + 产品规则表 + 持活值的 UserSessionService。
@@ -637,7 +637,7 @@ TEST_F(ConfigReloaderFixture, ProxyChangeReachesModelSearchAndFetchTogether)
 }
 
 // 端到端（L1.f）：群聊开关、affect.enforce、瞥视预算接通应用；同一个结构里还没接通的字段
-// （bot.name、affect.enabled/policy、glance.enabled）在活值里保持运行值，反馈里如实列为尚未接通
+// （bot.name、affect.enabled/policy）在活值里保持运行值，反馈里如实列为尚未接通；glance.enabled 自 L2.b 起接通
 TEST_F(ConfigReloaderFixture, GroupChatEnforceAndGlanceBudgetApplyKeepingRunningFields)
 {
     ConfigReloader reloader(*store, *live);
@@ -653,9 +653,8 @@ TEST_F(ConfigReloaderFixture, GroupChatEnforceAndGlanceBudgetApplyKeepingRunning
 
     ASSERT_TRUE(report.result.success);
     EXPECT_EQ(report.applied, (std::vector<std::string>{"bot.group_chat_enabled", "affect.enforce",
-                                                        "glance.per_group_per_minute"}));
-    EXPECT_EQ(report.notWired, (std::vector<std::string>{"bot.name", "affect.enabled", "affect.policy",
-                                                         "glance.enabled"}));
+                                                        "glance.enabled", "glance.per_group_per_minute"}));
+    EXPECT_EQ(report.notWired, (std::vector<std::string>{"bot.name", "affect.enabled", "affect.policy"}));
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_FALSE(after.message->groupChatEnabled);
     EXPECT_EQ(after.message->bot.name, "Klein") << "bot 身份保持运行值（决定 9）";
@@ -664,7 +663,7 @@ TEST_F(ConfigReloaderFixture, GroupChatEnforceAndGlanceBudgetApplyKeepingRunning
     EXPECT_FALSE(after.affect->enabled) << "affect.enabled 尚未接通：保持运行值";
     EXPECT_EQ(after.affect->policy, "baseline");
     EXPECT_EQ(after.glance->perGroupPerMinute, 12);
-    EXPECT_FALSE(after.glance->enabled) << "glance.enabled 尚未接通：保持运行值";
+    EXPECT_TRUE(after.glance->enabled) << "glance.enabled 自 L2.b 起接通";
     EXPECT_TRUE(before.message->groupChatEnabled) << "替换前取到的快照不变";
     EXPECT_FALSE(before.affect->enforce);
     EXPECT_EQ(after.chat, before.chat);

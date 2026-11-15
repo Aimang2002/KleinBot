@@ -18,9 +18,10 @@
 class MemoryService
 {
 public:
-    // config 是组合根的活值（ADR-023）：model、batch_turns、idle_minutes、recall_limit 在使用处
-    // 取快照，改了下一次操作即用新值。enabled 只在构造时读一次，决定是否启动后台线程
-    // （运行中不跟随重载，L2.b 再改）
+    // config 是组合根的活值（ADR-023）：model、batch_turns、idle_minutes、recall_limit、enabled
+    // 都在使用处取快照，改了下一次操作即用新值。后台线程在记忆库可用时始终启动（稳定外壳，
+    // 运行时不创建也不销毁线程）；enabled 只在入队与召回处读：关掉后不再收新的轮次、召回不查
+    // 长期记忆，已入队的批次照常处理完
     MemoryService(const std::string &dbPath, ConversationStore &conversationStore,
                   Dock &dock, const ModelRegistry &models, const Live<MemoryOptions> &config);
     ~MemoryService();
@@ -40,7 +41,8 @@ public:
     void clearUser(uint64_t user_id);
     void removeBySourceFrom(uint64_t user_id, int64_t firstSourceId);
     void shutdown();
-    bool isEnabled() const { return enabled; }
+    // 记忆库可用且当前 memory.enabled 为真
+    bool isEnabled() const { return storeOpen && config.get()->enabled; }
 
 private:
     struct PendingBatch
@@ -50,6 +52,10 @@ private:
         uint64_t epoch = 0;
     };
 
+    std::string recallWith(const MemoryOptions &options, uint64_t user_id,
+                           const std::vector<std::string> &queries, std::size_t limit,
+                           const std::vector<StructuredFactQuery> &factQueries,
+                           int64_t excludeConversationId);
     void workerLoop();
     void processBatch(uint64_t user_id, PendingBatch batch, const std::string &modelName);
     bool isEpochCurrent(uint64_t user_id, uint64_t epoch);
@@ -58,7 +64,7 @@ private:
     ConversationStore &conversationStore;
     MemoryExtractor extractor;
     const Live<MemoryOptions> &config;
-    bool enabled = true; // 启动值：记忆库可用且启动时 memory.enabled 为真
+    bool storeOpen = false; // 记忆库是否可用（构造时定，决定是否起后台线程）
 
     std::thread worker;
     std::mutex queueMutex;

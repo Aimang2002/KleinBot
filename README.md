@@ -195,7 +195,7 @@ export KLEIN_TAVILY_API_KEY="tvly-..."
 }
 ```
 
-- `enabled`：总开关，默认 `false`。需要同时开启观察通道并配置好视觉模型，否则启动日志会说明原因并自动不启用。改动需重启。
+- `enabled`：总开关，默认 `false`。需要同时开启观察通道并配置好视觉模型；视觉模型没就绪时日志会说明一次，并在就绪后自动恢复。改了即生效（下一张图起）。
 - `per_group_per_minute`：每个群每分钟最多瞥视几张图（1–60，默认 6）。刷屏超出的图标记为「未看（刷屏）」；同一张图（如反复刷的表情包）只看一次，重复出现不计数。改了即生效（下一张图起，已用的次数照常计入一分钟窗口）。
 - 表情包与系统表情不额外花钱：QQ 标记为表情包的图片会带上 `sticker` 标记，商城表情/小黄脸直接以 `[表情 …]` 文字记入缓冲。
 
@@ -238,16 +238,18 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 - `chat.default_model`：没有用 `#切换模型` 手动选过模型的用户跟着新的默认模型走；手动选过的保持自己的选择（手动选择只保存在内存里，重启后恢复为跟随默认模型）。
 - `chat.temperature`、`chat.frequency_penalty`、`chat.presence_penalty`。
 - `chat.max_message_tokens`、`chat.message_survival_seconds`。
-- `models.drawing`、`models.vision`、`models.worker` 的 `model`、`endpoint`、`api_key`、`api_standard`：生图、看图、群聊瞥视和后台杂务（话题会话、私聊摘要）下一次调用就用新配置。两处仍按启动时的配置：启动时视觉模型没配好、之后才补上的，群聊瞥视要重启才开始；决策层 judge（`affect.policy` 为 `judge` 时）用的 worker 端点。
+- `models.drawing`、`models.vision`、`models.worker` 的 `model`、`endpoint`、`api_key`、`api_standard`：生图、看图、群聊瞥视和后台杂务（话题会话、私聊摘要）下一次调用就用新配置。视觉模型启动时没配好、之后才补上的，群聊瞥视从下一张图起开始。决策层 judge（`affect.policy` 为 `judge` 时）用的 worker 端点仍按启动时的配置。
 - `voice.enabled`：改了就把语音总开关置为新值；之后管理员的 `#激活语音`、`#冻结语音` 还能再改，以最后一次为准。只改其他 `voice` 参数时总开关不动。
 - `voice.host`、`voice.port`、`voice.reference_audio`、`voice.reference_text`：下一次合成语音就用新参数。
-- `memory.model`（没写时跟着 `chat.default_model` 走）、`memory.batch_turns`、`memory.idle_minutes`、`memory.recall_limit`：后台提取最迟一两秒内按新的批次条件挑下一批、用新模型，召回从下一次起按新条数。`memory.enabled` 仍要重启。
+- `memory.model`（没写时跟着 `chat.default_model` 走）、`memory.batch_turns`、`memory.idle_minutes`、`memory.recall_limit`：后台提取最迟一两秒内按新的批次条件挑下一批、用新模型，召回从下一次起按新条数。
+- `memory.enabled`：关掉后不再收新的对话轮次、召回不再查长期记忆（只查原始对话），已经排队的批次照常提取完；打开后下一轮对话起照常积累提取。
 - `web_search.enabled`、`web_fetch.enabled`：打开后下一次对话（私聊、@ 回复、话题会话轮）的工具列表里就有联网搜索或网页抓取，关掉后下一次就没有（搜索打开但没配 `api_key` 时仍视为关闭）。
 - `web_search`、`web_fetch` 的其余参数（`web_search.provider` 除外，它仍要重启）：下一次搜索、抓取就用新值；抓取缓存里已有的条目按存入时的有效期过期，条目上限在下一次存入时按新值淘汰。
 - `network.proxy`：模型调用、联网搜索、网页抓取三处一起换，下一次请求就走新代理。
 - `bot.group_chat_enabled`：下一条群消息起按新开关处理。
 - `affect.enforce`：下一次群回应决策起按新值在影子期与生效期之间切换；`affect` 的另外三项仍要重启。
-- `glance.per_group_per_minute`：下一张图起按新预算；`glance.enabled` 仍要重启。
+- `glance.enabled`：下一张图起开始或停止瞥视（已排队的图照常看完）；仍需要启动时观察通道已开启（群内容缓冲在启动时建立）、视觉模型就绪。
+- `glance.per_group_per_minute`：下一张图起按新预算。
 
 其余配置仍需重启机器人才生效（`chat.top_p` 目前没有送进模型请求，配置了也不起作用）。
 

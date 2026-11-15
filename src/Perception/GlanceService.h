@@ -14,7 +14,9 @@
  * 落在资源预算与安全护栏上——每群每分钟预算、队列封顶、按字节去重；
  * 不允许任何"看到图就做 X"的行为逻辑。
  *
- * 线程：一个后台 worker（start() 且启用、有视觉 seam、有群缓冲时才起）。
+ * 线程：一个后台 worker（start() 时有视觉 seam、有群缓冲就起，常驻；ADR-023 稳定外壳，
+ * 运行时不创建也不销毁线程）。glance.enabled 与视觉模型是否就绪都在入队时判断：
+ * 关着或未就绪时新图不入队，已入队的照常处理完。
  * enqueue 在消息 worker 的观察路径上调用，只做锁内入队，不阻塞、不做 IO；
  * 文件读取、视觉 HTTP、写回 SQLite 全在本 worker 内，且都在锁外。
  * 队列满时丢最旧任务并（由 worker 稍后）标记"未看（刷屏）"；shutdown 丢弃
@@ -61,14 +63,16 @@ public:
     // 视觉调用 seam：组合根以 models.vision + Dock::RequestVision 适配，测试注入 fake。
     // 返回空串 = 失败/取消（不写回）
     using Vision = std::function<std::string(const ImageAsset &asset, const std::string &hint)>;
+    // 视觉模型当前是否就绪 seam：组合根按 models.vision 的活值与注册表现判；
+    // 未设置视为就绪（测试）。入队时调用，不做 IO
+    using VisionReady = std::function<bool()>;
 
     // 队列封顶与去重缓存上限（资源护栏，零旋钮）
     static constexpr std::size_t kMaxQueue = 64;
     static constexpr std::size_t kMaxCacheEntries = 512;
     static constexpr std::size_t kMaxCaptionCodePoints = 80;
 
-    // options：组合根的活值（ADR-023）。每张图开头取一次预算；enabled 只在 start() 时读
-    //（运行中不跟随重载，L2.b 再改）
+    // options：组合根的活值（ADR-023）。enabled 在入队时读，预算每张图开头取一次
     GlanceService(GroupContextStore *store, const ImageAssetStore *assets,
                   const Live<GlanceOptions> &options);
     ~GlanceService();
@@ -76,14 +80,18 @@ public:
     GlanceService(const GlanceService &) = delete;
     GlanceService &operator=(const GlanceService &) = delete;
 
-    // 必须在 start() 之前设置；未设置 = 视觉模型未配置，start() 保持 no-op
+    // 必须在 start() 之前设置；未设置时 start() 保持 no-op
     void setVision(Vision vision) { this->vision = std::move(vision); }
+    // 在 start() 之前设置
+    void setVisionReady(VisionReady ready) { visionReady = std::move(ready); }
 
-    // 仅当 enabled && vision && store 才起 worker；否则 LOG_WARNING 说明原因并保持 no-op
+    // 有 vision seam 与群缓冲就起 worker（与 enabled、视觉是否就绪无关）；否则 LOG_WARNING
+    // 说明原因并保持 no-op
     void start();
     bool isRunning() const { return running.load(); }
 
-    // 观察路径调用：锁内入队即返回（不阻塞、不做 IO）；未运行时无副作用
+    // 观察路径调用：glance.enabled 为真且视觉就绪才入队（锁内入队即返回，不阻塞、不做 IO）；
+    // 视觉就绪状态变化时打一次日志，不逐张打。未运行时无副作用
     void enqueue(GlanceJob job);
 
     // stopping=true → 唤醒 → join；pending 全部丢弃（不写标记）。可重复调用
@@ -99,6 +107,8 @@ public:
 
 private:
     void workerLoop();
+    // 视觉就绪状态与上一次判断不同时打一次日志
+    void noteVisionReadiness(bool ready);
     void process(const GlanceJob &job);
     // 每群滚动 60 秒窗口预算：有余量则记一次并返回 true（仅 worker 线程访问）。
     // perGroupPerMinute 是这张图开头取到的预算，改小后已记的调用照常计入窗口
@@ -111,6 +121,9 @@ private:
     const ImageAssetStore *const assets;
     const Live<GlanceOptions> &options;
     Vision vision;
+    VisionReady visionReady;
+    // 上一次判断的视觉就绪状态：-1 未判断，0 未就绪，1 就绪（多个消息 worker 并发入队）
+    std::atomic<int> lastVisionReady{-1};
 
     std::thread worker;
     std::atomic<bool> running{false};

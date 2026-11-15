@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <thread>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
@@ -519,7 +520,7 @@ TEST(MemoryServiceLiveConfigTest, RecallUsesCurrentRecallLimit)
     Dock dock(network, &running);
     ModelRegistry models(modelPath);
     MemoryOptions initial;
-    initial.enabled = false; // 只召回原始对话，不起后台线程
+    initial.enabled = false; // 只召回原始对话（后台线程常驻但不收新轮次）
     initial.recallLimit = 3;
     Live<MemoryOptions> options(initial);
     MemoryService service(databasePath, conversations, dock, models, options);
@@ -580,5 +581,58 @@ TEST(MemoryServiceLiveConfigTest, WorkerUsesCurrentBatchIdleAndModel)
     options.set(next);
     service.enqueueTurn(12, "明天去爬山", "注意安全", 21, 22);
     EXPECT_EQ(log.waitFor(3), (std::vector<std::string>{"model-a", "model-b", "model-a"}));
+    service.shutdown();
+}
+
+// 配置实时生效（L2.b）：后台线程在记忆库可用时常驻，memory.enabled 只在入队与召回处读。
+// 关掉后不再收新的轮次，已入队的批次照常处理完；再打开，下一轮起照常入队提取
+TEST(MemoryServiceLiveConfigTest, EnabledSwitchGatesNewTurnsAndDrainsQueuedBatches)
+{
+    RecallTemporaryDirectory temporaryDirectory;
+    const auto databasePath = temporaryDirectory.path() + "/memory.db";
+    const auto modelPath = temporaryDirectory.path() + "/models.json";
+    std::ofstream(modelPath) << R"({"Models":[{"ModelName":["model-a"],"api_key":"k",)"
+                                R"("api_endpoint":"https://example.test/chat","APIStandard":"Fake"}]})";
+    ConversationStore conversations(databasePath);
+    std::atomic<bool> running{true};
+    Live<DockOptions> network{DockOptions{}};
+    Dock dock(network, &running);
+    ExtractionLog log;
+    dock.registerStandard("Fake", std::make_unique<ExtractionRecordingPort>(&log));
+    ModelRegistry models(modelPath);
+    MemoryOptions initial;
+    initial.enabled = false;
+    initial.model = "model-a";
+    initial.batchTurns = 2;
+    initial.idleMinutes = 60;
+    Live<MemoryOptions> options(initial);
+    MemoryService service(databasePath, conversations, dock, models, options);
+    EXPECT_FALSE(service.isEnabled());
+
+    // 启动时关着：线程照样在，打开后下一轮入队即生效
+    MemoryOptions on = initial;
+    on.enabled = true;
+    options.set(on);
+    EXPECT_TRUE(service.isEnabled());
+    service.enqueueTurn(10, "我喜欢塞尔达", "记住了", 1, 2);
+
+    // 关掉（同时把空闲阈值降到 0）：已入队的那一轮照常提取；关着时的新轮次不收
+    MemoryOptions off = on;
+    off.enabled = false;
+    off.idleMinutes = 0;
+    options.set(off);
+    EXPECT_FALSE(service.isEnabled());
+    service.enqueueTurn(11, "我住在上海", "好的", 3, 4);
+    EXPECT_EQ(log.waitFor(1), (std::vector<std::string>{"model-a"}));
+    // 空闲阈值为 0，用户 11 的轮次若被收下，最迟一两轮（各约 500 毫秒）就会提取
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    EXPECT_EQ(log.waitFor(1).size(), 1U);
+
+    // 再打开：新轮次照常入队提取
+    MemoryOptions onAgain = off;
+    onAgain.enabled = true;
+    options.set(onAgain);
+    service.enqueueTurn(12, "明天去爬山", "注意安全", 5, 6);
+    EXPECT_EQ(log.waitFor(2), (std::vector<std::string>{"model-a", "model-a"}));
     service.shutdown();
 }

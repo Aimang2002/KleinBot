@@ -59,15 +59,18 @@ MemoryService::MemoryService(const std::string &dbPath, ConversationStore &conve
                              Dock &dock, const ModelRegistry &models, const Live<MemoryOptions> &config)
     : store(dbPath), conversationStore(conversationStore), extractor(dock, models), config(config)
 {
-    enabled = config.get()->enabled && store.isOpen();
-    if (enabled)
+    storeOpen = store.isOpen();
+    if (storeOpen)
     {
         worker = std::thread(&MemoryService::workerLoop, this);
-        LOG_INFO("长期记忆服务已启动");
+        if (config.get()->enabled)
+            LOG_INFO("长期记忆服务已启动");
+        else
+            LOG_WARNING("长期记忆服务未启用（memory.enabled=false；后台线程常驻，打开后即生效）");
     }
     else
     {
-        LOG_WARNING("长期记忆服务未启用");
+        LOG_WARNING("长期记忆服务未启用：记忆库不可用");
     }
 }
 
@@ -80,7 +83,8 @@ void MemoryService::enqueueTurn(uint64_t user_id, const std::string &userText,
                                 const std::string &assistantText, int64_t sourceStartId,
                                 int64_t sourceEndId)
 {
-    if (!enabled || userText.empty() || assistantText.empty())
+    // 开关在队列锁之外取（活值的锁不与 queueMutex 嵌套）
+    if (!storeOpen || !config.get()->enabled || userText.empty() || assistantText.empty())
         return;
 
     std::lock_guard<std::mutex> lock(queueMutex);
@@ -99,12 +103,22 @@ std::string MemoryService::recall(uint64_t user_id, const std::vector<std::strin
                                   int64_t excludeConversationId)
 {
     // 一次召回取一次配置快照
-    const std::size_t recallLimit = config.get()->recallLimit;
+    const Live<MemoryOptions>::Snapshot options = config.get();
+    return recallWith(*options, user_id, queries, limit, factQueries, excludeConversationId);
+}
+
+std::string MemoryService::recallWith(const MemoryOptions &options, uint64_t user_id,
+                                      const std::vector<std::string> &queries, std::size_t limit,
+                                      const std::vector<StructuredFactQuery> &factQueries,
+                                      int64_t excludeConversationId)
+{
+    const std::size_t recallLimit = options.recallLimit;
     const std::size_t effectiveLimit = limit == 0 ? recallLimit : std::min(limit, recallLimit);
     const std::size_t candidateLimit = effectiveLimit * 3;
     std::vector<MemoryItem> memories;
     std::vector<StructuredFactResult> facts;
-    if (enabled)
+    // 长期记忆关着时只查原始对话（与启动时关闭的行为相同）
+    if (storeOpen && options.enabled)
     {
         facts = store.searchFacts(user_id, factQueries, candidateLimit);
         memories = store.search(user_id, queries, candidateLimit);
@@ -227,15 +241,17 @@ std::string MemoryService::recallForMessage(uint64_t user_id, const std::string 
     if (!explicitRecall && !factQuestion)
         return {};
 
+    // 一次召回取一次配置快照：开关与 recall_limit 出自同一份
+    const Live<MemoryOptions>::Snapshot options = config.get();
     std::vector<StructuredFactQuery> factQueries;
-    if (enabled)
+    if (storeOpen && options->enabled)
         factQueries = store.planFactQueries(user_id, text, 5);
     if (!explicitRecall && factQueries.empty())
         return {};
 
-    // limit 传 0 = 按配置的 recall_limit，由 recall 取那一份快照（同一次召回不取两次）
-    const std::string result = recall(
-        user_id, {text}, 0, factQueries, currentMessageId);
+    // limit 传 0 = 按配置的 recall_limit
+    const std::string result = recallWith(
+        *options, user_id, {text}, 0, factQueries, currentMessageId);
     if (result == "没有找到与这些检索词相关的长期记忆或原始对话。")
         return {};
     return result;
