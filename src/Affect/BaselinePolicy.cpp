@@ -15,6 +15,6 @@ BehaviorPlan BaselinePolicy::planFor(const SituationCard &card)
 
 Decision BaselinePolicy::decide(const SituationCard &card, const std::string &)
 {
-    return Decision{planFor(card), {}, 0};
+    return Decision{planFor(card), {}, 0, {}};
 }
 } // namespace affect

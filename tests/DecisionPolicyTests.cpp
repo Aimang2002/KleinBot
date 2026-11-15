@@ -4,6 +4,8 @@
 #include "Affect/DecisionRecord.h"
 #include "Affect/JudgePolicy.h"
 #include "Affect/SituationCard.h"
+#include "Affect/SwitchingPolicy.h"
+#include "utils/Live.h"
 
 #include <chrono>
 #include <set>
@@ -355,3 +357,76 @@ TEST(JudgePolicyTest, EmptyPlanSummaryLeavesPromptUnchanged)
     EXPECT_NE(withPlan.find("当前对话计划：\n主线 3/5：安装编辑器"), std::string::npos);
 }
 } // namespace
+
+// ---- SwitchingPolicy（配置实时生效 L2.c 的策略外壳）----
+
+// 记录开着且 policy=judge 才转给 judge，其余（含 judge 但记录关着）一律基线；
+// resolve 按给定快照选，decide/version 按当前活值选
+TEST(SwitchingPolicyTest, SelectsJudgeOnlyWhenEnabledAndPolicyIsJudge)
+{
+    FakeWorker worker{planJson("no_reply", "none")};
+    JudgePolicy judge(worker.seam(), "m");
+    BaselinePolicy baseline;
+    Live<AffectOptions> options{AffectOptions{}};
+    affect::SwitchingPolicy shell(options, baseline, judge);
+
+    AffectOptions snapshot;
+    EXPECT_EQ(&shell.resolve(snapshot), &baseline);
+    snapshot.policy = "judge";
+    EXPECT_EQ(&shell.resolve(snapshot), &baseline) << "记录关着时不经 judge";
+    snapshot.enabled = true;
+    EXPECT_EQ(&shell.resolve(snapshot), &judge);
+    snapshot.policy = "baseline";
+    EXPECT_EQ(&shell.resolve(snapshot), &baseline);
+
+    const SituationCard card = cardFor("engagement_turn", "lull");
+    EXPECT_EQ(shell.version(), "baseline_v2.4.1");
+    EXPECT_EQ(shell.decide(card, "m").plan.action, "group_say");
+    EXPECT_EQ(worker.calls, 0);
+
+    AffectOptions judgeOn;
+    judgeOn.enabled = true;
+    judgeOn.policy = "judge";
+    options.set(judgeOn);
+    EXPECT_EQ(shell.version(), "judge_v1");
+    EXPECT_EQ(shell.planVersion(), "judge_plan_v1");
+    const affect::Decision decision = shell.decide(card, "m");
+    EXPECT_EQ(decision.plan.action, "no_reply");
+    EXPECT_EQ(decision.modelLabel, "m");
+    EXPECT_EQ(worker.calls, 1);
+    EXPECT_EQ(judge.callsThisHour(card.groupId), 1);
+
+    // 切回基线再切回 judge：预算状态留在 judge 对象里
+    options.set(AffectOptions{});
+    EXPECT_EQ(shell.decide(card, "m").plan.action, "group_say");
+    options.set(judgeOn);
+    shell.decide(card, "m");
+    EXPECT_EQ(judge.callsThisHour(card.groupId), 2);
+}
+
+// judge 的调用目标每次决策开头解析一次：回退（预算满等）也带上这一次解析出的模型名
+TEST(JudgePolicyTest, TargetIsResolvedPerDecisionAndLabelTravelsWithDecision)
+{
+    std::string model = "first";
+    std::vector<std::string> called;
+    JudgePolicy policy([&model, &called]() -> JudgePolicy::Target
+                       {
+                           const std::string current = model;
+                           return {[current, &called](const std::string &, const std::string &)
+                                   {
+                                       called.push_back(current);
+                                       return planJson("no_reply", "none");
+                                   },
+                                   current};
+                       });
+    const SituationCard card = cardFor("engagement_turn", "lull");
+    EXPECT_EQ(policy.decide(card, "m").modelLabel, "first");
+    model = "second";
+    EXPECT_EQ(policy.modelLabel(), "second");
+    EXPECT_EQ(policy.decide(card, "m").modelLabel, "second");
+    EXPECT_EQ(called, (std::vector<std::string>{"first", "second"}));
+
+    const affect::Decision unsupported = policy.decide(cardFor("at_reply_unknown", ""), "m");
+    EXPECT_EQ(unsupported.fallbackReason, "judge_unsupported_trigger");
+    EXPECT_EQ(unsupported.modelLabel, "second");
+}

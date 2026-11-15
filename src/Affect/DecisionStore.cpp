@@ -6,6 +6,7 @@
 #include <sqlite3.h>
 
 #include <cmath>
+#include <utility>
 
 namespace affect
 {
@@ -65,17 +66,28 @@ std::optional<DecisionRecord> readDecision(sqlite3_stmt *statement)
 }
 } // namespace
 
-DecisionStore::DecisionStore(const std::string &dbPath)
+DecisionStore::DecisionStore(std::string dbPath) : path(std::move(dbPath))
 {
-    utils::ensureParentDirectories(dbPath);
-    if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK)
+}
+
+bool DecisionStore::open()
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    if (db != nullptr)
+        return true;
+    if (openAttempted)
+        return false; // 打开失败过：降级为不记录，不反复重试、不反复打日志
+    openAttempted = true;
+
+    utils::ensureParentDirectories(path);
+    if (sqlite3_open(path.c_str(), &db) != SQLITE_OK)
     {
         LOG_ERROR("决策记录 SQLite 打开失败：" +
                   std::string(db ? sqlite3_errmsg(db) : "?"));
         if (db != nullptr)
             sqlite3_close(db);
         db = nullptr;
-        return;
+        return false;
     }
     sqlite3_busy_timeout(db, 5000);
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
@@ -123,6 +135,7 @@ DecisionStore::DecisionStore(const std::string &dbPath)
         sqlite3_close(db);
         db = nullptr;
     }
+    return db != nullptr;
 }
 
 DecisionStore::~DecisionStore()
@@ -133,12 +146,13 @@ DecisionStore::~DecisionStore()
 
 bool DecisionStore::isOpen() const
 {
+    std::lock_guard<std::mutex> lock(mutex);
     return db != nullptr;
 }
 
 bool DecisionStore::appendDecision(const DecisionRecord &record, std::string *error)
 {
-    if (db == nullptr)
+    if (!isOpen())
     {
         setError(error, "决策存储未打开");
         return false;
@@ -192,7 +206,7 @@ bool DecisionStore::appendDecision(const DecisionRecord &record, std::string *er
 
 bool DecisionStore::appendExecution(const ExecutionRecord &record, std::string *error)
 {
-    if (db == nullptr)
+    if (!isOpen())
     {
         setError(error, "决策存储未打开");
         return false;
@@ -235,7 +249,7 @@ bool DecisionStore::appendExecution(const ExecutionRecord &record, std::string *
 
 bool DecisionStore::appendFeedback(const FeedbackRecord &record, std::string *error)
 {
-    if (db == nullptr)
+    if (!isOpen())
     {
         setError(error, "决策存储未打开");
         return false;
@@ -287,7 +301,7 @@ bool DecisionStore::updateExecutionReceipt(const std::string &executionId,
                                            const std::string &outboundMessageId,
                                            std::string *error)
 {
-    if (db == nullptr)
+    if (!isOpen())
     {
         setError(error, "决策存储未打开");
         return false;
@@ -357,7 +371,7 @@ ExecutionRecord readExecution(sqlite3_stmt *statement)
 
 std::optional<ExecutionRecord> DecisionStore::findExecution(const std::string &executionId) const
 {
-    if (db == nullptr || executionId.empty())
+    if (!isOpen() || executionId.empty())
         return std::nullopt;
 
     std::lock_guard<std::mutex> lock(mutex);
@@ -380,7 +394,7 @@ bool DecisionStore::appendExecutionMessageId(const std::string &executionId,
                                              const std::string &outboundMessageId,
                                              std::string *error)
 {
-    if (db == nullptr)
+    if (!isOpen())
     {
         setError(error, "决策存储未打开");
         return false;
@@ -423,7 +437,7 @@ bool DecisionStore::appendExecutionMessageId(const std::string &executionId,
 std::optional<ExecutionRecord> DecisionStore::findExecutionByOutboundMessageId(
     const std::string &outboundMessageId) const
 {
-    if (db == nullptr || outboundMessageId.empty())
+    if (!isOpen() || outboundMessageId.empty())
         return std::nullopt;
 
     std::lock_guard<std::mutex> lock(mutex);
@@ -449,7 +463,7 @@ std::optional<ExecutionRecord> DecisionStore::latestExecution(std::uint64_t grou
                                                               std::uint64_t userId,
                                                               std::int64_t since) const
 {
-    if (db == nullptr)
+    if (!isOpen())
         return std::nullopt;
 
     std::lock_guard<std::mutex> lock(mutex);
@@ -476,7 +490,7 @@ std::optional<ExecutionRecord> DecisionStore::latestExecution(std::uint64_t grou
 
 std::optional<DecisionRecord> DecisionStore::findDecision(const std::string &decisionId) const
 {
-    if (db == nullptr || decisionId.empty())
+    if (!isOpen() || decisionId.empty())
         return std::nullopt;
 
     std::lock_guard<std::mutex> lock(mutex);
@@ -498,7 +512,7 @@ std::optional<DecisionRecord> DecisionStore::findDecision(const std::string &dec
 std::vector<DecisionRecord> DecisionStore::recentDecisions(std::size_t limit) const
 {
     std::vector<DecisionRecord> result;
-    if (db == nullptr || limit == 0)
+    if (!isOpen() || limit == 0)
         return result;
 
     std::lock_guard<std::mutex> lock(mutex);
@@ -521,7 +535,7 @@ std::vector<DecisionRecord> DecisionStore::recentDecisions(std::size_t limit) co
 
 std::size_t DecisionStore::decisionCount() const
 {
-    if (db == nullptr)
+    if (!isOpen())
         return 0;
 
     std::lock_guard<std::mutex> lock(mutex);
@@ -538,7 +552,7 @@ std::size_t DecisionStore::decisionCount() const
 
 std::size_t DecisionStore::executionCount(const std::string &decisionId) const
 {
-    if (db == nullptr || decisionId.empty())
+    if (!isOpen() || decisionId.empty())
         return 0;
 
     std::lock_guard<std::mutex> lock(mutex);
@@ -558,7 +572,7 @@ std::size_t DecisionStore::executionCount(const std::string &decisionId) const
 std::vector<FeedbackRecord> DecisionStore::feedbackFor(const std::string &decisionId) const
 {
     std::vector<FeedbackRecord> result;
-    if (db == nullptr || decisionId.empty())
+    if (!isOpen() || decisionId.empty())
         return result;
 
     std::lock_guard<std::mutex> lock(mutex);
@@ -588,7 +602,7 @@ std::vector<FeedbackRecord> DecisionStore::feedbackFor(const std::string &decisi
 
 std::size_t DecisionStore::feedbackCount(const std::string &decisionId) const
 {
-    if (db == nullptr || decisionId.empty())
+    if (!isOpen() || decisionId.empty())
         return 0;
 
     std::lock_guard<std::mutex> lock(mutex);

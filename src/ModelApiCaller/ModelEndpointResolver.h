@@ -56,12 +56,35 @@ inline EndpointProvider registryEndpoint(const Live<ModelEndpointOptions> &confi
 // 临时的活值活不过 provider，不许传
 EndpointProvider registryEndpoint(const Live<ModelEndpointOptions> &&, const ModelRegistry &) = delete;
 
-// 配置固定为传入的值，只有注册表那一半在调用时解析。产品代码里只剩 judge 用它
-// （judge 的端点与记录标签到 L2.c 才改成按当前配置解析）；registry 必须比返回的 provider 活得久
+// 配置固定为传入的值，只有注册表那一半在调用时解析（测试与不需要配置活值的场景；产品代码
+// 不再使用）；registry 必须比返回的 provider 活得久
 inline EndpointProvider registryEndpoint(ModelEndpointOptions configured, const ModelRegistry &registry)
 {
     return [configured = std::move(configured), &registry]()
     { return resolveEndpoint(configured, registry); };
+}
+
+// 一次解析同时给出“要调用的端点”和“记录用的模型名”，二者出自同一份输入、成对一致
+// （judge 每次决策调用一次，ADR-023）：
+//   preferredModel 非空且在注册表里 → 用它的注册条目，名字就是它；
+//   否则用 fallback（如 models.worker）按注册表解析，名字是 fallback 的模型名；
+//   fallback 也没写模型名时端点未配置，调用方（ChatService::buildOnceWith）回退默认对话模型，
+//   名字取 defaultModel。
+struct LabeledEndpoint
+{
+    ModelEndpointOptions endpoint;
+    std::string modelLabel; // 只是模型名，不含端点/密钥
+};
+
+inline LabeledEndpoint resolveLabeledEndpoint(const std::string &preferredModel,
+                                              const ModelEndpointOptions &fallback,
+                                              const std::string &defaultModel,
+                                              const ModelRegistry &registry)
+{
+    if (!preferredModel.empty() && registry.find(preferredModel).has_value())
+        return {resolveEndpoint(ModelEndpointOptions{preferredModel}, registry), preferredModel};
+    return {resolveEndpoint(fallback, registry),
+            !fallback.model.empty() ? fallback.model : defaultModel};
 }
 
 #endif // MODEL_ENDPOINT_RESOLVER_H

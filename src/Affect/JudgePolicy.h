@@ -26,22 +26,36 @@ class JudgePolicy : public DecisionPolicy
 public:
     using Worker = std::function<std::string(const std::string &systemPrompt,
                                              const std::string &userPrompt)>;
+    // 一次决策要调用的模型：调用 seam 与记录用的模型名成对给出，保证调用的模型与记录的
+    // 标签一致
+    struct Target
+    {
+        Worker worker;
+        std::string modelLabel; // 模型名，不含端点/密钥
+    };
+    // 每次决策开头调用一次，按当前配置（affect.judge_model、models.worker、注册表）解析
+    using TargetResolver = std::function<Target()>;
     static constexpr int kJudgeCallsPerHour = 30; // 资源护栏：每群每小时（滚动窗口）
     static constexpr int kMaxCodepoints = 400;    // 计划长度上限的夹紧值
     // judge 调用的 HTTP 超时：卡住时快速失败回退基线（适配器默认 300 秒会把同群
     // 会话轮拖住 5 分钟）。组合根经 makeWorkerSeam 传给 buildOnceWith
     static constexpr long kTimeoutMs = 15000;
 
-    // clock 返回 unix 秒（预算窗口用）；空 = 系统时钟
+    // clock 返回 unix 秒（预算窗口用）；空 = 系统时钟。
+    // 组合根用 resolver：每次决策按当前配置解析调用目标（ADR-023，配置实时生效）
+    explicit JudgePolicy(TargetResolver resolver, std::function<std::int64_t()> clock = {});
+    // 固定目标（测试与不需要按配置解析的场景）
     JudgePolicy(Worker worker, std::string modelLabel,
                 std::function<std::int64_t()> clock = {});
 
-    // 结果的 latencyMs 是 worker 调用耗时（未调用 worker 的回退为 0）
+    // 开头解析一次调用目标，结果的 modelLabel 就是它的模型名（回退也带）；
+    // latencyMs 是 worker 调用耗时（未调用 worker 的回退为 0）
     Decision decide(const SituationCard &card, const std::string &transientMaterial) override;
     std::string version() const override { return "judge_v1"; }
     std::string planVersion() const override { return "judge_plan_v1"; }
 
-    const std::string &modelLabel() const { return label; } // 模型名，不含端点/密钥
+    // 按当前配置解析出的模型名（不含端点/密钥）；记录里用的是 Decision::modelLabel
+    std::string modelLabel() const;
     int callsThisHour(std::uint64_t groupId) const;          // 供 card.judgeCallsThisHour
 
     static std::string systemPrompt();
@@ -55,8 +69,7 @@ public:
 private:
     bool takeBudget(std::uint64_t groupId);
 
-    Worker worker;
-    std::string label;
+    TargetResolver resolver;
     std::function<std::int64_t()> clock;
     mutable std::mutex mutex;
     std::map<std::uint64_t, std::deque<std::int64_t>> calls; // 每群调用时刻

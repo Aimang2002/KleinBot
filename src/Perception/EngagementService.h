@@ -122,7 +122,7 @@ public:
                                                 const OutboundMessage &message,
                                                 const std::string &correlationId)>;
 
-    // affectOptions：组合根的活值（ADR-023），每个会话轮开头取一次 enforce
+    // affectOptions：组合根的活值（ADR-023），每个会话轮开头取一次快照（策略选择与 enforce）
     EngagementService(BotIdentity bot, GroupContextStore *store,
                       const Live<AffectOptions> &affectOptions,
                       MessageSenderPort *sender = nullptr,
@@ -146,7 +146,8 @@ public:
     }
     // R1 决策层：可空（= 基线）。非基线策略且记录器启用时，每轮在请求主模型前装配
     // 情境卡并 decide，记录换成按策略构造的决策；enforce=false（影子）时之后的流程
-    // 与基线逐字相同（enforce 来自构造时给的活值）。policy 由组合根持有、须比本服务活得久
+    // 与基线逐字相同（enforce 来自构造时给的活值）。policy 由组合根持有、须比本服务活得久；
+    // 组合根给的是策略外壳，每个会话轮按 affect 快照 resolve 一次
     void setPolicy(affect::DecisionPolicy *policy) { this->policy = policy; }
     // 会话轮可用的注册表工具（如 inspect_image / generate_image / send_image /
     // klein_web_search / klein_web_fetch；契约追加开放工具自带的 GroupTurn 使用规则）：

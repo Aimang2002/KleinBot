@@ -4,8 +4,9 @@
 /*
  * 决策层（affect）的模块 Options：由 Bootstrap/RuntimeSettings 从配置节 affect
  * 映射而来（Affect 不 include Configuration），与其他模块的 Options 一样放在全局命名空间。
- * enforce 实时生效：使用方持 const Live<AffectOptions> &，每次决策时取快照（ADR-023）；
- * enabled、policy、judge_model 仍按启动值（L2.c 接通）。
+ * 四个字段都实时生效（ADR-023）：使用方持 const Live<AffectOptions> &，每次决策时取快照。
+ * enabled 由决策记录器读（DecisionRecorder::enabled），enabled 与 policy 由策略外壳
+ * （SwitchingPolicy）读，judge_model 由组合根给 JudgePolicy 的调用目标解析器读。
  */
 #include <string>
 

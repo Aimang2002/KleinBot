@@ -15,15 +15,22 @@ namespace affect
 {
 // 决策/执行/反馈三张表的 SQLite 存储。与既有 Store 相同：
 // 独立连接、WAL、busy_timeout、互斥锁；写入按主键幂等（INSERT OR IGNORE）。
+// 延迟打开（ADR-023 稳定外壳）：对象始终构造，构造时不碰数据库；第一次 open() 才打开连接、
+// 建表。组合根里只有决策记录器在 affect.enabled 为真时调用 open()，没启用过就没有决策表。
+// 打开失败只试一次：之后 open() 返回 false，记录降级为不写（已打 LOG_ERROR）。
+// 未打开时各读写方法与打开失败时一样返回失败/空结果，不会自行打开
 class DecisionStore
 {
 public:
-    explicit DecisionStore(const std::string &dbPath);
+    explicit DecisionStore(std::string dbPath);
     ~DecisionStore();
 
     DecisionStore(const DecisionStore &) = delete;
     DecisionStore &operator=(const DecisionStore &) = delete;
 
+    // 打开连接并建表（幂等、线程安全）；返回是否可用
+    bool open();
+    // 是否已打开（不触发打开）
     bool isOpen() const;
     bool appendDecision(const DecisionRecord &record, std::string *error = nullptr);
     bool appendExecution(const ExecutionRecord &record, std::string *error = nullptr);
@@ -60,7 +67,9 @@ public:
     std::vector<FeedbackRecord> feedbackFor(const std::string &decisionId) const;
 
 private:
-    sqlite3 *db = nullptr;
+    const std::string path;
+    sqlite3 *db = nullptr;      // 只在 open() 里由空变非空一次，之后到析构不变
+    bool openAttempted = false; // 受 mutex 保护
     mutable std::mutex mutex;
 };
 } // namespace affect

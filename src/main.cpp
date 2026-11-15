@@ -40,6 +40,7 @@
 #include "Affect/DecisionRecorder.h"
 #include "Affect/DecisionStore.h"
 #include "Affect/JudgePolicy.h"
+#include "Affect/SwitchingPolicy.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
 #include "Perception/PerceptionChannel.h"
@@ -391,22 +392,19 @@ int main(int argc, char **argv)
 	ModelRegistry models(kModelRegistryPath);
 	const std::string &dbPath = settings.storage.conversationDatabase;
 	ConversationStore conversationStore(dbPath);
-	// M1 决策记录（影子）：默认关闭；开启后只写决策/执行/反馈表，
-	// 不改变任何回应行为。store 打开失败时回退到不记录。
-	std::unique_ptr<affect::DecisionStore> decisionStore;
-	std::unique_ptr<affect::DecisionRecorder> decisionRecorder;
+	// M1 决策记录（影子）：默认关闭；开启后只写决策/执行/反馈表，不改变任何回应行为。
+	// 稳定外壳（ADR-023）：决策库与记录器始终构造，affect.enabled 是活值，记录器每次问它；
+	// 决策库延迟打开——第一次在 enabled 为真时需要记录才打开并建表，没启用过就没有决策表。
+	// 打开失败时回退到不记录（只试一次）
+	affect::DecisionStore decisionStore(dbPath);
+	affect::DecisionRecorder decisionRecorder(decisionStore, liveSettings.affect);
 	if (settings.affect.enabled)
 	{
-		decisionStore = std::make_unique<affect::DecisionStore>(dbPath);
-		if (decisionStore->isOpen())
-		{
-			decisionRecorder = std::make_unique<affect::DecisionRecorder>(decisionStore.get());
+		// 启动时就开着：当场打开，启动日志如实反映
+		if (decisionRecorder.enabled())
 			LOG_INFO("心境决策记录已启用（M1 影子：只记录，不改变回应）");
-		}
 		else
-		{
 			LOG_WARNING("心境决策记录启用失败：决策库不可用，已回退到不记录");
-		}
 	}
 	ImageAssetStore imageAssetStore(dbPath, settings.storage.imageAssets);
 	// 群资产库（ADR-019）：同一实现的第二个实例——表 group_image_assets、id 前缀 gimg_、
@@ -524,40 +522,36 @@ int main(int argc, char **argv)
 				   const std::string &systemPrompt, const std::string &userPrompt)
 		{ return chatService.buildOnceWith(provider(), systemPrompt, userPrompt, timeoutMs); };
 	};
-	// R1 决策层：policy=judge（且决策记录已启用）时由 worker 模型产出行为计划，否则基线。
-	// 两条群回应路径（Message 的 @ 回复、话题会话轮）共用这一个策略；enforce=false 时只记录计划
-	std::unique_ptr<affect::DecisionPolicy> decisionPolicy;
-	if (decisionRecorder && settings.affect.policy == "judge")
-	{
-		// judge 要便宜：judge_model 空或不在注册表时一律走 worker 端点（不回退主模型）。
-		// 每次调用时查注册表，热重载后补注册的名字即时生效。
-		// judge 的 worker 端点用启动时的 models.worker 配置，不跟随重载：下面的记录标签也是
-		// 按启动配置算好的，两者到 L2.c 一起改成每次决策时按当前配置解析，免得调用的模型
-		// 与记录的标签对不上
-		const EndpointProvider judgeWorkerEndpoint = registryEndpoint(settings.models.worker, models);
-		const std::string judgeModel = settings.affect.judgeModel;
-		const EndpointProvider judgeEndpoint = judgeModel.empty()
-			? judgeWorkerEndpoint
-			: EndpointProvider([&models, judgeModel, judgeWorkerEndpoint]()
-				{
-					return models.find(judgeModel)
-						? resolveEndpoint(ModelEndpointOptions{judgeModel}, models)
-						: judgeWorkerEndpoint();
-				});
-		const bool judgeRegistered = !judgeModel.empty() && models.find(judgeModel).has_value();
-		if (!judgeModel.empty() && !judgeRegistered)
-			LOG_WARNING("affect.judge_model 未在模型注册表找到：" + judgeModel +
-						"，judge 将改用 worker 模型（models.worker）");
-		const std::string judgeLabel = judgeRegistered ? judgeModel
-			: !settings.models.worker.model.empty() ? settings.models.worker.model
-			: settings.chat.defaultModel;
-		decisionPolicy = std::make_unique<affect::JudgePolicy>(
-			makeWorkerSeam(judgeEndpoint, affect::JudgePolicy::kTimeoutMs), judgeLabel);
-	}
-	else
-	{
-		decisionPolicy = std::make_unique<affect::BaselinePolicy>();
-	}
+	// R1 决策层（ADR-023 稳定外壳）：基线与 judge 两个策略始终构造，外壳 decisionPolicy 按当前
+	// 配置转给其中一个——affect.enabled 为真且 affect.policy 为 judge 时用 judge，否则基线。
+	// 两条群回应路径（Message 的 @ 回复、话题会话轮）共用这一个外壳，每次决策按快照选一次；
+	// enforce=false 时只记录计划。judge 的每群小时预算在 JudgePolicy 里，跨切换保留
+	affect::BaselinePolicy baselinePolicy;
+	// judge 要便宜：judge_model 空或不在注册表时一律走 worker 端点（不回退主模型）。
+	// 调用目标每次决策时按当前配置解析一次（affect.judge_model、models.worker、注册表都现取），
+	// 调用的端点与记录的模型标签出自同一份解析，二者成对一致
+	affect::JudgePolicy judgePolicy(
+		[&liveSettings, &models, &chatService]() -> affect::JudgePolicy::Target
+		{
+			// 注册了的 judge_model；否则 worker 端点；worker 也没配时 buildOnceWith 回退默认对话模型
+			const LabeledEndpoint target = resolveLabeledEndpoint(
+				liveSettings.affect.get()->judgeModel, *liveSettings.workerModel.get(),
+				liveSettings.chat.get()->defaultModel, models);
+			return {[&chatService, endpoint = target.endpoint](const std::string &systemPrompt,
+															   const std::string &userPrompt)
+					{
+						return chatService.buildOnceWith(endpoint, systemPrompt, userPrompt,
+														 affect::JudgePolicy::kTimeoutMs);
+					},
+					target.modelLabel};
+		});
+	// 启动时用得上 judge 才提示（与改造前相同）；之后改的 judge_model 没注册时同样回退 worker，
+	// 记录里的 judge_model 如实反映实际调用的模型
+	if (settings.affect.enabled && settings.affect.policy == "judge" &&
+		!settings.affect.judgeModel.empty() && !models.find(settings.affect.judgeModel))
+		LOG_WARNING("affect.judge_model 未在模型注册表找到：" + settings.affect.judgeModel +
+					"，judge 将改用 worker 模型（models.worker）");
+	affect::SwitchingPolicy decisionPolicy(liveSettings.affect, baselinePolicy, judgePolicy);
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;
 	QueuedMessageSender messageSender(outboundQueue);
@@ -566,8 +560,8 @@ int main(int argc, char **argv)
 	// registry 只在 WS 模式分配 echo；HTTP 模式同步拿响应体，直接回报 fanout
 	DeliveryReceiptFanout receiptFanout;
 	DeliveryReceiptRegistry deliveryReceipts(&receiptFanout);
-	if (decisionRecorder != nullptr)
-		receiptFanout.addSink(decisionRecorder.get());
+	// 决策记录器始终在扇出里：决策库没打开过时它对回执 no-op
+	receiptFanout.addSink(&decisionRecorder);
 	// 推送门暂时搁置（2026-10-25）：接缝构造一并停用，恢复时移除 #if 0。
 #if 0
 	// 推送门接缝：润色器以管理员会话装配人格（与话题会话同源），失败由接缝兜底直发
@@ -608,8 +602,8 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));
 	commandRegistry.registryCommand(std::make_unique<RemoveContextCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
-	// 人工反馈 #好/#坏（R0.3，所有人可用）：affect 关闭时 store/recorder 为空，命令回"未启用"
-	RecordFeedbackAction recordFeedbackAction(decisionStore.get(), decisionRecorder.get(),
+	// 人工反馈 #好/#坏（R0.3，所有人可用）：affect.enabled 当前为假时命令回"未启用"
+	RecordFeedbackAction recordFeedbackAction(&decisionStore, &decisionRecorder,
 											  settings.bot.managerId);
 	commandRegistry.registryCommand(std::make_unique<FeedbackCommand>(recordFeedbackAction));
 	// 观察通道状态与群列表（唯一真值在数据库，见 GroupListService）：
@@ -674,11 +668,11 @@ int main(int argc, char **argv)
 	// 话题会话（意志层 v2）：每群至多一个存活会话，激活→轮次→保留 2h；
 	// 模型经 seam 接入（主模型=人格会话轮，杂务模型=压缩/情绪基调），未配管理员
 	// 则无主模型、跟进自动停摆（与主动发言同一底线）
-	// affect.enforce 持活值，每个会话轮取一次；决策记录与策略仍按启动配置构造（L2.c）
+	// affect 持活值，每个会话轮取一次快照；决策记录器与策略外壳都读同一组活值
 	EngagementService engagementService(settings.bot, groupContextStore.get(), liveSettings.affect,
 										&messageSender);
-	engagementService.setDecisionRecorder(decisionRecorder.get());
-	engagementService.setPolicy(decisionPolicy.get());
+	engagementService.setDecisionRecorder(&decisionRecorder);
+	engagementService.setPolicy(&decisionPolicy);
 	groupContextService.setEngagement(&engagementService);
 	if (settings.bot.managerId != 0)
 	{
@@ -717,7 +711,7 @@ int main(int argc, char **argv)
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, voice, liveSettings.message, visionEndpoint,
 		liveSettings.globalVoice, liveSettings.affect, &typingIndicator, &perceptionChannel,
-		&groupContextService, decisionRecorder.get(), &groupImageAssets, decisionPolicy.get());
+		&groupContextService, &decisionRecorder, &groupImageAssets, &decisionPolicy);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,

@@ -19,7 +19,8 @@ class DecisionStore;
 // 所有人可用。标注人分两类落在 affect_feedback.source（用户定规 2026-10-28）：
 //   manual_admin（bot.manager_id，confidence 1.0）/ manual_user（其他人，confidence 0.6）
 // 评测与反思按 source 分组即可区分，不必解析 evidence_json。
-// store/recorder 可空（affect 关闭）：返回明确的未启用说明，不抛
+// store/recorder 可空；affect.enabled 当前为假（recorder->enabled() 读活值）时同样返回明确的
+// 未启用说明，不抛
 class RecordFeedbackAction : public Action
 {
 public:

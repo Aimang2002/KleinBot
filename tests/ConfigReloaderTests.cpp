@@ -637,7 +637,7 @@ TEST_F(ConfigReloaderFixture, ProxyChangeReachesModelSearchAndFetchTogether)
 }
 
 // 端到端（L1.f）：群聊开关、affect.enforce、瞥视预算接通应用；同一个结构里还没接通的字段
-// （bot.name、affect.enabled/policy）在活值里保持运行值，反馈里如实列为尚未接通；glance.enabled 自 L2.b 起接通
+// （bot.name）在活值里保持运行值，反馈里如实列为尚未接通；glance.enabled 自 L2.b、affect 其余三键自 L2.c 起接通
 TEST_F(ConfigReloaderFixture, GroupChatEnforceAndGlanceBudgetApplyKeepingRunningFields)
 {
     ConfigReloader reloader(*store, *live);
@@ -652,16 +652,17 @@ TEST_F(ConfigReloaderFixture, GroupChatEnforceAndGlanceBudgetApplyKeepingRunning
     const ConfigReloadReport report = reloader.reload();
 
     ASSERT_TRUE(report.result.success);
-    EXPECT_EQ(report.applied, (std::vector<std::string>{"bot.group_chat_enabled", "affect.enforce",
-                                                        "glance.enabled", "glance.per_group_per_minute"}));
-    EXPECT_EQ(report.notWired, (std::vector<std::string>{"bot.name", "affect.enabled", "affect.policy"}));
+    EXPECT_EQ(report.applied,
+              (std::vector<std::string>{"bot.group_chat_enabled", "affect.enabled", "affect.policy",
+                                        "affect.enforce", "glance.enabled", "glance.per_group_per_minute"}));
+    EXPECT_EQ(report.notWired, (std::vector<std::string>{"bot.name"}));
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_FALSE(after.message->groupChatEnabled);
     EXPECT_EQ(after.message->bot.name, "Klein") << "bot 身份保持运行值（决定 9）";
     EXPECT_EQ(after.message->bot.id, 10001U);
     EXPECT_TRUE(after.affect->enforce);
-    EXPECT_FALSE(after.affect->enabled) << "affect.enabled 尚未接通：保持运行值";
-    EXPECT_EQ(after.affect->policy, "baseline");
+    EXPECT_TRUE(after.affect->enabled) << "affect.enabled、policy 自 L2.c 起接通";
+    EXPECT_EQ(after.affect->policy, "judge");
     EXPECT_EQ(after.glance->perGroupPerMinute, 12);
     EXPECT_TRUE(after.glance->enabled) << "glance.enabled 自 L2.b 起接通";
     EXPECT_TRUE(before.message->groupChatEnabled) << "替换前取到的快照不变";

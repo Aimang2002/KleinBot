@@ -47,11 +47,23 @@ bool contains(const std::vector<std::string> &values, const std::string &value)
 }
 } // namespace
 
-JudgePolicy::JudgePolicy(Worker worker, std::string modelLabel,
-                         std::function<std::int64_t()> clock)
-    : worker(std::move(worker)), label(std::move(modelLabel)),
+JudgePolicy::JudgePolicy(TargetResolver resolver, std::function<std::int64_t()> clock)
+    : resolver(std::move(resolver)),
       clock(clock ? std::move(clock) : std::function<std::int64_t()>(systemNow))
 {
+}
+
+JudgePolicy::JudgePolicy(Worker worker, std::string modelLabel,
+                         std::function<std::int64_t()> clock)
+    : JudgePolicy(TargetResolver([target = Target{std::move(worker), std::move(modelLabel)}]()
+                                 { return target; }),
+                  std::move(clock))
+{
+}
+
+std::string JudgePolicy::modelLabel() const
+{
+    return resolver ? resolver().modelLabel : std::string();
 }
 
 std::string JudgePolicy::systemPrompt()
@@ -175,7 +187,11 @@ int JudgePolicy::callsThisHour(std::uint64_t groupId) const
 
 Decision JudgePolicy::decide(const SituationCard &card, const std::string &transientMaterial)
 {
-    Decision result{BaselinePolicy::planFor(card), {}, 0};
+    Decision result{BaselinePolicy::planFor(card), {}, 0, {}};
+    // 一次决策解析一次调用目标：调用的模型与记录的标签出自同一份配置
+    const Target target = resolver ? resolver() : Target{};
+    result.modelLabel = target.modelLabel;
+    const Worker &worker = target.worker;
     if (!worker)
     {
         result.fallbackReason = "judge_unavailable";

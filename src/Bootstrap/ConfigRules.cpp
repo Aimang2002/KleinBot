@@ -79,12 +79,11 @@ void applyGroupChat(LiveSettings &live, const RuntimeSettings &next)
     live.message.set(std::move(message));
 }
 
-// affect：这一组只接通 enforce；enabled、policy、judge_model 到 L2.c 才接通，保持运行值
+// affect：整份替换。enabled 由决策记录器每次读（第一次为真时才打开决策库），enabled 与
+// policy 由策略外壳每次决策时读，judge_model 由 judge 的调用目标解析器每次决策时读
 void applyAffect(LiveSettings &live, const RuntimeSettings &next)
 {
-    AffectOptions affect = *live.affect.get();
-    affect.enforce = next.affect.enforce;
-    live.affect.set(std::move(affect));
+    live.affect.set(next.affect);
 }
 
 // glance：整份替换。enabled 在每张图入队时判断（瞥视线程常驻）
@@ -129,8 +128,8 @@ constexpr ConfigRule kProductRules[] = {
     {"chat.worker_threads",           restart(),          field<&SchemaConfig::chat, &ChatSchema::workerThreads>},
     {"chat.message_survival_seconds", applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::messageSurvivalSeconds>},
 
-    // models：drawing / vision / worker 各四个字段。三个端点来源每次调用时读活值
-    // （judge 例外：它的端点与记录标签到 L2.c 才改成按当前配置解析，见 main.cpp）
+    // models：drawing / vision / worker 各四个字段。三个端点来源与 judge 的调用目标
+    // 每次调用时读活值
     {"models.drawing.model", applies(applyDrawingModel),
      field<&SchemaConfig::models, &ModelSchema::drawing, &ModelEndpointSchema::model>},
     {"models.drawing.endpoint", applies(applyDrawingModel),
@@ -171,11 +170,11 @@ constexpr ConfigRule kProductRules[] = {
     {"memory.idle_minutes", applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::idleMinutes>},
     {"memory.recall_limit", applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::recallLimit>},
 
-    // affect：enabled、policy、judge_model 到 L2.c 才接通
-    {"affect.enabled",     notYet(Restart),     field<&SchemaConfig::affect, &AffectSchema::enabled>},
-    {"affect.policy",      notYet(Restart),     field<&SchemaConfig::affect, &AffectSchema::policy>},
+    // affect
+    {"affect.enabled",     applies(applyAffect), field<&SchemaConfig::affect, &AffectSchema::enabled>},
+    {"affect.policy",      applies(applyAffect), field<&SchemaConfig::affect, &AffectSchema::policy>},
     {"affect.enforce",     applies(applyAffect), field<&SchemaConfig::affect, &AffectSchema::enforce>},
-    {"affect.judge_model", notYet(Restart),     field<&SchemaConfig::affect, &AffectSchema::judgeModel>},
+    {"affect.judge_model", applies(applyAffect), field<&SchemaConfig::affect, &AffectSchema::judgeModel>},
 
     // glance
     {"glance.enabled",              applies(applyGlance), field<&SchemaConfig::glance, &GlanceSchema::enabled>},

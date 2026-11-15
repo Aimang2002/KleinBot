@@ -179,3 +179,33 @@ TEST(ModelEndpointResolverTest, ToChatModelMapsConnectionFields)
     EXPECT_TRUE(model.modelList.empty()) << "模型名不进 ChatModel，单独作 model_name 传给 Dock";
     EXPECT_TRUE(model.visionModels.empty());
 }
+
+// 配置实时生效 L2.c：judge 每次决策解析一次，调用的端点与记录的模型名出自同一次解析。
+// 指定模型注册了就用它；没注册（或没写）就用 worker 端点、记 worker 的名字；worker 也没写
+// 模型名时端点未配置（调用方回退默认模型），名字记默认模型
+TEST(ModelEndpointResolverTest, LabeledEndpointPairsCalledModelWithRecordedLabel)
+{
+    RegistryFile file("kleinbot-resolver-labeled.json", kRegistry);
+    ModelRegistry registry(file.string());
+    ModelEndpointOptions worker;
+    worker.model = "vision-model";
+
+    const LabeledEndpoint preferred = resolveLabeledEndpoint("claude-x", worker, "chat-default", registry);
+    EXPECT_EQ(preferred.modelLabel, "claude-x");
+    EXPECT_EQ(preferred.endpoint.model, "claude-x");
+    EXPECT_EQ(preferred.endpoint.endpoint, "https://anthropic.example.com");
+
+    const LabeledEndpoint unregistered =
+        resolveLabeledEndpoint("not-registered", worker, "chat-default", registry);
+    EXPECT_EQ(unregistered.modelLabel, "vision-model");
+    EXPECT_EQ(unregistered.endpoint.model, "vision-model");
+    EXPECT_EQ(unregistered.endpoint.endpoint, "https://vision.example.com");
+
+    const LabeledEndpoint followsWorker = resolveLabeledEndpoint("", worker, "chat-default", registry);
+    EXPECT_EQ(followsWorker.modelLabel, followsWorker.endpoint.model);
+
+    const LabeledEndpoint fallsBack =
+        resolveLabeledEndpoint("", ModelEndpointOptions{}, "chat-default", registry);
+    EXPECT_FALSE(fallsBack.endpoint.configured());
+    EXPECT_EQ(fallsBack.modelLabel, "chat-default");
+}

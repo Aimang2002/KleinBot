@@ -331,8 +331,8 @@ TEST_F(PanelServerFixture, PostArrayAliasesIsRejectedAndKeepsString)
                                    [this]() { return readFile(); }, *store);
 }
 
-// R1 affect 三键经面板 GET→POST 往返落盘、进快照（policy、judge_model 分级为 Restart；
-// enforce 自配置实时生效 L1.f 起为 dynamic，见 PostLiveSwitchesReportsDynamicAndAppliesToLiveValues）
+// R1 affect 三键经面板 GET→POST 往返落盘、进快照（四个键自配置实时生效 L1.f / L2.c 起都是
+// dynamic，enforce 的应用见 PostLiveSwitchesReportsDynamicAndAppliesToLiveValues）
 TEST_F(PanelServerFixture, PostAffectDecisionKeysRoundtripClassifiesRestart)
 {
     httplib::Client client("127.0.0.1", port);

@@ -26,6 +26,16 @@
 
 namespace
 {
+// 决策记录开着的 affect 配置：记录器每次读它的 enabled（配置实时生效 L2.c）
+const Live<AffectOptions> &affectEnabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{true}};
+    return live;
+}
+} // namespace
+
+namespace
+{
 InboundMessage privateText(std::uint64_t user, const std::string &text)
 {
     InboundMessage message;
@@ -489,7 +499,7 @@ TEST(MessageLiveConfigTest, EnforceIsReadAtEachMessage)
 {
     CoalesceTemporaryDirectory decisions;
     affect::DecisionStore store(decisions.path() + "/affect.db");
-    affect::DecisionRecorder recorder(&store, [] { return std::int64_t(1000); });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return std::int64_t(1000); });
     const std::vector<ChatRequest> *requests = nullptr;
     std::vector<std::size_t> requestsSeenByJudge;
     affect::JudgePolicy judge(

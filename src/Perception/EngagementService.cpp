@@ -693,8 +693,13 @@ void EngagementService::runTurn(std::uint64_t groupId)
 {
     if (mainAgent == nullptr || store == nullptr)
         return;
-    // 一个会话轮取一次（锁外）：决策点与执行记录用同一个 enforce
-    const bool enforce = affectOptions.get()->enforce;
+    // 一个会话轮取一次 affect 快照（锁外）：用哪种策略、决策点与执行记录的 enforce 都出自它；
+    // 记录开关问记录器（读 affect.enabled 活值），同一轮里只问一次
+    const Live<AffectOptions>::Snapshot affectNow = affectOptions.get();
+    const bool enforce = affectNow->enforce;
+    const bool recording = decisionRecorder != nullptr && decisionRecorder->enabled();
+    affect::DecisionPolicy *const activePolicy =
+        policy != nullptr ? &policy->resolve(*affectNow) : nullptr;
 
     enum class TurnKind
     {
@@ -819,8 +824,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     // 之后的请求、工具与动作与基线逐字相同
     const char *const decisionSource =
         kind == TurnKind::ColdEntry ? "engagement_cold_entry" : "engagement_turn";
-    const bool policyDecides = decisionRecorder != nullptr && decisionRecorder->enabled() &&
-                               !affect::isBaselinePolicy(policy);
+    const bool policyDecides = recording && !affect::isBaselinePolicy(activePolicy);
     affect::Decision planned;
     if (policyDecides)
     {
@@ -834,7 +838,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
         card.recentSummary = context.digest;
         card.moodLine = moodLine;
         card.lullHourlyCap = static_cast<int>(kLullHourlyCap);
-        if (const auto *judge = dynamic_cast<const affect::JudgePolicy *>(policy))
+        if (const auto *judge = dynamic_cast<const affect::JudgePolicy *>(activePolicy))
         {
             card.judgeCallsThisHour = judge->callsThisHour(groupId);
             card.judgeCallsCap = affect::JudgePolicy::kJudgeCallsPerHour;
@@ -845,7 +849,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
             card.availableTools.push_back("recall_context");
         card.availableTools.insert(card.availableTools.end(), offeredToolNames.begin(),
                                    offeredToolNames.end());
-        planned = policy->decide(card, context.material);
+        planned = activePolicy->decide(card, context.material);
     }
 
     // R1.c 生效（enforce=true）：no_reply 只在 judge 能说"不"的轮次（lull / 冷启动，
@@ -1083,12 +1087,12 @@ void EngagementService::runTurn(std::uint64_t groupId)
                                    ? "group_say"
                                    : turn.kind == EngagementTurn::Kind::Leave ? "leave_topic"
                                                                               : "no_reply";
-    if (decisionRecorder != nullptr && decisionRecorder->enabled())
+    if (recording)
     {
         affect::DecisionRecord decision =
             policyDecides
                 ? affect::makePolicyDecision(decisionSource, groupId, 0, std::string(), planned,
-                                             *policy, card)
+                                             *activePolicy, card)
                 : affect::makeBaselineDecision(decisionSource, groupId, 0, std::string(), action);
         decisionId = decisionRecorder->recordDecision(std::move(decision));
     }

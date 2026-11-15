@@ -20,6 +20,22 @@
 
 namespace
 {
+// 决策记录开着的 affect 配置：记录器每次读它的 enabled（配置实时生效 L2.c）
+const Live<AffectOptions> &affectEnabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{true}};
+    return live;
+}
+// 决策记录关着的 affect 配置
+const Live<AffectOptions> &affectDisabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{}};
+    return live;
+}
+} // namespace
+
+namespace
+{
 class RecordingSink final : public DeliveryReceiptSink
 {
 public:
@@ -245,8 +261,9 @@ TEST(ExecutionReceiptTest, QueuedAdvancesToSentWithMessageId)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
-    affect::DecisionRecorder recorder(&store, [] { return 1234; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return 1234; });
 
     const std::string decisionId = recorder.recordDecision(
         affect::makeBaselineDecision("at_reply", 8823, 10001, "msg-1", "reply"));
@@ -278,8 +295,9 @@ TEST(ExecutionReceiptTest, SegmentReceiptsAggregateMessageIdsOnOneExecution)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
-    affect::DecisionRecorder recorder(&store, [] { return 1; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return 1; });
     affect::ExecutionRecord execution;
     execution.executionId = "exe-seg";
     execution.decisionId = "dec-seg";
@@ -341,6 +359,7 @@ TEST(ExecutionReceiptTest, UnknownNeverDowngradesAndLateDefiniteReceiptUpgrades)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
 
     affect::ExecutionRecord execution;
@@ -379,7 +398,9 @@ TEST(ExecutionReceiptTest, UnknownNeverDowngradesAndLateDefiniteReceiptUpgrades)
 
 TEST(ExecutionReceiptTest, DisabledRecorderIgnoresReceipts)
 {
-    affect::DecisionRecorder recorder(nullptr);
+    TemporaryDirectory directory;
+    affect::DecisionStore store(directory.path() + "/affect.db");
+    affect::DecisionRecorder recorder(store, affectDisabled());
     DeliveryReceipt receipt;
     receipt.correlation_id = "exe_x";
     receipt.status = "sent";

@@ -13,6 +13,22 @@
 
 namespace
 {
+// 决策记录开着的 affect 配置：记录器每次读它的 enabled（配置实时生效 L2.c）
+const Live<AffectOptions> &affectEnabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{true}};
+    return live;
+}
+// 决策记录关着的 affect 配置
+const Live<AffectOptions> &affectDisabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{}};
+    return live;
+}
+} // namespace
+
+namespace
+{
 class TemporaryDirectory
 {
 public:
@@ -58,7 +74,7 @@ struct ShadowFixture
 {
     TemporaryDirectory directory;
     affect::DecisionStore store{directory.path() + "/affect.db"};
-    affect::DecisionRecorder recorder{&store, [] { return std::int64_t{1000}; }};
+    affect::DecisionRecorder recorder{store, affectEnabled(), [] { return std::int64_t{1000}; }};
     affect::SituationCard card;
     affect::ExecutionRecord execution;
 
@@ -147,7 +163,7 @@ TEST(ShadowDecisionTest, DeliveryExceptionStillWritesDecisionThenRethrows)
 TEST(ShadowDecisionTest, DisabledRecorderOnlyDelivers)
 {
     ShadowFixture fixture;
-    affect::DecisionRecorder disabled;
+    affect::DecisionRecorder disabled(fixture.store, affectDisabled());
     std::vector<std::string> events;
     OrderedPolicy policy(events);
     const std::string decisionId = recordShadowAroundDelivery(

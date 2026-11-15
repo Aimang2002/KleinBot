@@ -14,6 +14,22 @@
 
 namespace
 {
+// 决策记录开着的 affect 配置：记录器每次读它的 enabled（配置实时生效 L2.c）
+const Live<AffectOptions> &affectEnabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{true}};
+    return live;
+}
+// 决策记录关着的 affect 配置
+const Live<AffectOptions> &affectDisabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{}};
+    return live;
+}
+} // namespace
+
+namespace
+{
 class TemporaryDirectory
 {
 public:
@@ -170,8 +186,9 @@ TEST(RecordFeedbackActionTest, MatchesAnySegmentOfASplitReply)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
-    affect::DecisionRecorder recorder(&store, [] { return 2000; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return 2000; });
     const std::string older = seed(recorder, store, "at_reply", 88, 1, "111", 1500);
     const std::string newer = seed(recorder, store, "engagement_turn", 88, 0, "999", 1900);
     ASSERT_TRUE(store.appendExecutionMessageId(older, "112"));
@@ -192,8 +209,9 @@ TEST(RecordFeedbackActionTest, MatchesByReplyMessageIdAndWritesEvidence)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
-    affect::DecisionRecorder recorder(&store, [] { return 2000; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return 2000; });
     const std::string older = seed(recorder, store, "at_reply", 88, 1, "111", 1500);
     const std::string newer = seed(recorder, store, "at_reply", 88, 1, "222", 1900);
     std::int64_t now = 2000;
@@ -215,8 +233,9 @@ TEST(RecordFeedbackActionTest, FallsBackToLatestInWindowPerGroupOrPrivateUser)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
-    affect::DecisionRecorder recorder(&store, [] { return 3000; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return 3000; });
     const std::string groupOld = seed(recorder, store, "at_reply", 88, 1, "", 2000);
     const std::string groupNew = seed(recorder, store, "engagement_turn", 88, 0, "", 2900);
     const std::string otherGroup = seed(recorder, store, "at_reply", 99, 1, "", 2950);
@@ -254,8 +273,9 @@ TEST(RecordFeedbackActionTest, SplitsSourceAndConfidenceByAdminVersusUser)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
-    affect::DecisionRecorder recorder(&store, [] { return 500; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return 500; });
     const std::string executionId = seed(recorder, store, "at_reply", 88, 1, "321", 400);
     const std::string decisionId = store.findExecution(executionId)->decisionId;
     RecordFeedbackAction action(&store, &recorder, 10001, [] { return 500; });
@@ -291,8 +311,9 @@ TEST(RecordFeedbackActionTest, SkippedExecutionsAreNotFeedbackTargets)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
-    affect::DecisionRecorder recorder(&store, [] { return 100; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return 100; });
     affect::DecisionRecord decision = affect::makeBaselineDecision("engagement_turn", 88, 0, "", "no_reply");
     const std::string decisionId = recorder.recordDecision(decision);
     affect::ExecutionRecord execution;
@@ -309,7 +330,7 @@ TEST(RecordFeedbackActionTest, RejectsBadLabelAndReportsDisabledRecorder)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
-    affect::DecisionRecorder recorder(&store);
+    affect::DecisionRecorder recorder(store, affectEnabled());
     RecordFeedbackAction action(&store, &recorder, 10001);
     EXPECT_NE(action.execute({{"label", "meh"}}, {1, 0, ""}).content.find("label 必须是"),
               std::string::npos);
@@ -317,8 +338,8 @@ TEST(RecordFeedbackActionTest, RejectsBadLabelAndReportsDisabledRecorder)
     RecordFeedbackAction disabled(nullptr, nullptr, 10001);
     EXPECT_NE(disabled.execute({{"label", "good"}}, {1, 0, ""}).content.find("功能未开启"),
               std::string::npos);
-    affect::DecisionRecorder noStore(nullptr);
-    RecordFeedbackAction disabledRecorder(&store, &noStore, 10001);
+    affect::DecisionRecorder switchedOff(store, affectDisabled());
+    RecordFeedbackAction disabledRecorder(&store, &switchedOff, 10001);
     EXPECT_NE(disabledRecorder.execute({{"label", "good"}}, {1, 0, ""}).content.find("功能未开启"),
               std::string::npos);
 

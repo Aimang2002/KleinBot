@@ -6,6 +6,7 @@
 #include "Affect/DecisionRecorder.h"
 #include "Affect/DecisionStore.h"
 #include "Affect/JudgePolicy.h"
+#include "Affect/SwitchingPolicy.h"
 #include "Perception/EngagementService.h"
 #include "Perception/GroupContextService.h"
 #include "Perception/GroupListService.h"
@@ -27,6 +28,16 @@
 #include <vector>
 
 #include <sqlite3.h>
+
+namespace
+{
+// 决策记录开着的 affect 配置：记录器每次读它的 enabled（配置实时生效 L2.c）
+const Live<AffectOptions> &affectEnabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{true}};
+    return live;
+}
+} // namespace
 
 namespace
 {
@@ -1754,8 +1765,9 @@ TEST(EngagementDecisionRecordTest, RecordsSpeakAndPassWithSharedContract)
 {
     Harness harness;
     affect::DecisionStore store(harness.directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
-    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
     harness.service->setDecisionRecorder(&recorder);
 
     harness.service->onAtActivated(8823, "话题");
@@ -1795,8 +1807,9 @@ TEST(EngagementDecisionRecordTest, NameMentionEntryPassStaysQuietAndRecordsNoRep
 {
     Harness harness;
     affect::DecisionStore store(harness.directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
-    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
     harness.service->setDecisionRecorder(&recorder);
 
     // 只是在聊她，不是叫她：入场轮选沉默
@@ -1913,7 +1926,7 @@ TurnTranscript runTwoLullTurns(affect::DecisionPolicy *policy, bool setPolicy = 
     Harness harness;
     const std::string dbPath = harness.directory.path() + "/affect.db";
     affect::DecisionStore store(dbPath);
-    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
     harness.service->setDecisionRecorder(&recorder);
     if (setPolicy)
     {
@@ -1963,6 +1976,97 @@ std::string judgeReply(const std::string &action)
 
 // 影子期：judge 对 lull 建议 no_reply，但她照常被请求、照常说话；记录里是 judge 的计划、
 // 执行标 shadow；请求体与无策略时逐字相同；state_json 是派生状态、不含材料原文
+// 配置实时生效（L2.c）：与组合根相同的接线——记录器与策略外壳始终存在、读同一组 affect 活值。
+// affect.enabled=false 时请求、工具、动作与没有记录器时逐字相同，决策库不打开（连文件都没有）；
+// 打开并选 judge 后下一轮即经 judge 决策并记录；judge 的调用目标每次决策时解析，调用的模型与
+// 记录的 judge_model 成对；policy 改回 baseline 后下一轮按基线记录、不再调 judge
+TEST(EngagementDecisionPointTest, AlwaysPresentShellFollowsLiveAffectSwitches)
+{
+    const TurnTranscript legacy = runTwoLullTurns(nullptr, false);
+
+    Harness harness;
+    const std::string dbPath = harness.directory.path() + "/affect.db";
+    affect::DecisionStore store(dbPath);
+    affect::DecisionRecorder recorder(store, harness.affect, [&harness] { return harness.now; });
+    affect::BaselinePolicy baseline;
+    std::string judgeModel = "judge-a";
+    std::vector<std::string> judgeCalls; // 每次 worker 调用实际用的模型
+    affect::JudgePolicy judge(
+        [&judgeModel, &judgeCalls]() -> affect::JudgePolicy::Target
+        {
+            const std::string model = judgeModel;
+            return {[model, &judgeCalls](const std::string &, const std::string &)
+                    {
+                        judgeCalls.push_back(model);
+                        return judgeReply("group_say");
+                    },
+                    model};
+        });
+    affect::SwitchingPolicy shell(harness.affect, baseline, judge);
+    harness.service->setDecisionRecorder(&recorder);
+    harness.service->setPolicy(&shell);
+
+    const auto lullTurn = [&harness](const std::string &text, ChatResponse response)
+    {
+        harness.feed(8823, text, harness.now);
+        harness.turnResponses.push_back(std::move(response));
+        harness.service->runTurn(8823);
+        harness.now += 60;
+    };
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, std::string("现场消息") + kMaterialMarker, harness.now);
+    harness.turnResponses.push_back(sayResponse("接一句"));
+    harness.service->runTurn(8823);
+    harness.now += 60;
+    harness.feed(8823, "又来一条", harness.now);
+    harness.turnResponses.push_back(passResponse());
+    harness.service->runTurn(8823);
+
+    // affect 关着：与没有记录器、没有策略时逐字相同；不打开决策库
+    EXPECT_EQ(harness.agentContracts, legacy.contracts);
+    EXPECT_EQ(harness.agentSchemas, legacy.schemas);
+    EXPECT_EQ(harness.sender->texts, legacy.texts);
+    ASSERT_EQ(harness.agentHistories.size(), legacy.histories.size());
+    for (std::size_t index = 0; index < legacy.histories.size(); ++index)
+        EXPECT_EQ(flattenHistory(harness.agentHistories[index]), legacy.histories[index]);
+    EXPECT_TRUE(judgeCalls.empty());
+    EXPECT_FALSE(store.isOpen());
+    EXPECT_FALSE(std::filesystem::exists(dbPath)) << "没启用过就没有决策表";
+
+    // 打开并选 judge：下一轮即经 judge
+    AffectOptions on;
+    on.enabled = true;
+    on.policy = "judge";
+    harness.affect.set(on);
+    lullTurn("第三条", sayResponse("再接一句"));
+    ASSERT_EQ(judgeCalls, (std::vector<std::string>{"judge-a"}));
+    ASSERT_TRUE(store.isOpen());
+    std::vector<affect::DecisionRecord> decisions = store.recentDecisions(10);
+    ASSERT_EQ(decisions.size(), 1U);
+    EXPECT_EQ(decisions.front().policyVersion, "judge_v1");
+    EXPECT_EQ(nlohmann::json::parse(decisions.front().stateJson)["judge_model"], "judge-a");
+
+    // 换 judge 模型（等同 affect.judge_model 重载）：下一次决策调用新模型、记录新标签
+    judgeModel = "judge-b";
+    lullTurn("第四条", sayResponse("又接一句"));
+    ASSERT_EQ(judgeCalls, (std::vector<std::string>{"judge-a", "judge-b"}));
+    decisions = store.recentDecisions(1);
+    ASSERT_EQ(decisions.size(), 1U);
+    EXPECT_EQ(nlohmann::json::parse(decisions.front().stateJson)["judge_model"], "judge-b");
+
+    // policy 改回 baseline：下一轮按基线记录，不再调 judge；预算状态留在 judge 里
+    AffectOptions baselineOn = on;
+    baselineOn.policy = "baseline";
+    harness.affect.set(baselineOn);
+    lullTurn("第五条", sayResponse("还接一句"));
+    EXPECT_EQ(judgeCalls.size(), 2U);
+    decisions = store.recentDecisions(1);
+    ASSERT_EQ(decisions.size(), 1U);
+    EXPECT_EQ(decisions.front().policyVersion, "baseline_v2.4.1");
+    EXPECT_EQ(store.decisionCount(), 3U);
+    EXPECT_EQ(judge.callsThisHour(8823), 2);
+}
+
 TEST(EngagementDecisionPointTest, ShadowJudgeRecordsPlanButKeepsBaselineAction)
 {
     const TurnTranscript legacy = runTwoLullTurns(nullptr, false);
@@ -2041,7 +2145,7 @@ TEST(EngagementDecisionPointTest, FollowUpWindowTurnKeepsRequestBody)
         Harness harness;
         const std::string dbPath = harness.directory.path() + "/affect.db";
         affect::DecisionStore store(dbPath);
-        affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+        affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
         harness.service->setDecisionRecorder(&recorder);
         harness.service->setPolicy(policy);
 
@@ -2089,7 +2193,7 @@ TEST(EngagementDecisionPointTest, CardTriggerKindPerTurn)
     Harness harness;
     const std::string dbPath = harness.directory.path() + "/affect.db";
     affect::DecisionStore store(dbPath);
-    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
     harness.service->setDecisionRecorder(&recorder);
     affect::JudgePolicy judge(
         [](const std::string &, const std::string &) { return judgeReply("group_say"); },
@@ -2159,7 +2263,7 @@ struct EnforcedHarness
 {
     Harness harness;
     affect::DecisionStore store{harness.directory.path() + "/affect.db"};
-    affect::DecisionRecorder recorder{&store, [this] { return harness.now; }};
+    affect::DecisionRecorder recorder{store, affectEnabled(), [this] { return harness.now; }};
     std::string judgeOutput;
     affect::JudgePolicy judge{[this](const std::string &, const std::string &) { return judgeOutput; },
                               "judge-model"};
@@ -2389,7 +2493,7 @@ OneTurnOutcome runOneLullTurn(const ChatResponse &response, const std::string &m
     Harness harness;
     const std::string dbPath = harness.directory.path() + "/affect.db";
     affect::DecisionStore store(dbPath);
-    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
     affect::JudgePolicy judge([](const std::string &, const std::string &)
                               { return judgeReply("group_say"); },
                               "judge-model");
@@ -2464,7 +2568,7 @@ TEST(EngagementEnforceTest, EnforceFollowsLiveValueOnNextTurn)
 {
     Harness harness;
     affect::DecisionStore store(harness.directory.path() + "/affect.db");
-    affect::DecisionRecorder recorder(&store, [&harness] { return harness.now; });
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
     affect::JudgePolicy judge([](const std::string &, const std::string &)
                               { return judgeReply("no_reply"); },
                               "judge-model");

@@ -37,7 +37,8 @@ public:
     // groupContext 可空：注入时白名单群启用内容级上下文装配与收敛契约（T7b）
     // visionModel：视觉端点来源，每次调用时取一次（models.vision 可只填注册名）
     // options / globalVoice / affectOptions 都是组合根的活值（ADR-023，只读）：
-    // 群聊开关在每次过滤时取，语音总开关在每次投递回复时取，enforce 在每次决策时取
+    // 群聊开关在每次过滤时取，语音总开关在每次投递回复时取，affect（策略选择与 enforce）
+    // 在每次决策时取一次；decisionPolicy 是组合根的策略外壳，每条消息按快照 resolve 一次
     explicit Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                      MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
                      CommandRegistry &registry, Voice &voice, const Live<MessageOptions> &options,

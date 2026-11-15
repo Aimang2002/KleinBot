@@ -45,10 +45,10 @@ DecisionRecord makePolicyDecision(const std::string &source,
     record.planVersion = policy.planVersion();
     record.fallbackReason = decision.fallbackReason;
     nlohmann::json state = card.toJson();
-    if (const auto *judge = dynamic_cast<const JudgePolicy *>(&policy))
+    if (dynamic_cast<const JudgePolicy *>(&policy) != nullptr)
     {
         state["judge_latency_ms"] = decision.latencyMs;
-        state["judge_model"] = judge->modelLabel();
+        state["judge_model"] = decision.modelLabel;
     }
     record.stateJson = state.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
     return record;

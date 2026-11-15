@@ -186,11 +186,15 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		// R1 影子期（群聊 @ + 非基线策略 + enforce=false）：决策改在投递之后由策略产出，
 		// 这里不写基线决策；请求、回复与投递与基线逐字相同（Application/ShadowDecision.h）
 		std::string decisionId;
+		// 记录开关问记录器（读 affect.enabled 活值，关着时不打开决策库）；用哪种策略、影子与
+		// 生效的判定出自每条消息取一次的 affect 快照（配置实时生效）
 		const bool recording = this->decisionRecorder != nullptr && this->decisionRecorder->enabled();
+		const Live<AffectOptions>::Snapshot affectNow = this->affectOptions.get();
+		affect::DecisionPolicy *const activePolicy = this->decisionPolicy != nullptr
+			? &this->decisionPolicy->resolve(*affectNow) : nullptr;
 		const bool policyDecides = recording && isGroup &&
-			!affect::isBaselinePolicy(this->decisionPolicy);
-		// enforce 每条消息取一次（配置实时生效）：影子与生效的判定都出自这一份
-		const bool enforcePlan = this->affectOptions.get()->enforce;
+			!affect::isBaselinePolicy(activePolicy);
+		const bool enforcePlan = affectNow->enforce;
 		const bool shadowPolicy = policyDecides && !enforcePlan;
 		const bool enforcedPolicy = policyDecides && enforcePlan;
 		const std::string triggerMessageId = !current_data.message_id_raw.empty()
@@ -215,12 +219,12 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		if (enforcedPolicy)
 		{
 			const affect::SituationCard card = atCard();
-			const affect::Decision decision = this->decisionPolicy->decide(card, judgeMaterial);
+			const affect::Decision decision = activePolicy->decide(card, judgeMaterial);
 			plannedAction = decision.plan.action;
 			constraints = fromPlan(decision.plan);
 			decisionId = this->decisionRecorder->recordDecision(affect::makePolicyDecision(
 				"at_reply", current_data.group_id, current_data.user_id, triggerMessageId,
-				decision, *this->decisionPolicy, card));
+				decision, *activePolicy, card));
 		}
 		else if (recording && !shadowPolicy)
 		{
@@ -325,7 +329,7 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 
 		if (shadowPolicy)
 		{
-			recordShadowAroundDelivery(*this->decisionRecorder, *this->decisionPolicy, atCard(),
+			recordShadowAroundDelivery(*this->decisionRecorder, *activePolicy, atCard(),
 				judgeMaterial, triggerMessageId, std::move(execution), deliver);
 		}
 		else

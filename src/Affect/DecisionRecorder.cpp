@@ -15,9 +15,9 @@ std::string makeId(const char *prefix)
 }
 } // namespace
 
-DecisionRecorder::DecisionRecorder(DecisionStore *store,
+DecisionRecorder::DecisionRecorder(DecisionStore &store, const Live<AffectOptions> &options,
                                    std::function<std::int64_t()> clock)
-    : store(store),
+    : store(store), options(options),
       clock(clock ? std::move(clock)
                   : [] { return static_cast<std::int64_t>(std::time(nullptr)); })
 {
@@ -25,7 +25,8 @@ DecisionRecorder::DecisionRecorder(DecisionStore *store,
 
 bool DecisionRecorder::enabled() const
 {
-    return store != nullptr && store->isOpen();
+    // 先看开关：关着时不碰决策库（没启用过就不建表）
+    return options.get()->enabled && store.open();
 }
 
 std::string DecisionRecorder::recordDecision(DecisionRecord record)
@@ -37,7 +38,7 @@ std::string DecisionRecorder::recordDecision(DecisionRecord record)
         record.decisionId = makeId("dec");
     if (record.createdAt == 0)
         record.createdAt = clock();
-    if (!store->appendDecision(record))
+    if (!store.appendDecision(record))
         return {};
     return record.decisionId;
 }
@@ -51,7 +52,7 @@ bool DecisionRecorder::recordExecution(ExecutionRecord record)
         record.executionId = makeId("exe");
     if (record.createdAt == 0)
         record.createdAt = clock();
-    return store->appendExecution(record);
+    return store.appendExecution(record);
 }
 
 bool DecisionRecorder::recordFeedback(FeedbackRecord record)
@@ -63,7 +64,7 @@ bool DecisionRecorder::recordFeedback(FeedbackRecord record)
         record.feedbackId = makeId("fbk");
     if (record.createdAt == 0)
         record.createdAt = clock();
-    return store->appendFeedback(record);
+    return store.appendFeedback(record);
 }
 
 std::string DecisionRecorder::newExecutionId()
@@ -78,7 +79,7 @@ std::string DecisionRecorder::newDecisionId()
 
 void DecisionRecorder::onReceipt(DeliveryReceipt receipt)
 {
-    if (!enabled() || receipt.correlation_id.empty())
+    if (!store.isOpen() || receipt.correlation_id.empty())
         return;
     std::string error;
     // 分段投递："execution_id#序号" 只把该段的 message_id 聚合到同一条执行记录，
@@ -89,12 +90,12 @@ void DecisionRecorder::onReceipt(DeliveryReceipt receipt)
         if (receipt.status == "sent" && !receipt.message_id_raw.empty())
         {
             const std::string executionId = receipt.correlation_id.substr(0, hash);
-            if (!store->appendExecutionMessageId(executionId, receipt.message_id_raw, &error))
+            if (!store.appendExecutionMessageId(executionId, receipt.message_id_raw, &error))
                 LOG_DEBUG("分段回执未落库：" + error);
         }
         return;
     }
-    if (!store->updateExecutionReceipt(receipt.correlation_id, receipt.status,
+    if (!store.updateExecutionReceipt(receipt.correlation_id, receipt.status,
                                        receipt.message_id_raw, &error))
     {
         // 查无此行通常是无记录器时期的投递或 correlation 不是 execution_id；

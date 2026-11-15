@@ -11,6 +11,22 @@
 
 namespace
 {
+// 决策记录开着的 affect 配置：记录器每次读它的 enabled（配置实时生效 L2.c）
+const Live<AffectOptions> &affectEnabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{true}};
+    return live;
+}
+// 决策记录关着的 affect 配置
+const Live<AffectOptions> &affectDisabled()
+{
+    static const Live<AffectOptions> live{AffectOptions{}};
+    return live;
+}
+} // namespace
+
+namespace
+{
 class TemporaryDirectory
 {
 public:
@@ -134,8 +150,9 @@ TEST(DecisionStoreTest, PersistsDecisionExecutionAndFeedbackAcrossReopen)
     std::string decisionId;
     {
         affect::DecisionStore store(dbPath);
+        store.open(); // 决策库延迟打开（配置实时生效 L2.c）
         ASSERT_TRUE(store.isOpen());
-        affect::DecisionRecorder recorder(&store, [] { return 1234; });
+        affect::DecisionRecorder recorder(store, affectEnabled(), [] { return 1234; });
 
         affect::DecisionRecord decision = affect::makeBaselineDecision(
             "at_reply", 8823, 10001, "msg-1", "reply");
@@ -161,6 +178,7 @@ TEST(DecisionStoreTest, PersistsDecisionExecutionAndFeedbackAcrossReopen)
 
     // 重开验证持久化，而不是只存在内存里
     affect::DecisionStore reopened(dbPath);
+    reopened.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(reopened.isOpen());
     const std::optional<affect::DecisionRecord> found = reopened.findDecision(decisionId);
     ASSERT_TRUE(found.has_value());
@@ -181,6 +199,7 @@ TEST(DecisionStoreTest, DuplicateIdsAreIdempotent)
 {
     TemporaryDirectory directory;
     affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open(); // 决策库延迟打开（配置实时生效 L2.c）
     ASSERT_TRUE(store.isOpen());
 
     affect::DecisionRecord decision = affect::makeBaselineDecision(
@@ -214,10 +233,17 @@ TEST(DecisionStoreTest, DuplicateIdsAreIdempotent)
     EXPECT_EQ(store.feedbackCount("dec-fixed"), 1U);
 }
 
-TEST(DecisionRecorderTest, DisabledWithoutStore)
+// L2.c 稳定外壳：决策库与记录器始终构造；affect.enabled 为假时记录器不可用、
+// 不打开决策库（没启用过就没有决策表）
+TEST(DecisionRecorderTest, DisabledWhileAffectIsOff)
 {
-    affect::DecisionRecorder recorder(nullptr);
+    TemporaryDirectory directory;
+    const std::string dbPath = directory.path() + "/affect.db";
+    affect::DecisionStore store(dbPath);
+    affect::DecisionRecorder recorder(store, affectDisabled());
     EXPECT_FALSE(recorder.enabled());
+    EXPECT_FALSE(store.isOpen());
+    EXPECT_FALSE(std::filesystem::exists(dbPath)) << "没启用过：连数据库文件都不创建";
 
     affect::DecisionRecord decision = affect::makeBaselineDecision(
         "at_reply", 1, 2, "msg", "reply");
@@ -227,4 +253,45 @@ TEST(DecisionRecorderTest, DisabledWithoutStore)
     execution.decisionId = "missing";
     execution.status = "queued";
     EXPECT_FALSE(recorder.recordExecution(execution));
+    EXPECT_FALSE(store.isOpen());
+    EXPECT_FALSE(std::filesystem::exists(dbPath));
+}
+
+// L2.c：affect.enabled 是活值。关着时不建表；打开后下一次记录才打开决策库并写入；
+// 再关上，新的记录不写（已打开的库保持打开，回执照常回填已有的执行行）
+TEST(DecisionRecorderTest, FollowsLiveEnabledSwitchAndOpensStoreLazily)
+{
+    TemporaryDirectory directory;
+    affect::DecisionStore store(directory.path() + "/affect.db");
+    Live<AffectOptions> options{AffectOptions{}};
+    affect::DecisionRecorder recorder(store, options, [] { return 42; });
+    const affect::DecisionRecord decision =
+        affect::makeBaselineDecision("at_reply", 1, 2, "msg", "reply");
+
+    EXPECT_TRUE(recorder.recordDecision(decision).empty());
+    EXPECT_FALSE(store.isOpen());
+
+    AffectOptions on;
+    on.enabled = true;
+    options.set(on);
+    EXPECT_TRUE(recorder.enabled());
+    EXPECT_TRUE(store.isOpen());
+    const std::string decisionId = recorder.recordDecision(decision);
+    ASSERT_FALSE(decisionId.empty());
+    affect::ExecutionRecord execution;
+    execution.executionId = "exe-live";
+    execution.decisionId = decisionId;
+    execution.status = "queued";
+    ASSERT_TRUE(recorder.recordExecution(execution));
+
+    options.set(AffectOptions{});
+    EXPECT_FALSE(recorder.enabled());
+    EXPECT_TRUE(recorder.recordDecision(decision).empty());
+    EXPECT_EQ(store.decisionCount(), 1U);
+    DeliveryReceipt receipt;
+    receipt.correlation_id = "exe-live";
+    receipt.status = "sent";
+    receipt.message_id_raw = "9001";
+    static_cast<DeliveryReceiptSink &>(recorder).onReceipt(receipt);
+    EXPECT_EQ(store.findExecution("exe-live")->status, "sent");
 }

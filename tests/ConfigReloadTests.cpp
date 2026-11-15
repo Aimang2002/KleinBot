@@ -255,7 +255,8 @@ TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)
     SchemaConfig candidate = *loaded.config;
     candidate.affect.enabled = false;
     const ConfigDiff diff = compareConfig(*loaded.config, candidate);
-    EXPECT_TRUE(containsChange(diff, "affect.enabled", ConfigChangeImpact::Restart));
+    // 配置实时生效 L2.c 起 affect.enabled 重载即生效
+    EXPECT_TRUE(containsChange(diff, "affect.enabled", ConfigChangeImpact::Dynamic));
     // R1 三键缺省：基线、影子、跟随 worker
     EXPECT_EQ(loaded.config->affect.policy, "baseline");
     EXPECT_FALSE(loaded.config->affect.enforce);
@@ -305,9 +306,10 @@ TEST(ConfigLoaderAffectTest, ParsesDecisionLayerKeysAndClassifiesRestart)
     candidate.affect.enforce = false;
     candidate.affect.judgeModel = "other";
     const ConfigDiff diff = compareConfig(*loaded.config, candidate);
-    EXPECT_TRUE(containsChange(diff, "affect.policy", ConfigChangeImpact::Restart));
+    // 配置实时生效：enforce 自 L1.f、policy 与 judge_model 自 L2.c 起重载即生效
+    EXPECT_TRUE(containsChange(diff, "affect.policy", ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(diff, "affect.enforce", ConfigChangeImpact::Dynamic));
-    EXPECT_TRUE(containsChange(diff, "affect.judge_model", ConfigChangeImpact::Restart));
+    EXPECT_TRUE(containsChange(diff, "affect.judge_model", ConfigChangeImpact::Dynamic));
 
     file.write(withAffect(R"({"enabled": true, "policy": "smart"})"));
     const ConfigLoadResult invalid = loader.loadFile(file.path.string());
