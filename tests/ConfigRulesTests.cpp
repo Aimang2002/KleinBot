@@ -43,8 +43,9 @@ TEST(ConfigRulesTest, PathsAreUniqueAndEveryRowIsComplete)
     EXPECT_EQ(paths.size(), productConfigRules().size());
 }
 
-// 接通实时生效的键（L1.a：chat 组除 top_p 与 worker_threads 外的 6 个）：每行都带应用函数、档位 Dynamic
-TEST(ConfigRulesTest, AppliesRowsAreTheSixWiredChatKeys)
+// 接通实时生效的键，按表的顺序：每行都带应用函数、档位 Dynamic。
+// L1.a：chat 组除 top_p 与 worker_threads 外的 6 个；L1.b：models 的三个端点各 4 个字段
+TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
 {
     std::vector<std::string> wired;
     for (const ConfigRule &rule : productConfigRules())
@@ -55,11 +56,18 @@ TEST(ConfigRulesTest, AppliesRowsAreTheSixWiredChatKeys)
         EXPECT_TRUE(rule.effect.apply() != nullptr) << rule.path;
         EXPECT_TRUE(rule.effect.impact() == ConfigChangeImpact::Dynamic) << rule.path;
     }
-    EXPECT_EQ(wired.size(), 6U);
-    EXPECT_EQ(wired, (std::vector<std::string>{"chat.default_model", "chat.temperature",
-                                               "chat.frequency_penalty", "chat.presence_penalty",
-                                               "chat.max_message_tokens",
-                                               "chat.message_survival_seconds"}));
+    const std::vector<std::string> expected = {
+        // L1.a
+        "chat.default_model", "chat.temperature", "chat.frequency_penalty", "chat.presence_penalty",
+        "chat.max_message_tokens", "chat.message_survival_seconds",
+        // L1.b
+        "models.drawing.model", "models.drawing.endpoint", "models.drawing.api_key",
+        "models.drawing.api_standard", "models.vision.model", "models.vision.endpoint",
+        "models.vision.api_key", "models.vision.api_standard", "models.worker.model",
+        "models.worker.endpoint", "models.worker.api_key", "models.worker.api_standard",
+    };
+    EXPECT_EQ(wired.size(), 18U);
+    EXPECT_EQ(wired, expected);
 }
 
 TEST(ConfigRulesTest, EffectFactoriesTieImpactToApplyFunction)

@@ -478,12 +478,13 @@ int main(int argc, char **argv)
 		tools.registerTool(std::make_unique<ActionTool>(*webFetchAction));
 		LOG_INFO("网页抓取工具已启用");
 	}
-	// 专用模型端点（ModelEndpointResolver）：每次调用时按注册表解析——models.vision/
-	// drawing/worker 只填注册名即可，注册表热重载即时生效；全配形态原样直连。
+	// 专用模型端点（ModelEndpointResolver）：每次调用时先从活值取 models.vision/drawing/
+	// worker 的配置（重载后下一次调用即用新值），再按注册表解析——只填注册名即可，
+	// 注册表热重载即时生效；全配形态原样直连。
 	// 生图/看图工具、#生成图片、Message、瞥视与话题会话杂务共用这三个来源
-	const EndpointProvider visionEndpoint = registryEndpoint(settings.models.vision, models);
-	const EndpointProvider drawingEndpoint = registryEndpoint(settings.models.drawing, models);
-	const EndpointProvider workerEndpoint = registryEndpoint(settings.models.worker, models);
+	const EndpointProvider visionEndpoint = registryEndpoint(liveSettings.visionModel, models);
+	const EndpointProvider drawingEndpoint = registryEndpoint(liveSettings.drawingModel, models);
+	const EndpointProvider workerEndpoint = registryEndpoint(liveSettings.workerModel, models);
 	tools.registerTool(std::make_unique<GetTimeTool>());
 	tools.registerTool(std::make_unique<ActionTool>(getCurrentModelAction));
 	tools.registerTool(std::make_unique<RecallConversationTool>(memoryService));
@@ -526,15 +527,19 @@ int main(int argc, char **argv)
 	if (decisionRecorder && settings.affect.policy == "judge")
 	{
 		// judge 要便宜：judge_model 空或不在注册表时一律走 worker 端点（不回退主模型）。
-		// 每次调用时查注册表，热重载后补注册的名字即时生效
+		// 每次调用时查注册表，热重载后补注册的名字即时生效。
+		// judge 的 worker 端点用启动时的 models.worker 配置，不跟随重载：下面的记录标签也是
+		// 按启动配置算好的，两者到 L2.c 一起改成每次决策时按当前配置解析，免得调用的模型
+		// 与记录的标签对不上
+		const EndpointProvider judgeWorkerEndpoint = registryEndpoint(settings.models.worker, models);
 		const std::string judgeModel = settings.affect.judgeModel;
 		const EndpointProvider judgeEndpoint = judgeModel.empty()
-			? workerEndpoint
-			: EndpointProvider([&models, judgeModel, workerEndpoint]()
+			? judgeWorkerEndpoint
+			: EndpointProvider([&models, judgeModel, judgeWorkerEndpoint]()
 				{
 					return models.find(judgeModel)
 						? resolveEndpoint(ModelEndpointOptions{judgeModel}, models)
-						: workerEndpoint();
+						: judgeWorkerEndpoint();
 				});
 		const bool judgeRegistered = !judgeModel.empty() && models.find(judgeModel).has_value();
 		if (!judgeModel.empty() && !judgeRegistered)
@@ -633,7 +638,9 @@ int main(int argc, char **argv)
 	// 群聊瞥视（R1.1，ADR-020）：群图异步瞥视成一行派生描述写回群缓冲占位符，
 	// 零行为变化（只丰富文本、不触发回应）。视觉复用 models.vision：启动时按解析后的
 	// 端点判定就绪（注册表形态只填名字也算），未就绪时不设 seam，start() 报"视觉模型
-	// 未配置"并保持 no-op；观察通道关闭时 store 为空同理
+	// 未配置"并保持 no-op；观察通道关闭时 store 为空同理。
+	// 已知限制（L2.b 解除）：seam 每次调用按活值解析端点，改 models.vision 下一张图即用新端点；
+	// 但设不设 seam 只看启动时的就绪状态，启动时未就绪、之后才补配的要重启才开始瞥视
 	GlanceService glanceService(groupContextStore.get(), &groupImageAssets, settings.glance);
 	if (modelEndpointReadinessText(visionEndpoint(), "视觉", "models.vision").empty())
 	{

@@ -16,6 +16,22 @@ void applyChat(LiveSettings &live, const RuntimeSettings &next)
     live.chat.set(next.chat);
 }
 
+// models：三个专用端点各是一个活值，各自整份替换（端点的四个字段都能实时生效）
+void applyDrawingModel(LiveSettings &live, const RuntimeSettings &next)
+{
+    live.drawingModel.set(next.models.drawing);
+}
+
+void applyVisionModel(LiveSettings &live, const RuntimeSettings &next)
+{
+    live.visionModel.set(next.models.vision);
+}
+
+void applyWorkerModel(LiveSettings &live, const RuntimeSettings &next)
+{
+    live.workerModel.set(next.models.worker);
+}
+
 // 每行：差异里的路径、生效方式、比较的 Schema 字段。表的顺序就是差异条目的输出顺序。
 // applies(应用函数) 的键重载成功后立即生效；restart() 的键只能重启生效；
 // notYet(档位) 的键还没接通实时生效，档位保持改造前的值
@@ -39,30 +55,31 @@ constexpr ConfigRule kProductRules[] = {
     {"chat.worker_threads",           restart(),          field<&SchemaConfig::chat, &ChatSchema::workerThreads>},
     {"chat.message_survival_seconds", applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::messageSurvivalSeconds>},
 
-    // models：drawing / vision / worker 各四个字段
-    {"models.drawing.model", notYet(Rebuild),
+    // models：drawing / vision / worker 各四个字段。三个端点来源每次调用时读活值
+    // （judge 例外：它的端点与记录标签到 L2.c 才改成按当前配置解析，见 main.cpp）
+    {"models.drawing.model", applies(applyDrawingModel),
      field<&SchemaConfig::models, &ModelSchema::drawing, &ModelEndpointSchema::model>},
-    {"models.drawing.endpoint", notYet(Rebuild),
+    {"models.drawing.endpoint", applies(applyDrawingModel),
      field<&SchemaConfig::models, &ModelSchema::drawing, &ModelEndpointSchema::endpoint>},
-    {"models.drawing.api_key", notYet(Rebuild),
+    {"models.drawing.api_key", applies(applyDrawingModel),
      field<&SchemaConfig::models, &ModelSchema::drawing, &ModelEndpointSchema::apiKey>},
-    {"models.drawing.api_standard", notYet(Rebuild),
+    {"models.drawing.api_standard", applies(applyDrawingModel),
      field<&SchemaConfig::models, &ModelSchema::drawing, &ModelEndpointSchema::apiStandard>},
-    {"models.vision.model", notYet(Rebuild),
+    {"models.vision.model", applies(applyVisionModel),
      field<&SchemaConfig::models, &ModelSchema::vision, &ModelEndpointSchema::model>},
-    {"models.vision.endpoint", notYet(Rebuild),
+    {"models.vision.endpoint", applies(applyVisionModel),
      field<&SchemaConfig::models, &ModelSchema::vision, &ModelEndpointSchema::endpoint>},
-    {"models.vision.api_key", notYet(Rebuild),
+    {"models.vision.api_key", applies(applyVisionModel),
      field<&SchemaConfig::models, &ModelSchema::vision, &ModelEndpointSchema::apiKey>},
-    {"models.vision.api_standard", notYet(Rebuild),
+    {"models.vision.api_standard", applies(applyVisionModel),
      field<&SchemaConfig::models, &ModelSchema::vision, &ModelEndpointSchema::apiStandard>},
-    {"models.worker.model", notYet(Rebuild),
+    {"models.worker.model", applies(applyWorkerModel),
      field<&SchemaConfig::models, &ModelSchema::worker, &ModelEndpointSchema::model>},
-    {"models.worker.endpoint", notYet(Rebuild),
+    {"models.worker.endpoint", applies(applyWorkerModel),
      field<&SchemaConfig::models, &ModelSchema::worker, &ModelEndpointSchema::endpoint>},
-    {"models.worker.api_key", notYet(Rebuild),
+    {"models.worker.api_key", applies(applyWorkerModel),
      field<&SchemaConfig::models, &ModelSchema::worker, &ModelEndpointSchema::apiKey>},
-    {"models.worker.api_standard", notYet(Rebuild),
+    {"models.worker.api_standard", applies(applyWorkerModel),
      field<&SchemaConfig::models, &ModelSchema::worker, &ModelEndpointSchema::apiStandard>},
 
     // voice

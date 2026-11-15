@@ -2,7 +2,9 @@
 
 LiveSettings::LiveSettings(const RuntimeSettings &startup)
     : chat(startup.chat),
-      models(startup.models),
+      drawingModel(startup.models.drawing),
+      visionModel(startup.models.vision),
+      workerModel(startup.models.worker),
       voice(startup.voice),
       memory(startup.memory),
       webSearch(startup.webSearch),

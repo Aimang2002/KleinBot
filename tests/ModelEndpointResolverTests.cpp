@@ -4,6 +4,7 @@
 #include "ModelApiCaller/EndpointChatModel.h"
 #include "ModelApiCaller/ModelEndpointResolver.h"
 #include "ModelRegistry/ModelRegistry.h"
+#include "utils/Live.h"
 
 #include <filesystem>
 #include <fstream>
@@ -119,6 +120,42 @@ TEST(ModelEndpointResolverTest, RegistryProviderResolvesAtCallTime)
     ASSERT_TRUE(registry.reload());
     EXPECT_EQ(provider().endpoint, "https://late.example.com");
     EXPECT_EQ(provider().apiKey, "key-late");
+}
+
+// 配置实时生效（L1.b）：provider 每次调用先取活值的快照再按注册表解析，
+// 配置换了下一次调用即用新值；换值之前拿到的结果不变
+TEST(ModelEndpointResolverTest, LiveProviderReadsConfigurationAtEachCall)
+{
+    RegistryFile file("kleinbot-resolver-live.json", kRegistry);
+    ModelRegistry registry(file.string());
+
+    ModelEndpointOptions initial;
+    initial.model = "vision-model";
+    Live<ModelEndpointOptions> configured(initial);
+    const EndpointProvider provider = registryEndpoint(configured, registry);
+    const ModelEndpointOptions before = provider();
+    EXPECT_EQ(before.endpoint, "https://vision.example.com");
+    EXPECT_EQ(before.apiKey, "key-v");
+
+    // 注册表形态换成另一个注册名：下一次调用按新名字解析
+    ModelEndpointOptions renamed;
+    renamed.model = "claude-x";
+    configured.set(renamed);
+    const ModelEndpointOptions after = provider();
+    EXPECT_EQ(after.model, "claude-x");
+    EXPECT_EQ(after.endpoint, "https://anthropic.example.com");
+    EXPECT_EQ(after.apiKey, "key-a");
+    EXPECT_EQ(after.apiStandard, "Anthropic");
+    EXPECT_EQ(before.endpoint, "https://vision.example.com") << "换值之前拿到的结果不变";
+
+    // 换成全配形态：原样直连
+    configured.set(ModelEndpointOptions{"vision-model", "https://direct.example.com", "sk-direct", "OpenAI"});
+    EXPECT_EQ(provider().endpoint, "https://direct.example.com");
+    EXPECT_EQ(provider().apiKey, "sk-direct");
+
+    // 清空：未配置，由调用方的就绪检查处理
+    configured.set(ModelEndpointOptions{});
+    EXPECT_FALSE(provider().configured());
 }
 
 TEST(ModelEndpointResolverTest, FixedAndEmptyProviders)

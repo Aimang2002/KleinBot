@@ -237,7 +237,8 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 
 - `chat.default_model`：没有用 `#切换模型` 手动选过模型的用户跟着新的默认模型走；手动选过的保持自己的选择（手动选择只保存在内存里，重启后恢复为跟随默认模型）；
 - `chat.temperature`、`chat.frequency_penalty`、`chat.presence_penalty`；
-- `chat.max_message_tokens`、`chat.message_survival_seconds`。
+- `chat.max_message_tokens`、`chat.message_survival_seconds`；
+- `models.drawing`、`models.vision`、`models.worker` 的 `model`、`endpoint`、`api_key`、`api_standard`：生图、看图、群聊瞥视和后台杂务（话题会话、私聊摘要）下一次调用就用新配置。两处仍按启动时的配置：启动时视觉模型没配好、之后才补上的，群聊瞥视要重启才开始；决策层 judge（`affect.policy` 为 `judge` 时）用的 worker 端点。
 
 其余配置仍需重启机器人才生效（`chat.top_p` 目前没有送进模型请求，配置了也不起作用）。
 

@@ -115,6 +115,34 @@ TEST(ConfigDiffTest, ChatKeysAreDynamicExceptTopPAndWorkerThreads)
     EXPECT_TRUE(containsChange(diff, "chat.worker_threads", ConfigChangeImpact::Restart));
 }
 
+// 配置实时生效 L1.b：models 三个专用端点的 12 个字段接通应用，档位由 Rebuild 变为 Dynamic
+TEST(ConfigDiffTest, ModelEndpointKeysAreDynamic)
+{
+    SchemaConfig current;
+    SchemaConfig candidate = current;
+    for (ModelEndpointSchema *endpoint :
+         {&candidate.models.drawing, &candidate.models.vision, &candidate.models.worker})
+    {
+        endpoint->model = "next-model";
+        endpoint->endpoint = "https://next.example.test";
+        endpoint->apiKey = "sk-next";
+        endpoint->apiStandard = "Anthropic";
+    }
+
+    const ConfigDiff diff = compareConfig(current, candidate);
+
+    EXPECT_EQ(diff.size(), 12U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 12U);
+    for (const char *endpoint : {"drawing", "vision", "worker"})
+    {
+        for (const char *field : {"model", "endpoint", "api_key", "api_standard"})
+        {
+            const std::string path = std::string("models.") + endpoint + "." + field;
+            EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Dynamic)) << path;
+        }
+    }
+}
+
 TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)
 {
     TemporaryConfigFile file;

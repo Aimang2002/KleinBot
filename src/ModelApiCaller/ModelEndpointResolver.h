@@ -11,6 +11,9 @@
  *     就绪检查（modelEndpointReadinessText）或回退逻辑处理。
  * 调用方不要冻结解析结果：需要随注册表热重载的地方持有 EndpointProvider，
  * 每次调用时取一次。
+ * 配置这一半同样在调用时取（ADR-023，配置实时生效）：组合根把 LiveSettings 里的
+ * 活值交给 registryEndpoint，provider 每次调用先取一份配置快照、再按注册表解析，
+ * models.* 重载后下一次调用即用新值。
  * 只有组合根（main）与测试应包含本头文件：EndpointProvider / fixedEndpoint /
  * currentEndpoint 在 ModelEndpointOptions.h，toChatModel 在 EndpointChatModel.h，
  * 使用方因此不依赖 ModelRegistry。
@@ -18,6 +21,7 @@
 #include "ModelEndpointOptions.h"
 #include "../ModelRegistry/ChatModel.h"
 #include "../ModelRegistry/ModelRegistry.h"
+#include "../utils/Live.h"
 
 #include <optional>
 #include <utility>
@@ -40,7 +44,20 @@ inline ModelEndpointOptions resolveEndpoint(const ModelEndpointOptions &configur
     return resolved;
 }
 
-// 按注册表在调用时解析；registry 必须比返回的 provider 活得久（组合根栈对象）
+// 配置与注册表都在调用时取：每次调用先取一份配置快照，再按注册表解析。
+// configured 与 registry 都必须比返回的 provider 活得久（组合根栈对象）
+inline EndpointProvider registryEndpoint(const Live<ModelEndpointOptions> &configured,
+                                         const ModelRegistry &registry)
+{
+    return [&configured, &registry]()
+    { return resolveEndpoint(*configured.get(), registry); };
+}
+
+// 临时的活值活不过 provider，不许传
+EndpointProvider registryEndpoint(const Live<ModelEndpointOptions> &&, const ModelRegistry &) = delete;
+
+// 配置固定为传入的值，只有注册表那一半在调用时解析。产品代码里只剩 judge 用它
+// （judge 的端点与记录标签到 L2.c 才改成按当前配置解析）；registry 必须比返回的 provider 活得久
 inline EndpointProvider registryEndpoint(ModelEndpointOptions configured, const ModelRegistry &registry)
 {
     return [configured = std::move(configured), &registry]()
