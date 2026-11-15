@@ -10,7 +10,7 @@
 enum class ConfigChangeImpact
 {
     Dynamic,
-    Rebuild,
+    Rebuild, // 配置实时生效 L2.e 起不再产生（规则表只有 restart()/applies()），枚举值与 JSON 名保留
     Restart
 };
 

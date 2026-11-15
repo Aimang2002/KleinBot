@@ -5,8 +5,6 @@
 
 namespace
 {
-constexpr ConfigChangeImpact Rebuild = ConfigChangeImpact::Rebuild;
-
 // 应用函数：重载成功后，把新的运行时设置换进对应的活值（只替换快照，不会失败）。
 // 一组一个；同组几个键一起变化时，ConfigReloader 只调一次。结构里有模块在读、但还没接通
 // 或只能重启的字段时，应用函数保持它的运行值（决定 9），活值里始终是模块实际在用的值
@@ -118,8 +116,7 @@ void applyProxy(LiveSettings &live, const RuntimeSettings &next)
 }
 
 // 每行：差异里的路径、生效方式、比较的 Schema 字段。表的顺序就是差异条目的输出顺序。
-// applies(应用函数) 的键重载成功后立即生效；restart() 的键只能重启生效；
-// notYet(档位) 的键还没接通实时生效，档位保持改造前的值
+// applies(应用函数) 的键重载成功后立即生效；restart() 的键只能重启生效
 constexpr ConfigRule kProductRules[] = {
     {"schema_version", restart(), field<&SchemaConfig::schemaVersion>},
 
@@ -192,9 +189,9 @@ constexpr ConfigRule kProductRules[] = {
     {"glance.per_group_per_minute", applies(applyGlance), field<&SchemaConfig::glance, &GlanceSchema::perGroupPerMinute>},
 
     // web_search：enabled 决定工具是否开放（对象始终构造、始终注册）；provider 决定构造哪一种
-    // 搜索实现，只能重启生效，档位保持改造前的 Rebuild
+    // 搜索实现，只能重启生效
     {"web_search.enabled",            applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::enabled>},
-    {"web_search.provider",           notYet(Rebuild),         field<&SchemaConfig::webSearch, &WebSearchSchema::provider>},
+    {"web_search.provider",           restart(),               field<&SchemaConfig::webSearch, &WebSearchSchema::provider>},
     {"web_search.endpoint",           applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::endpoint>},
     {"web_search.api_key",            applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::apiKey>},
     {"web_search.search_depth",       applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::searchDepth>},
@@ -220,41 +217,41 @@ constexpr ConfigRule kProductRules[] = {
     // network：代理同时作用于模型调用、搜索、抓取，应用函数一起换三个活值
     {"network.proxy", applies(applyProxy), field<&SchemaConfig::proxy>},
 
-    // communication：通信方式与协议端地址只能重启生效；档位保持改造前的 Rebuild。
+    // communication：通信方式、协议端地址与超时只能重启生效（连接在启动时建立）。
     // active_profile 指 active_transport 选中的那一份传输档案
-    {"communication.protocol.type", notYet(Rebuild),
+    {"communication.protocol.type", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::protocolType>},
-    {"communication.active_transport", notYet(Rebuild),
+    {"communication.active_transport", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeTransport>},
-    {"communication.active_profile.type", notYet(Rebuild),
+    {"communication.active_profile.type", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::type>},
-    {"communication.active_profile.host", notYet(Rebuild),
+    {"communication.active_profile.host", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::host>},
-    {"communication.active_profile.port", notYet(Rebuild),
+    {"communication.active_profile.port", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::port>},
-    {"communication.active_profile.path", notYet(Rebuild),
+    {"communication.active_profile.path", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::path>},
-    {"communication.active_profile.access_token", notYet(Rebuild),
+    {"communication.active_profile.access_token", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::accessToken>},
-    {"communication.active_profile.api.base_url", notYet(Rebuild),
+    {"communication.active_profile.api.base_url", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::apiBaseUrl>},
-    {"communication.active_profile.api.access_token", notYet(Rebuild),
+    {"communication.active_profile.api.access_token", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::apiAccessToken>},
-    {"communication.active_profile.events.bind", notYet(Rebuild),
+    {"communication.active_profile.events.bind", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::eventBindHost>},
-    {"communication.active_profile.events.port", notYet(Rebuild),
+    {"communication.active_profile.events.port", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::eventBindPort>},
-    {"communication.active_profile.events.path", notYet(Rebuild),
+    {"communication.active_profile.events.path", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::eventPath>},
-    {"communication.active_profile.events.access_token", notYet(Rebuild),
+    {"communication.active_profile.events.access_token", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::eventAccessToken>},
-    {"communication.active_profile.events.secret", notYet(Rebuild),
+    {"communication.active_profile.events.secret", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::activeProfile, &TransportProfileSchema::eventSecret>},
-    {"communication.defaults.connect_timeout_ms", notYet(Rebuild),
+    {"communication.defaults.connect_timeout_ms", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::connectTimeoutMs>},
-    {"communication.defaults.request_timeout_ms", notYet(Rebuild),
+    {"communication.defaults.request_timeout_ms", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::requestTimeoutMs>},
-    {"communication.defaults.max_event_body_bytes", notYet(Rebuild),
+    {"communication.defaults.max_event_body_bytes", restart(),
      field<&SchemaConfig::communication, &CommunicationSchema::maxBodyBytes>},
 
     // webui

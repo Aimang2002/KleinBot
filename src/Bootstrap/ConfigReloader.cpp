@@ -51,9 +51,6 @@ ConfigReloadReport ConfigReloader::reload()
         case ConfigEffect::Kind::Restart:
             report.restartOnly.push_back(rule.path);
             break;
-        case ConfigEffect::Kind::NotYet:
-            report.notWired.push_back(rule.path);
-            break;
         }
     }
 
@@ -68,8 +65,7 @@ std::string summarizeReload(const ConfigReloadReport &report)
     if (!report.result.success)
         return "配置刷新失败，继续使用当前内存快照。";
 
-    const std::size_t total =
-        report.applied.size() + report.restartOnly.size() + report.notWired.size();
+    const std::size_t total = report.applied.size() + report.restartOnly.size();
     if (total == 0)
         return "配置校验通过，内存快照无变化。";
 
@@ -78,8 +74,5 @@ std::string summarizeReload(const ConfigReloadReport &report)
     if (!report.restartOnly.empty())
         text += "\n需重启才能生效 " + std::to_string(report.restartOnly.size()) + " 项：" +
                 joinPaths(report.restartOnly) + "。";
-    if (!report.notWired.empty())
-        text += "\n尚未接通实时生效、需重启 " + std::to_string(report.notWired.size()) + " 项：" +
-                joinPaths(report.notWired) + "。";
     return text;
 }

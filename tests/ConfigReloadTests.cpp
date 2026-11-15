@@ -67,8 +67,9 @@ bool containsChange(const ConfigDiff &diff, const std::string &path,
 }
 }
 
-// 三档各取一个键（voice.host 自 L1.c 起实时生效，Rebuild 的代表换成通信超时）
-TEST(ConfigDiffTest, ClassifiesDynamicRebuildAndRestartChanges)
+// 生效方式只有两种（L2.e 起）：实时生效的是 Dynamic，其余是 Restart，不再产生 Rebuild
+// （通信超时此前是过渡期的 Rebuild，L2.e 起归 Restart）
+TEST(ConfigDiffTest, ClassifiesDynamicAndRestartChanges)
 {
     SchemaConfig current;
     SchemaConfig candidate = current;
@@ -80,12 +81,12 @@ TEST(ConfigDiffTest, ClassifiesDynamicRebuildAndRestartChanges)
 
     EXPECT_EQ(diff.size(), 3U);
     EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 1U);
-    EXPECT_EQ(diff.count(ConfigChangeImpact::Rebuild), 1U);
-    EXPECT_EQ(diff.count(ConfigChangeImpact::Restart), 1U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Rebuild), 0U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Restart), 2U);
     EXPECT_TRUE(containsChange(diff, "bot.group_chat_enabled",
                                ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(diff, "communication.defaults.request_timeout_ms",
-                               ConfigChangeImpact::Rebuild));
+                               ConfigChangeImpact::Restart));
     EXPECT_TRUE(containsChange(diff, "chat.worker_threads",
                                ConfigChangeImpact::Restart));
 }
@@ -185,7 +186,7 @@ TEST(ConfigDiffTest, MemoryKeysAreDynamic)
 }
 
 // 配置实时生效 L1.e：web_search（除 enabled、provider）、web_fetch（除 enabled）与 network.proxy
-// 接通应用，档位变为 Dynamic；L2.a 起两个 enabled 也接通；provider 只能重启（仍为 Rebuild）
+// 接通应用，档位变为 Dynamic；L2.a 起两个 enabled 也接通；provider 只能重启（L2.e 起为 Restart）
 TEST(ConfigDiffTest, WebSearchFetchAndProxyKeysAreDynamicExceptProvider)
 {
     SchemaConfig current;
@@ -213,13 +214,46 @@ TEST(ConfigDiffTest, WebSearchFetchAndProxyKeysAreDynamicExceptProvider)
 
     EXPECT_EQ(diff.size(), 18U);
     EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 17U);
-    EXPECT_EQ(diff.count(ConfigChangeImpact::Rebuild), 1U);
-    EXPECT_TRUE(containsChange(diff, "web_search.provider", ConfigChangeImpact::Rebuild));
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Restart), 1U);
+    EXPECT_TRUE(containsChange(diff, "web_search.provider", ConfigChangeImpact::Restart));
     for (const char *path : {"web_search.enabled", "web_fetch.enabled"})
         EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Dynamic)) << path;
     EXPECT_TRUE(containsChange(diff, "network.proxy", ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(diff, "web_search.endpoint", ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(diff, "web_fetch.cache_max_entries", ConfigChangeImpact::Dynamic));
+}
+
+// L2.e：communication 的 17 个键只能重启生效（连接在启动时建立），档位 Restart
+TEST(ConfigDiffTest, CommunicationKeysAreRestart)
+{
+    SchemaConfig current;
+    SchemaConfig candidate = current;
+    CommunicationSchema &next = candidate.communication;
+    next.protocolType = "other";
+    next.activeTransport = "other";
+    TransportProfileSchema &profile = next.activeProfile;
+    profile.type = "other";
+    profile.host = "10.0.0.1";
+    profile.port = static_cast<unsigned short>(current.communication.activeProfile.port + 1);
+    profile.path = "/next";
+    profile.accessToken = "token-next";
+    profile.apiBaseUrl = "http://10.0.0.1:3000";
+    profile.apiAccessToken = "api-token-next";
+    profile.eventBindHost = "0.0.0.0";
+    profile.eventBindPort = static_cast<unsigned short>(current.communication.activeProfile.eventBindPort + 1);
+    profile.eventPath = "/events-next";
+    profile.eventAccessToken = "event-token-next";
+    profile.eventSecret = "secret-next";
+    next.connectTimeoutMs = current.communication.connectTimeoutMs + 1;
+    next.requestTimeoutMs = current.communication.requestTimeoutMs + 1;
+    next.maxBodyBytes = current.communication.maxBodyBytes + 1;
+
+    const ConfigDiff diff = compareConfig(current, candidate);
+
+    EXPECT_EQ(diff.size(), 17U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Restart), 17U);
+    for (const ConfigChange &change : diff.changes())
+        EXPECT_EQ(change.path.rfind("communication.", 0), 0U) << change.path;
 }
 
 TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)

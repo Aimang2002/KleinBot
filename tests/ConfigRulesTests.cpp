@@ -10,11 +10,11 @@
 
 namespace
 {
-// 生效方式只能由三个工厂产生：构造函数私有，applies 传不了空指针
+// 生效方式只能由两个工厂产生：构造函数私有，applies 传不了空指针
 static_assert(!std::is_default_constructible_v<ConfigEffect>, "没有默认的生效方式");
 static_assert(!std::is_constructible_v<ConfigEffect, ConfigEffect::Kind, ConfigChangeImpact,
                                        ConfigApplyFunction *>,
-              "只能经 restart() / applies() / notYet() 产生");
+              "只能经 restart() / applies() 产生");
 static_assert(!std::is_invocable_v<decltype(&applies), std::nullptr_t>,
               "applies 不接受空指针");
 
@@ -93,21 +93,48 @@ TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
     EXPECT_EQ(wired, expected);
 }
 
+// L2.e：过渡期的 notYet 已清零删除。每一行要么 restart()（档位 Restart、没有应用函数），
+// 要么 applies(函数)（见上一个用例）；只能重启的键按表的顺序逐个列出
+TEST(ConfigRulesTest, EveryOtherRowIsRestartOnly)
+{
+    std::vector<std::string> restartOnly;
+    for (const ConfigRule &rule : productConfigRules())
+    {
+        if (rule.effect.kind() == ConfigEffect::Kind::Applies)
+            continue;
+        ASSERT_TRUE(rule.effect.kind() == ConfigEffect::Kind::Restart) << rule.path;
+        EXPECT_TRUE(rule.effect.impact() == ConfigChangeImpact::Restart) << rule.path;
+        EXPECT_TRUE(rule.effect.apply() == nullptr) << rule.path;
+        restartOnly.push_back(rule.path);
+    }
+    const std::vector<std::string> expected = {
+        "schema_version", "bot.id", "bot.manager_id", "chat.worker_threads",
+        "web_search.provider",
+        "storage.conversation_database", "storage.image_assets",
+        "communication.protocol.type", "communication.active_transport",
+        "communication.active_profile.type", "communication.active_profile.host",
+        "communication.active_profile.port", "communication.active_profile.path",
+        "communication.active_profile.access_token", "communication.active_profile.api.base_url",
+        "communication.active_profile.api.access_token", "communication.active_profile.events.bind",
+        "communication.active_profile.events.port", "communication.active_profile.events.path",
+        "communication.active_profile.events.access_token",
+        "communication.active_profile.events.secret",
+        "communication.defaults.connect_timeout_ms", "communication.defaults.request_timeout_ms",
+        "communication.defaults.max_event_body_bytes",
+        "webui.enabled", "webui.bind", "webui.port", "webui.access_token",
+        "push.enabled", "push.bind", "push.port", "push.access_token", "push.allowed_groups",
+        "push.allowed_users", "push.max_per_hour",
+    };
+    EXPECT_EQ(restartOnly.size(), 35U);
+    EXPECT_EQ(restartOnly, expected);
+}
+
 TEST(ConfigRulesTest, EffectFactoriesTieImpactToApplyFunction)
 {
     constexpr ConfigEffect restartOnly = restart();
     EXPECT_TRUE(restartOnly.kind() == ConfigEffect::Kind::Restart);
     EXPECT_TRUE(restartOnly.impact() == ConfigChangeImpact::Restart);
     EXPECT_TRUE(restartOnly.apply() == nullptr);
-
-    for (const ConfigChangeImpact impact : {ConfigChangeImpact::Dynamic, ConfigChangeImpact::Rebuild,
-                                            ConfigChangeImpact::Restart})
-    {
-        const ConfigEffect pending = notYet(impact);
-        EXPECT_TRUE(pending.kind() == ConfigEffect::Kind::NotYet);
-        EXPECT_TRUE(pending.impact() == impact) << "过渡期保留原档位";
-        EXPECT_TRUE(pending.apply() == nullptr);
-    }
 
     constexpr ConfigEffect live = applies(applyNothing);
     EXPECT_TRUE(live.kind() == ConfigEffect::Kind::Applies);

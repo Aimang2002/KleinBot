@@ -65,7 +65,6 @@ const ConfigRule kApplyingRules[] = {
     {"chat.temperature",    applies(applyChat),                 field<&SchemaConfig::chat, &ChatSchema::temperature>},
     {"chat.presence_penalty", applies(applyChat),               field<&SchemaConfig::chat, &ChatSchema::presencePenalty>},
     {"voice.host",          applies(applyVoice),                field<&SchemaConfig::voice, &VoiceSchema::host>},
-    {"memory.batch_turns",  notYet(ConfigChangeImpact::Rebuild), field<&SchemaConfig::memory, &MemorySchema::batchTurns>},
     {"chat.worker_threads", restart(),                          field<&SchemaConfig::chat, &ChatSchema::workerThreads>},
 };
 
@@ -258,7 +257,6 @@ TEST_F(ConfigReloaderFixture, FailedReloadAppliesNothing)
     EXPECT_EQ(voiceApplyCalls.load(), 0);
     EXPECT_TRUE(report.applied.empty());
     EXPECT_TRUE(report.restartOnly.empty());
-    EXPECT_TRUE(report.notWired.empty());
     EXPECT_EQ(summarizeReload(report), "配置刷新失败，继续使用当前内存快照。");
 }
 
@@ -303,17 +301,16 @@ TEST_F(ConfigReloaderFixture, ParsedButInvalidCandidateAppliesNothing)
         EXPECT_EQ(chatApplyCalls.load(), 0) << bad.name;
         EXPECT_TRUE(report.applied.empty()) << bad.name;
         EXPECT_TRUE(report.restartOnly.empty()) << bad.name;
-        EXPECT_TRUE(report.notWired.empty()) << bad.name;
-        EXPECT_EQ(summarizeReload(report), "配置刷新失败，继续使用当前内存快照。") << bad.name;
+            EXPECT_EQ(summarizeReload(report), "配置刷新失败，继续使用当前内存快照。") << bad.name;
     }
 }
 
 // 产品规则表（默认）：只有接通的行把新值换进活值（L1.a 起 chat 组 6 个键，L1.b 起
 // models 的 12 个键，L1.c 起 voice 的 5 个键，L1.d 起 memory 除 enabled 外的 4 个键，
 // L1.e 起搜索、抓取参数与 network.proxy，L1.f 起群聊开关、affect.enforce、瞥视预算），
-// 其余活值的快照指针不变；还没接通的字段在活值里
+// 其余活值的快照指针不变；只能重启的字段在活值里
 // 保持运行值（决定 9 的同一做法）；
-// 反馈如实列出已生效、需重启与尚未接通的键
+// 反馈如实列出已生效与需重启的键
 TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
 {
     ConfigReloader reloader(*store, *live);
@@ -343,7 +340,6 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
                                         "network.proxy"}));
     EXPECT_EQ(report.restartOnly,
               (std::vector<std::string>{"chat.worker_threads", "storage.conversation_database"}));
-    EXPECT_TRUE(report.notWired.empty());
 
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_NE(after.chat, before.chat);
@@ -629,7 +625,6 @@ TEST_F(ConfigReloaderFixture, ProxyChangeReachesModelSearchAndFetchTogether)
     ASSERT_TRUE(report.result.success);
     EXPECT_EQ(report.applied,
               (std::vector<std::string>{"web_search.enabled", "web_search.api_key", "network.proxy"}));
-    EXPECT_TRUE(report.notWired.empty());
     EXPECT_FALSE(live->webSearch.get()->enabled);
     EXPECT_TRUE(live->webSearch.get()->apiKey.empty());
     EXPECT_TRUE(live->webFetch.get()->enabled);
@@ -659,7 +654,6 @@ TEST_F(ConfigReloaderFixture, GroupChatEnforceAndGlanceBudgetApplyKeepingRunning
               (std::vector<std::string>{"bot.name", "bot.group_chat_enabled", "affect.enabled",
                                         "affect.policy", "affect.enforce", "glance.enabled",
                                         "glance.per_group_per_minute"}));
-    EXPECT_TRUE(report.notWired.empty());
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_FALSE(after.message->groupChatEnabled);
     EXPECT_EQ(after.message->bot.name, "Alice") << "bot.name 自 L2.d 起接通，MessageOptions 里同步";
@@ -686,7 +680,6 @@ TEST_F(ConfigReloaderFixture, AppliesChangedRowsOnceAfterPublishing)
         config["chat"]["temperature"] = 0.3;
         config["chat"]["presence_penalty"] = 0.8;
         config["chat"]["worker_threads"] = 3;
-        config["memory"] = {{"batch_turns", 4}};
     });
     const LiveSnapshots before = snapshotsOf(*live);
 
@@ -695,7 +688,6 @@ TEST_F(ConfigReloaderFixture, AppliesChangedRowsOnceAfterPublishing)
     ASSERT_TRUE(report.result.success);
     EXPECT_EQ(report.applied, (std::vector<std::string>{"chat.temperature", "chat.presence_penalty"}));
     EXPECT_EQ(report.restartOnly, (std::vector<std::string>{"chat.worker_threads"}));
-    EXPECT_EQ(report.notWired, (std::vector<std::string>{"memory.batch_turns"}));
     EXPECT_EQ(chatApplyCalls.load(), 1) << "同一个应用函数一次重载只调一次";
     EXPECT_EQ(voiceApplyCalls.load(), 0) << "没变化的行不应用";
 
@@ -709,9 +701,8 @@ TEST_F(ConfigReloaderFixture, AppliesChangedRowsOnceAfterPublishing)
     EXPECT_EQ(live->memory.get(), before.memory);
     EXPECT_EQ(live->message.get(), before.message);
     EXPECT_EQ(summarizeReload(report),
-              "配置已刷新：4 项变化，已生效 2 项。\n"
-              "需重启才能生效 1 项：chat.worker_threads。\n"
-              "尚未接通实时生效、需重启 1 项：memory.batch_turns。");
+              "配置已刷新：3 项变化，已生效 2 项。\n"
+              "需重启才能生效 1 项：chat.worker_threads。");
 
     // 文件没再变：第二次重载没有变化，不应用，活值不动
     const LiveSnapshots afterFirst = snapshotsOf(*live);

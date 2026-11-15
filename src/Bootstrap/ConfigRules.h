@@ -6,12 +6,11 @@
  * 比较哪个 Schema 字段、怎么生效。比较（compareConfig）、应用与反馈（ConfigReloader）、
  * 测试都遍历同一张表，档位只来自这里。新增配置键 = 表里加一行，并回答“怎么生效”。
  *
- * 生效方式只能由三个工厂产生（ConfigEffect 的构造函数是私有的）：
+ * 生效方式只能由两个工厂产生（ConfigEffect 的构造函数是私有的）：
  *   restart()       只能重启生效。档位 Restart，没有应用函数。
  *   applies(函数)   重载成功后调用该函数，把新值换进活值。档位 Dynamic。
  *                   参数是函数引用，传不了空指针：没有应用函数就造不出“实时生效”。
- *   notYet(原档位)  过渡期：这个键还没接通实时生效，保留改造前的档位，没有应用函数；
- *                   重载反馈里如实列为“尚未接通实时生效、需重启”。L2 结束时清零并删除。
+ * 档位 Rebuild 不再产生（枚举值保留，ConfigDiff 的对外形态不变）。
  *
  * 只有 Bootstrap、组合根、面板与测试包含本头文件（业务模块不得包含 Bootstrap/，
  * 由 tests/architecture_dependency_test.py 机检）。
@@ -33,8 +32,7 @@ public:
     enum class Kind
     {
         Restart, // restart()
-        Applies, // applies(函数)
-        NotYet   // notYet(原档位)，过渡期
+        Applies  // applies(函数)
     };
 
     constexpr Kind kind() const { return kindValue; }
@@ -54,7 +52,6 @@ private:
 
     friend constexpr ConfigEffect restart();
     friend constexpr ConfigEffect applies(ConfigApplyFunction &apply);
-    friend constexpr ConfigEffect notYet(ConfigChangeImpact current);
 };
 
 constexpr ConfigEffect restart()
@@ -67,18 +64,13 @@ constexpr ConfigEffect applies(ConfigApplyFunction &apply)
     return ConfigEffect(ConfigEffect::Kind::Applies, ConfigChangeImpact::Dynamic, &apply);
 }
 
-constexpr ConfigEffect notYet(ConfigChangeImpact current)
-{
-    return ConfigEffect(ConfigEffect::Kind::NotYet, current, nullptr);
-}
-
 // 比较函数：同一个字段在两份配置里是否不同
 using ConfigFieldChanged = bool(const SchemaConfig &current, const SchemaConfig &candidate);
 
 struct ConfigRule
 {
     const char *path;            // 差异条目与反馈里的路径（与改造前逐字相同）
-    ConfigEffect effect;         // restart() / applies(函数) / notYet(原档位)
+    ConfigEffect effect;         // restart() / applies(函数)
     ConfigFieldChanged *changed; // field<成员指针链>
 };
 
