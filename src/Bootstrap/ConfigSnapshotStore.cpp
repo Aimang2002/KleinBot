@@ -27,8 +27,11 @@ ConfigReloadResult ConfigSnapshotStore::reload()
     ConfigLoadResult loaded = loader.loadFile(path);
 
     ConfigReloadResult result;
+    // canStart() 要看诊断里有没有 Error/Fatal：必须在诊断移进结果之前判断，
+    // 否则能解析但不合格的候选也会被发布
+    const bool startable = loaded.canStart();
     result.diagnostics = std::move(loaded.diagnostics);
-    if (!loaded.canStart())
+    if (!startable)
     {
         result.snapshot = current();
         return result;

@@ -184,6 +184,52 @@ TEST_F(ConfigReloaderFixture, FailedReloadAppliesNothing)
     EXPECT_EQ(summarizeReload(report), "配置刷新失败，继续使用当前内存快照。");
 }
 
+// 能解析、但诊断里有 Error/Fatal 的候选同样校验不过：不发布、不应用、反馈失败
+TEST_F(ConfigReloaderFixture, ParsedButInvalidCandidateAppliesNothing)
+{
+    struct BadCandidate
+    {
+        const char *name;
+        std::function<void(nlohmann::json &)> breakIt;
+        ConfigSeverity severity;
+    };
+    const BadCandidate candidates[] = {
+        {"缺必填项", [](nlohmann::json &config) { config["bot"].erase("id"); },
+         ConfigSeverity::Fatal},
+        {"路径不以 / 开头",
+         [](nlohmann::json &config) { config["communication"]["transports"]["local"]["path"] = "onebot"; },
+         ConfigSeverity::Error},
+    };
+    ConfigReloader reloader(*store, *live, ruleTable(kApplyingRules));
+    for (const BadCandidate &bad : candidates)
+    {
+        writeEdited([&bad](nlohmann::json &config) {
+            config["chat"]["temperature"] = 0.3; // 带应用函数的行变了
+            bad.breakIt(config);
+        });
+        const std::shared_ptr<const ConfigSnapshot> snapshotBefore = store->current();
+        const LiveSnapshots before = snapshotsOf(*live);
+
+        const ConfigReloadReport report = reloader.reload();
+
+        EXPECT_FALSE(report.result.success) << bad.name;
+        bool found = false;
+        for (const ConfigDiagnostic &diagnostic : report.result.diagnostics)
+        {
+            if (diagnostic.severity == bad.severity)
+                found = true;
+        }
+        EXPECT_TRUE(found) << bad.name;
+        EXPECT_EQ(store->current(), snapshotBefore) << bad.name;
+        expectAllUnchanged(before, *live);
+        EXPECT_EQ(chatApplyCalls.load(), 0) << bad.name;
+        EXPECT_TRUE(report.applied.empty()) << bad.name;
+        EXPECT_TRUE(report.restartOnly.empty()) << bad.name;
+        EXPECT_TRUE(report.notWired.empty()) << bad.name;
+        EXPECT_EQ(summarizeReload(report), "配置刷新失败，继续使用当前内存快照。") << bad.name;
+    }
+}
+
 // 产品规则表（默认）还没有带应用函数的行：重载成功，所有活值的快照指针不变，
 // 反馈如实列出需重启与尚未接通的键
 TEST_F(ConfigReloaderFixture, ProductRulesApplyNothingAndKeepEveryLiveSnapshot)

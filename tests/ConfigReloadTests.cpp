@@ -325,6 +325,66 @@ TEST(ConfigSnapshotStoreTest, KeepsCurrentSnapshotWhenCandidateIsInvalid)
     EXPECT_FALSE(reloaded.diagnostics.empty());
 }
 
+// 能解析、但诊断里有 Error/Fatal 的候选同样不发布（2026-11-15 修复：此前 reload() 先把诊断
+// 移进结果再判 canStart()，这类候选会被发布）。诊断要与加载器给出的逐条相同
+namespace
+{
+void expectParsedCandidateRejected(const std::string &candidateText, ConfigSeverity severity,
+                                   const std::string &diagnosticPath)
+{
+    ConfigLoader loader;
+    const ConfigLoadResult initial = loader.loadText(validConfig);
+    ASSERT_TRUE(initial.canStart());
+
+    TemporaryConfigFile file;
+    file.write(candidateText);
+    const ConfigLoadResult expected = loader.loadFile(file.path.string());
+    ASSERT_NE(expected.config, nullptr) << "候选必须能解析，才走得到这一步";
+    ASSERT_FALSE(expected.canStart());
+
+    ConfigSnapshotStore store(file.path.string(), initial.config);
+    const std::shared_ptr<const ConfigSnapshot> before = store.current();
+    const ConfigReloadResult reloaded = store.reload();
+
+    EXPECT_FALSE(reloaded.success);
+    EXPECT_EQ(reloaded.snapshot, before);
+    EXPECT_EQ(store.current(), before);
+    EXPECT_TRUE(reloaded.diff.empty());
+    ASSERT_EQ(reloaded.diagnostics.size(), expected.diagnostics.size());
+    for (std::size_t index = 0; index < expected.diagnostics.size(); ++index)
+    {
+        EXPECT_EQ(reloaded.diagnostics[index].severity, expected.diagnostics[index].severity);
+        EXPECT_EQ(reloaded.diagnostics[index].category, expected.diagnostics[index].category);
+        EXPECT_EQ(reloaded.diagnostics[index].path, expected.diagnostics[index].path);
+        EXPECT_EQ(reloaded.diagnostics[index].message, expected.diagnostics[index].message);
+    }
+    bool found = false;
+    for (const ConfigDiagnostic &diagnostic : reloaded.diagnostics)
+    {
+        if (diagnostic.severity == severity && diagnostic.path == diagnosticPath)
+            found = true;
+    }
+    EXPECT_TRUE(found) << diagnosticPath;
+}
+}
+
+TEST(ConfigSnapshotStoreTest, KeepsCurrentSnapshotWhenParsedCandidateHasFatal)
+{
+    nlohmann::json candidate = nlohmann::json::parse(validConfig);
+    candidate["bot"]["group_chat_enabled"] = false; // 有变化：若被发布，差异不为空
+    candidate["bot"].erase("id");                   // 必填项缺失 → Fatal
+    expectParsedCandidateRejected(candidate.dump(), ConfigSeverity::Fatal, "bot.id");
+}
+
+TEST(ConfigSnapshotStoreTest, KeepsCurrentSnapshotWhenParsedCandidateHasError)
+{
+    nlohmann::json candidate = nlohmann::json::parse(validConfig);
+    candidate["bot"]["group_chat_enabled"] = false;
+    candidate["communication"]["transports"]["local"]["path"] = "onebot"; // 不以 / 开头 → Error
+    expectParsedCandidateRejected(candidate.dump(), ConfigSeverity::Error,
+                                  "communication.transports.local.path");
+}
+
 TEST(WebUiSchemaTest, MissingTokenEnvironmentDisablesPanelWithoutBlockingStartup)
 {
     // 面板令牌引用不存在的环境变量时应降级关闭面板，而不是以 Error 阻断启动
