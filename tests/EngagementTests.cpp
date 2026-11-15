@@ -1285,6 +1285,8 @@ public:
     {
         return webSearchUsageGuidance(scene, context);
     }
+    // 与 WebSearchAction 一样读开关（L2.a 稳定外壳：始终注册，开关决定是否开放）
+    bool available() const override { return enabled; }
     ToolResult execute(const std::string &args, const ToolContext &ctx) override
     {
         receivedArgs.push_back(args);
@@ -1294,8 +1296,45 @@ public:
 
     std::vector<std::string> receivedArgs;
     std::vector<ToolContext> receivedContexts;
+    bool enabled = true;
 };
 } // namespace
+
+// L2.a：联网工具始终注册、setTools 时开关关着也留在名单里；每轮开头按可用性再筛。
+// 关着的那一轮不给 schema、不提规则、情境之外调用也不执行；开关打开后下一轮即开放
+TEST(EngagementToolTest, WebSearchSwitchTakesEffectOnNextTurn)
+{
+    ToolRegistry registry;
+    auto search = std::make_unique<FakeWebSearchTool>();
+    FakeWebSearchTool *searchTool = search.get();
+    searchTool->enabled = false;
+    registry.registerTool(std::move(search));
+
+    Harness harness;
+    harness.service->setTools(&registry, {"klein_web_search"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "主持人lulu", harness.now);
+    ChatResponse searchCall;
+    searchCall.code = 200;
+    searchCall.finish_reason = "tool_calls";
+    searchCall.tool_calls.push_back({"ws-1", "klein_web_search", R"({"query":"lulu"})"});
+    harness.turnResponses.push_back(searchCall);
+    harness.service->runTurn(8823);
+
+    ASSERT_EQ(harness.agentSchemas.size(), 1U);
+    EXPECT_FALSE(schemasMention(harness.agentSchemas.front(), "klein_web_search"));
+    EXPECT_EQ(harness.agentContracts.front().find("不可信外部资料"), std::string::npos);
+    EXPECT_TRUE(searchTool->receivedArgs.empty()) << "关着时模型硬调也不执行";
+
+    searchTool->enabled = true;
+    harness.feed(8823, "lulu 又是谁", harness.now + 1);
+    harness.turnResponses.push_back(sayResponse("不认识"));
+    harness.service->runTurn(8823);
+
+    ASSERT_GE(harness.agentSchemas.size(), 2U);
+    EXPECT_TRUE(schemasMention(harness.agentSchemas.back(), "klein_web_search"));
+    EXPECT_NE(harness.agentContracts.back().find("不可信外部资料"), std::string::npos);
+}
 
 TEST(EngagementToolTest, WebSearchOfferedAndNoteAppendedWhenRegistered)
 {

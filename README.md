@@ -242,7 +242,8 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 - `voice.enabled`：改了就把语音总开关置为新值；之后管理员的 `#激活语音`、`#冻结语音` 还能再改，以最后一次为准。只改其他 `voice` 参数时总开关不动。
 - `voice.host`、`voice.port`、`voice.reference_audio`、`voice.reference_text`：下一次合成语音就用新参数。
 - `memory.model`（没写时跟着 `chat.default_model` 走）、`memory.batch_turns`、`memory.idle_minutes`、`memory.recall_limit`：后台提取最迟一两秒内按新的批次条件挑下一批、用新模型，召回从下一次起按新条数。`memory.enabled` 仍要重启。
-- `web_search`、`web_fetch` 除 `enabled`（以及 `web_search.provider`）以外的参数：下一次搜索、抓取就用新值；抓取缓存里已有的条目按存入时的有效期过期，条目上限在下一次存入时按新值淘汰。两个 `enabled` 与 `provider` 仍要重启；启动时没开的工具，参数改了也要等重启开启后才用得上。
+- `web_search.enabled`、`web_fetch.enabled`：打开后下一次对话（私聊、@ 回复、话题会话轮）的工具列表里就有联网搜索或网页抓取，关掉后下一次就没有（搜索打开但没配 `api_key` 时仍视为关闭）。
+- `web_search`、`web_fetch` 的其余参数（`web_search.provider` 除外，它仍要重启）：下一次搜索、抓取就用新值；抓取缓存里已有的条目按存入时的有效期过期，条目上限在下一次存入时按新值淘汰。
 - `network.proxy`：模型调用、联网搜索、网页抓取三处一起换，下一次请求就走新代理。
 - `bot.group_chat_enabled`：下一条群消息起按新开关处理。
 - `affect.enforce`：下一次群回应决策起按新值在影子期与生效期之间切换；`affect` 的另外三项仍要重启。

@@ -188,8 +188,8 @@ TEST(ConfigDiffTest, MemoryKeysAreDynamicExceptEnabled)
 }
 
 // 配置实时生效 L1.e：web_search（除 enabled、provider）、web_fetch（除 enabled）与 network.proxy
-// 接通应用，档位变为 Dynamic；两个 enabled 与 provider 尚未接通（仍为 Rebuild）
-TEST(ConfigDiffTest, WebSearchFetchAndProxyKeysAreDynamicExceptSwitchesAndProvider)
+// 接通应用，档位变为 Dynamic；L2.a 起两个 enabled 也接通；provider 只能重启（仍为 Rebuild）
+TEST(ConfigDiffTest, WebSearchFetchAndProxyKeysAreDynamicExceptProvider)
 {
     SchemaConfig current;
     SchemaConfig candidate = current;
@@ -215,10 +215,11 @@ TEST(ConfigDiffTest, WebSearchFetchAndProxyKeysAreDynamicExceptSwitchesAndProvid
     const ConfigDiff diff = compareConfig(current, candidate);
 
     EXPECT_EQ(diff.size(), 18U);
-    EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 15U);
-    EXPECT_EQ(diff.count(ConfigChangeImpact::Rebuild), 3U);
-    for (const char *path : {"web_search.enabled", "web_search.provider", "web_fetch.enabled"})
-        EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Rebuild)) << path;
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 17U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Rebuild), 1U);
+    EXPECT_TRUE(containsChange(diff, "web_search.provider", ConfigChangeImpact::Rebuild));
+    for (const char *path : {"web_search.enabled", "web_fetch.enabled"})
+        EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Dynamic)) << path;
     EXPECT_TRUE(containsChange(diff, "network.proxy", ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(diff, "web_search.endpoint", ConfigChangeImpact::Dynamic));
     EXPECT_TRUE(containsChange(diff, "web_fetch.cache_max_entries", ConfigChangeImpact::Dynamic));

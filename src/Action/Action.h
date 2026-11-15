@@ -39,6 +39,8 @@ public:
     virtual const ActionDescriptor &descriptor() const = 0;
     virtual ActionResult execute(const nlohmann::json &arguments,
                                  const ActionContext &context) = 0;
+    // 暴露为工具时当前是否可用（经 ActionTool::available 转出，语义同 Tool::available）
+    virtual bool available() const { return true; }
     // 暴露为工具时的使用规则（经 ActionTool::usageGuidance 转出，语义同 Tool::usageGuidance）
     virtual std::string usageGuidance(GuidanceScene, const GuidanceContext &) const { return {}; }
 };

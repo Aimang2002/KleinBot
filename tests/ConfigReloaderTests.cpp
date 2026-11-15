@@ -579,7 +579,7 @@ TEST_F(ConfigReloaderFixture, MemoryModelFollowsDefaultModelWhenNotConfigured)
 }
 
 // network.proxy（L1.e）：一个键作用于模型调用、搜索、抓取三处，应用函数同时换三个活值，
-// 每个只换 proxy；搜索与抓取的 enabled 还没接通，活值里保持运行值
+// 每个只换 proxy；搜索与抓取的 enabled（L2.a 起接通）跟着各自的组换成新值
 TEST_F(ConfigReloaderFixture, ProxyChangeReachesModelSearchAndFetchTogether)
 {
     ConfigReloader reloader(*store, *live);
@@ -594,12 +594,12 @@ TEST_F(ConfigReloaderFixture, ProxyChangeReachesModelSearchAndFetchTogether)
         });
     };
 
-    // 先把搜索、抓取的参数换成新值（代理还没配）
+    // 先把搜索、抓取的参数与开关换成新值（代理还没配）
     writeWeb("", true);
     ASSERT_TRUE(reloader.reload().result.success);
     EXPECT_EQ(live->webSearch.get()->maxResults, 7U);
-    EXPECT_FALSE(live->webSearch.get()->enabled) << "enabled 尚未接通：保持运行值";
-    EXPECT_FALSE(live->webFetch.get()->enabled);
+    EXPECT_TRUE(live->webSearch.get()->enabled);
+    EXPECT_TRUE(live->webFetch.get()->enabled);
     const LiveSnapshots before = snapshotsOf(*live);
 
     // 配上代理：三个活值一起换，其余字段不动
@@ -613,20 +613,23 @@ TEST_F(ConfigReloaderFixture, ProxyChangeReachesModelSearchAndFetchTogether)
     EXPECT_EQ(after.webFetch->proxy, "http://127.0.0.1:7890");
     EXPECT_EQ(after.webSearch->maxResults, 7U);
     EXPECT_EQ(after.webSearch->apiKey, "search-key");
-    EXPECT_FALSE(after.webSearch->enabled);
-    EXPECT_FALSE(after.webFetch->enabled);
+    EXPECT_TRUE(after.webSearch->enabled);
+    EXPECT_TRUE(after.webFetch->enabled);
     EXPECT_TRUE(before.webSearch->proxy.empty()) << "替换前取到的快照不变";
     EXPECT_EQ(after.chat, before.chat);
     EXPECT_EQ(after.memory, before.memory);
 
-    // 去掉代理、同时关掉搜索：代理三处一起清空；搜索开关尚未接通，如实列出、活值不动。
-    // 加载器只在搜索开着时读 api_key，关掉后 api_key 读成空，所以它也列为已生效
+    // 去掉代理、同时关掉搜索：代理三处一起清空，搜索开关关上（L2.a：工具随之不开放）。
+    // 加载器只在搜索开着时读 api_key，关掉后 api_key 读成空，与开关一起换进活值
     writeWeb("", false);
     report = reloader.reload();
     ASSERT_TRUE(report.result.success);
-    EXPECT_EQ(report.applied, (std::vector<std::string>{"web_search.api_key", "network.proxy"}));
-    EXPECT_EQ(report.notWired, (std::vector<std::string>{"web_search.enabled"}));
+    EXPECT_EQ(report.applied,
+              (std::vector<std::string>{"web_search.enabled", "web_search.api_key", "network.proxy"}));
+    EXPECT_TRUE(report.notWired.empty());
     EXPECT_FALSE(live->webSearch.get()->enabled);
+    EXPECT_TRUE(live->webSearch.get()->apiKey.empty());
+    EXPECT_TRUE(live->webFetch.get()->enabled);
     EXPECT_TRUE(live->dock.get()->proxy.empty());
     EXPECT_TRUE(live->webSearch.get()->proxy.empty());
     EXPECT_TRUE(live->webFetch.get()->proxy.empty());

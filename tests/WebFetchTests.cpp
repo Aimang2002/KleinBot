@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "Action/WebFetchAction.h"
+#include "Tool/ActionTool.h"
 #include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
 #include "WebFetch/HtmlTextExtractor.h"
@@ -130,6 +131,23 @@ TEST(WebFetchActionTest, ReturnsDirectContentWithMetadata)
     EXPECT_FALSE(result.terminal);
     EXPECT_TRUE(result.context_content.empty());
     EXPECT_EQ(fetch.fetchCount, 1);
+}
+
+// 配置实时生效（L2.a）：抓取工具始终注册，是否开放给模型看活值里的 enabled
+TEST(WebFetchActionTest, AvailabilityFollowsLiveEnabledSwitch)
+{
+    WebFetchOptions initial;
+    initial.enabled = true;
+    Live<WebFetchOptions> options(initial);
+    WebFetchAction action(options);
+    ActionTool tool(action);
+    EXPECT_TRUE(tool.available());
+
+    WebFetchOptions next = initial;
+    next.enabled = false;
+    options.set(next);
+    EXPECT_FALSE(action.available());
+    EXPECT_FALSE(tool.available());
 }
 
 TEST(WebFetchActionTest, RejectsInvalidUrlsBeforeAnyRequest)

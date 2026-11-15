@@ -28,6 +28,7 @@ public:
     std::string description() const override { return "fake"; }
     std::string parametersSchema() const override { return R"({"type":"object","properties":{}})"; }
     bool requiresAdmin() const override { return admin; }
+    bool available() const override { return isAvailable; }
 
     ToolResult execute(const std::string &args, const ToolContext &ctx) override
     {
@@ -38,6 +39,7 @@ public:
 
     std::vector<std::string> receivedArgs;
     std::vector<ToolContext> receivedContexts;
+    bool isAvailable = true;
 
 private:
     std::string toolName;
@@ -526,6 +528,56 @@ TEST_F(ToolLoopTest, OfferedFilterAndNoKnownToolStop)
         EXPECT_EQ(history[3].content, "错误：未知工具 hidden");
         EXPECT_EQ(openTool->receivedArgs.size(), 1u);
         EXPECT_TRUE(hidden->receivedArgs.empty());
+    }
+}
+
+// L2.a：注册了但当前不可用的工具（Tool::available，如关掉的联网工具）按“未开放”拒绝，
+// 不执行；开放名单里有它也一样（重载可能在两趟之间把它关掉）。注册表列名字时也不含它
+TEST_F(ToolLoopTest, UnavailableToolIsRejectedAsNotOfferedEvenWhenListed)
+{
+    FakeTool *web = addTool("web", [](const std::string &, const ToolContext &)
+                            { return textResult("不该执行"); });
+    web->isAvailable = false;
+    EXPECT_TRUE(registry.names().empty());
+    EXPECT_TRUE(registry.allSchemas().empty());
+
+    // 对话路径的形态：没有开放名单
+    {
+        ScriptedModel model({textResponse("好")});
+        ToolLoopHooks hooks;
+        hooks.request = model.fn();
+        std::vector<ChatMessage> history = freshHistory();
+        const ToolLoopResult result =
+            runToolLoop(history, toolResponse({call("1", "web")}), &registry, context, hooks);
+        EXPECT_EQ(result.stop, ToolLoopStop::Completed);
+        ASSERT_EQ(history.size(), 3u);
+        EXPECT_EQ(history[2].content, "错误：未知工具 web");
+    }
+    // 会话轮的形态：开放名单里点了名，仍按未开放处理，且不算“已知工具”
+    {
+        ScriptedModel model(std::vector<ChatResponse>{});
+        ToolLoopHooks hooks;
+        hooks.request = model.fn();
+        hooks.requireToolCallsFinishReason = false;
+        hooks.offered = [](const std::string &name) { return name == "web"; };
+        hooks.stopWhenNoKnownTool = true;
+        std::vector<ChatMessage> history = freshHistory();
+        const ToolLoopResult result =
+            runToolLoop(history, toolResponse({call("1", "web")}), &registry, context, hooks);
+        EXPECT_EQ(result.stop, ToolLoopStop::NoKnownTool);
+        EXPECT_EQ(model.calls(), 0u);
+    }
+    EXPECT_TRUE(web->receivedArgs.empty());
+
+    // 重新可用：下一次就执行
+    web->isAvailable = true;
+    {
+        ScriptedModel model({textResponse("好")});
+        ToolLoopHooks hooks;
+        hooks.request = model.fn();
+        std::vector<ChatMessage> history = freshHistory();
+        runToolLoop(history, toolResponse({call("1", "web")}), &registry, context, hooks);
+        EXPECT_EQ(web->receivedArgs.size(), 1u);
     }
 }
 

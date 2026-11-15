@@ -152,6 +152,7 @@ public:
     // klein_web_search / klein_web_fetch；契约追加开放工具自带的 GroupTurn 使用规则）：
     // tools 由组合根持有、须比本服务活得久；allowedNames 当场过滤——未注册或
     // requiresAdmin() 的名字丢弃并告警（L3 护栏：管理员工具永不开放给会话轮）。
+    // 名单里当前不可用的工具（Tool::available）留在名单里，每轮开头按可用性再筛一次。
     // 工具的出站消息直接投递到群并经 OutboundRecorder 入库。不调用 = 无注册表
     // 工具，会话轮 prompt 与工具表与此前一致
     void setTools(const ToolRegistry *tools, std::vector<std::string> allowedNames);

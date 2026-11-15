@@ -57,23 +57,20 @@ void applyMemory(LiveSettings &live, const RuntimeSettings &next)
     live.memory.set(std::move(memory));
 }
 
-// web_search：enabled 决定是否构造搜索对象（L2.a 前未接通），provider 决定构造哪一种实现
-// （只能重启），两者保持运行值；其余参数换成新值（proxy 与 network.proxy 同值）
+// web_search：provider 决定构造哪一种搜索实现（只能重启），保持运行值；enabled 与其余参数
+// 换成新值（proxy 与 network.proxy 同值）。enabled 决定搜索工具是否对模型开放
+// （WebSearchAction::available）：关掉时加载阶段不解析密钥、api_key 为空，工具也随之不开放
 void applyWebSearch(LiveSettings &live, const RuntimeSettings &next)
 {
-    const Live<WebSearchOptions>::Snapshot running = live.webSearch.get();
     WebSearchOptions webSearch = next.webSearch;
-    webSearch.enabled = running->enabled;
-    webSearch.provider = running->provider;
+    webSearch.provider = live.webSearch.get()->provider;
     live.webSearch.set(std::move(webSearch));
 }
 
-// web_fetch：enabled 决定是否构造抓取对象（L2.a 前未接通），保持运行值；其余参数换成新值
+// web_fetch：整份替换；enabled 决定抓取工具是否对模型开放（WebFetchAction::available）
 void applyWebFetch(LiveSettings &live, const RuntimeSettings &next)
 {
-    WebFetchOptions webFetch = next.webFetch;
-    webFetch.enabled = live.webFetch.get()->enabled;
-    live.webFetch.set(std::move(webFetch));
+    live.webFetch.set(next.webFetch);
 }
 
 // bot.group_chat_enabled：MessageOptions 里只换群聊开关；bot 身份保持运行值（决定 9：
@@ -189,9 +186,9 @@ constexpr ConfigRule kProductRules[] = {
     {"glance.enabled",              notYet(Restart),     field<&SchemaConfig::glance, &GlanceSchema::enabled>},
     {"glance.per_group_per_minute", applies(applyGlance), field<&SchemaConfig::glance, &GlanceSchema::perGroupPerMinute>},
 
-    // web_search：enabled 到 L2.a 才接通；provider 决定构造哪一种搜索实现，只能重启生效，
-    // 档位保持改造前的 Rebuild
-    {"web_search.enabled",            notYet(Rebuild),         field<&SchemaConfig::webSearch, &WebSearchSchema::enabled>},
+    // web_search：enabled 决定工具是否开放（对象始终构造、始终注册）；provider 决定构造哪一种
+    // 搜索实现，只能重启生效，档位保持改造前的 Rebuild
+    {"web_search.enabled",            applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::enabled>},
     {"web_search.provider",           notYet(Rebuild),         field<&SchemaConfig::webSearch, &WebSearchSchema::provider>},
     {"web_search.endpoint",           applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::endpoint>},
     {"web_search.api_key",            applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::apiKey>},
@@ -202,8 +199,8 @@ constexpr ConfigRule kProductRules[] = {
     {"web_search.connect_timeout_ms", applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::connectTimeoutMs>},
     {"web_search.request_timeout_ms", applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::requestTimeoutMs>},
 
-    // web_fetch：enabled 到 L2.a 才接通
-    {"web_fetch.enabled",            notYet(Rebuild),        field<&SchemaConfig::webFetch, &WebFetchSchema::enabled>},
+    // web_fetch：enabled 决定工具是否开放（对象始终构造、始终注册）
+    {"web_fetch.enabled",            applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::enabled>},
     {"web_fetch.max_content_chars",  applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::maxContentChars>},
     {"web_fetch.max_response_bytes", applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::maxResponseBytes>},
     {"web_fetch.connect_timeout_ms", applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::connectTimeoutMs>},

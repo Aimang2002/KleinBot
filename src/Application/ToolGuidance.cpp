@@ -59,7 +59,7 @@ std::string composeToolGuidance(const ToolRegistry &tools, const std::vector<std
         if (!contains(offeredNames, name))
             return {};
         const Tool *tool = tools.find(name);
-        if (tool == nullptr)
+        if (tool == nullptr || !tool->available())
             return {};
         std::string text = tool->usageGuidance(scene, context);
         if (text.empty() || contains(emitted, text))

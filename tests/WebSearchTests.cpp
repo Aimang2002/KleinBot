@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "Action/WebSearchAction.h"
+#include "Tool/ActionTool.h"
 #include "Port/ToolNames.h"
 #include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
@@ -151,6 +152,29 @@ TEST(WebSearchActionTest, NextExecutionUsesReplacedLimits)
     const nlohmann::json after = nlohmann::json::parse(action.execute(arguments, {}).content);
     EXPECT_EQ(provider.lastRequest.maxResults, 2U);
     EXPECT_EQ(after.at("results").at(0).at("content"), "ab…");
+}
+
+// 配置实时生效（L2.a）：搜索工具始终注册，是否开放给模型看活值里的 enabled，
+// 经 ActionTool 转出；开关一换，下一次问就是新值
+TEST(WebSearchActionTest, AvailabilityFollowsLiveEnabledSwitch)
+{
+    FakeSearchProvider provider;
+    WebSearchOptions initial;
+    initial.enabled = false;
+    Live<WebSearchOptions> options(initial);
+    WebSearchAction action(provider, options);
+    ActionTool tool(action);
+    EXPECT_FALSE(action.available());
+    EXPECT_FALSE(tool.available());
+
+    WebSearchOptions next = initial;
+    next.enabled = true;
+    options.set(next);
+    EXPECT_TRUE(action.available());
+    EXPECT_TRUE(tool.available());
+
+    options.set(initial);
+    EXPECT_FALSE(tool.available());
 }
 
 // 配置实时生效（L1.e）：TavilySearchProvider 每次搜索开头取一份快照，端点、密钥、

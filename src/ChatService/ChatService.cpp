@@ -71,23 +71,17 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
     // 按固定顺序组装：生产工具集下与此前手写的规则文本逐字节一致（system 前缀缓存稳定）
     // 计划收窄（R1.c）：工具表、使用规则与下方工具循环的开放名单用同一份过滤结果
     //（规则不提没开放的工具，免得诱导调用后被拒、白耗一趟工具轮）
-    std::vector<std::string> offeredToolNames;
+    // 可用工具（Tool::available，如联网工具的启用开关）在这里取一次，工具表与使用规则用同一份
+    std::vector<std::string> offeredToolNames = this->tools.names();
     if (constraints != nullptr)
-    {
-        offeredToolNames = filterToolNames(this->tools.names(), constraints->toolPolicy,
+        offeredToolNames = filterToolNames(offeredToolNames, constraints->toolPolicy,
                                            constraints->allowedTools);
-        bundle.request.tools.clear();
-        for (const std::string &name : offeredToolNames)
-            if (const std::optional<std::string> schema = this->tools.schemaFor(name))
-                bundle.request.tools.push_back(*schema);
-    }
-    else
-    {
-        bundle.request.tools = this->tools.allSchemas();
-    }
+    bundle.request.tools.clear();
+    for (const std::string &name : offeredToolNames)
+        if (const std::optional<std::string> schema = this->tools.schemaFor(name))
+            bundle.request.tools.push_back(*schema);
     bundle.request.system_prompt += composeToolGuidance(
-        this->tools, constraints != nullptr ? offeredToolNames : this->tools.names(),
-        GuidanceScene::Conversation, {currentLocalDateIso()});
+        this->tools, offeredToolNames, GuidanceScene::Conversation, {currentLocalDateIso()});
     if (imageRoute == CurrentImageRoute::NativeMultimodal)
     {
         // 每轮互斥的路由指令必须注入消息尾部而不是 system：

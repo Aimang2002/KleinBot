@@ -36,6 +36,8 @@ public:
     const ActionDescriptor &descriptor() const override;
     ActionResult execute(const nlohmann::json &arguments,
                          const ActionContext &context) override;
+    // web_fetch.enabled 是活值：关掉后工具仍注册，只是不对模型开放（ADR-023 稳定外壳）
+    bool available() const override { return options.get()->enabled; }
     std::string usageGuidance(GuidanceScene scene, const GuidanceContext &) const override
     {
         return webFetchUsageGuidance(scene);

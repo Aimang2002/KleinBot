@@ -790,12 +790,9 @@ void EngagementService::runTurn(std::uint64_t groupId)
     if (recallAvailable)
         schemas.push_back(kRecallSchema);
     // 注册表工具（setTools 开放的工具，如 inspect_image/generate_image）排在会话工具之后；
-    // 未 setTools 时工具表与契约与此前逐字节一致
-    const auto isTurnTool = [this](const std::string &name)
-    {
-        return tools != nullptr &&
-               std::find(turnToolNames.begin(), turnToolNames.end(), name) != turnToolNames.end();
-    };
+    // 未 setTools 时工具表与契约与此前逐字节一致。名单里当前不可用的工具（Tool::available，
+    // 如关掉的联网工具）这一轮不开放：schemaFor 不给它，工具表、使用规则、情境卡与工具循环
+    // 都只认这里得到的 offeredToolNames
     std::vector<std::string> offeredToolNames;
     if (tools != nullptr)
     {
@@ -930,7 +927,11 @@ void EngagementService::runTurn(std::uint64_t groupId)
                    enforcedToolNames.end();
         };
     else
-        hooks.offered = isTurnTool;
+        hooks.offered = [&offeredToolNames](const std::string &name)
+        {
+            return std::find(offeredToolNames.begin(), offeredToolNames.end(), name) !=
+                   offeredToolNames.end();
+        };
     hooks.stopWhenNoKnownTool = true;
     // user_id=0：会话轮没有个人语境，图片解析只看本群 24h 群库；参数先归一化
     hooks.normalizeExecutionArguments = true;

@@ -47,7 +47,8 @@ TEST(ConfigRulesTest, PathsAreUniqueAndEveryRowIsComplete)
 // L1.a：chat 组除 top_p 与 worker_threads 外的 6 个；L1.b：models 的三个端点各 4 个字段；
 // L1.c：voice 的 5 个键（开关与合成参数）；L1.d：memory 除 enabled 外的 4 个；
 // L1.e：web_search 除 enabled、provider 外的 8 个，web_fetch 除 enabled 外的 6 个，network.proxy；
-// L1.f：群聊开关、affect.enforce、瞥视预算
+// L1.f：群聊开关、affect.enforce、瞥视预算；
+// L2.a：web_search.enabled、web_fetch.enabled
 TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
 {
     std::vector<std::string> wired;
@@ -77,15 +78,15 @@ TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
         "memory.model", "memory.batch_turns", "memory.idle_minutes", "memory.recall_limit",
         // L1.f
         "affect.enforce", "glance.per_group_per_minute",
-        // L1.e
-        "web_search.endpoint", "web_search.api_key", "web_search.search_depth",
+        // L2.a 与 L1.e
+        "web_search.enabled", "web_search.endpoint", "web_search.api_key", "web_search.search_depth",
         "web_search.max_results", "web_search.max_content_chars", "web_search.max_response_bytes",
         "web_search.connect_timeout_ms", "web_search.request_timeout_ms",
-        "web_fetch.max_content_chars", "web_fetch.max_response_bytes", "web_fetch.connect_timeout_ms",
+        "web_fetch.enabled", "web_fetch.max_content_chars", "web_fetch.max_response_bytes", "web_fetch.connect_timeout_ms",
         "web_fetch.request_timeout_ms", "web_fetch.cache_ttl_seconds", "web_fetch.cache_max_entries",
         "network.proxy",
     };
-    EXPECT_EQ(wired.size(), 45U);
+    EXPECT_EQ(wired.size(), 47U);
     EXPECT_EQ(wired, expected);
 }
 

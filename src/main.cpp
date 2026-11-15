@@ -430,9 +430,6 @@ int main(int argc, char **argv)
 	userSession.setImageAssetStore(&imageAssetStore);
 	if (settings.bot.managerId != 0)
 		userSession.ensureUserExists(settings.bot.managerId);
-	std::unique_ptr<SearchProvider> webSearchProvider;
-	std::unique_ptr<WebSearchAction> webSearchAction;
-	std::unique_ptr<WebFetchAction> webFetchAction;
 	ToolRegistry tools;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
@@ -453,39 +450,36 @@ int main(int argc, char **argv)
 			}
 			return summarizeReload(report);
 		});
-	// 搜索与抓取：是否构造、用哪种搜索实现仍按启动值（enabled 到 L2.a，provider 只能重启）；
-	// 构造出来的对象持活值，其余参数与代理改了下一次调用即用新值
-	if (settings.webSearch.enabled)
-	{
-		webSearchProvider = std::make_unique<TavilySearchProvider>(liveSettings.webSearch, &running);
-		webSearchAction = std::make_unique<WebSearchAction>(*webSearchProvider, liveSettings.webSearch);
-		tools.registerTool(std::make_unique<ActionTool>(*webSearchAction));
-		LOG_INFO("联网搜索工具已启用，Provider：" + settings.webSearch.provider);
-	}
-	if (settings.webFetch.enabled)
-	{
-		// 超长正文走默认小模型做"按问题摘录"，失败时 Action 自动降级为截断；
-		// 默认模型每次摘录时从活值现取（ADR-023），重载后下一次摘录即用新值
-		webFetchAction = std::make_unique<WebFetchAction>(
-			liveSettings.webFetch, &running, WebFetchAction::HttpGet{},
-				[&dock, &models, &liveSettings](const std::string &prompt)
-				{
-					const std::string distillModel = liveSettings.chat.get()->defaultModel;
-					const std::optional<ChatModel> modelPtr = models.find(distillModel);
-					if (!modelPtr)
-						return std::string{};
-					ChatRequest request;
-					request.system_prompt = "你是网页内容提取器，只输出与问题相关的原文摘录。";
-					request.history.push_back({"user", prompt});
-					const ChatResponse response =
-						dock.RequestChat(*modelPtr, distillModel, request);
-				if (response.cancelled || response.code != 200)
-					return std::string{};
-				return response.content;
-			});
-		tools.registerTool(std::make_unique<ActionTool>(*webFetchAction));
-		LOG_INFO("网页抓取工具已启用");
-	}
+	// 搜索与抓取（ADR-023 稳定外壳）：对象始终构造、工具始终注册，是否对模型开放看各自活值里的
+	// enabled（Tool::available）；web_search.enabled、web_fetch.enabled 改了下一次请求即生效。
+	// 搜索实现目前只有 Tavily（web_search.provider 只能重启；不是 tavily 时加载阶段已把 enabled
+	// 置为假）。其余参数与代理改了下一次调用即用新值
+	TavilySearchProvider webSearchProvider(liveSettings.webSearch, &running);
+	WebSearchAction webSearchAction(webSearchProvider, liveSettings.webSearch);
+	tools.registerTool(std::make_unique<ActionTool>(webSearchAction));
+	LOG_INFO(std::string("联网搜索工具") + (settings.webSearch.enabled ? "已启用" : "未启用") +
+	         "，Provider：" + settings.webSearch.provider);
+	// 超长正文走默认小模型做"按问题摘录"，失败时 Action 自动降级为截断；
+	// 默认模型每次摘录时从活值现取（ADR-023），重载后下一次摘录即用新值
+	WebFetchAction webFetchAction(
+		liveSettings.webFetch, &running, WebFetchAction::HttpGet{},
+		[&dock, &models, &liveSettings](const std::string &prompt)
+		{
+			const std::string distillModel = liveSettings.chat.get()->defaultModel;
+			const std::optional<ChatModel> modelPtr = models.find(distillModel);
+			if (!modelPtr)
+				return std::string{};
+			ChatRequest request;
+			request.system_prompt = "你是网页内容提取器，只输出与问题相关的原文摘录。";
+			request.history.push_back({"user", prompt});
+			const ChatResponse response =
+				dock.RequestChat(*modelPtr, distillModel, request);
+			if (response.cancelled || response.code != 200)
+				return std::string{};
+			return response.content;
+		});
+	tools.registerTool(std::make_unique<ActionTool>(webFetchAction));
+	LOG_INFO(std::string("网页抓取工具") + (settings.webFetch.enabled ? "已启用" : "未启用"));
 	// 专用模型端点（ModelEndpointResolver）：每次调用时先从活值取 models.vision/drawing/
 	// worker 的配置（重载后下一次调用即用新值），再按注册表解析——只填注册名即可，
 	// 注册表热重载即时生效；全配形态原样直连。
@@ -510,13 +504,13 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<ActionTool>(listRemindersAction));
 	tools.registerTool(std::make_unique<ActionTool>(cancelReminderAction));
 	std::string registeredTools;
-	for (const std::string &toolName : tools.names())
+	for (const std::string &toolName : tools.registeredNames())
 	{
 		if (!registeredTools.empty())
 			registeredTools += ", ";
 		registeredTools += toolName;
 	}
-	LOG_INFO("已注册模型工具：" + registeredTools);
+	LOG_INFO("已注册模型工具（含当前未启用的）：" + registeredTools);
 	ChatService chatService(dock, userSession, models, tools, memoryService, liveSettings.chat,
 							settings.bot.managerId);
 	// 杂务模型调用 seam：话题会话（压缩/情绪基调）与 judge 共用一份。模型按名字经注册表在
@@ -702,8 +696,8 @@ int main(int argc, char **argv)
 	// 会话轮可用的注册表工具：群友发图时她能经 inspect_image 看图本身，
 	// 而不止占位符里的瞥视一句话（2026-10-30 真机缺陷）；点名让她画图/重发图时
 	// generate_image/send_image 的图当场发到群里（生图存群库）。看不懂的人名/梗/事件
-	// 可经 klein_web_search/klein_web_fetch 查（2026-10-31：先看懂再开口）；联网未配置时
-	// 未注册，setTools 丢弃并告警。管理员工具由 setTools 过滤
+	// 可经 klein_web_search/klein_web_fetch 查（2026-10-31：先看懂再开口）；联网工具始终注册，
+	// 关着时那一轮不开放（Tool::available）。管理员工具由 setTools 过滤
 	engagementService.setTools(&tools, {KleinInspectImageToolName, KleinGenerateImageToolName, KleinSendImageToolName,
 		KleinWebSearchToolName, KleinWebFetchToolName});
 	// 工具出站图入群缓冲：占位符与 @ 路径（Message::dispatch）一致

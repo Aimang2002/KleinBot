@@ -16,14 +16,22 @@ bool isLocalTool(const ToolLoopHooks &hooks, const std::string &name)
                hooks.localToolNames.end();
 }
 
-// 本循环能处理的调用：本地工具，或开放给本循环的注册表工具
+// 注册表工具当前是否可用（Tool::available）：重载可能在两趟之间把它关掉
+bool registryToolAvailable(const ToolRegistry *tools, const std::string &name)
+{
+    const Tool *tool = tools != nullptr ? tools->find(name) : nullptr;
+    return tool == nullptr || tool->available();
+}
+
+// 本循环能处理的调用：本地工具，或开放给本循环且当前可用的注册表工具
 bool isKnownTool(const ToolLoopHooks &hooks, const ToolRegistry *tools, const std::string &name)
 {
     if (isLocalTool(hooks, name))
         return true;
     if (hooks.offered)
-        return hooks.offered(name);
-    return tools != nullptr && tools->find(name) != nullptr;
+        return hooks.offered(name) && registryToolAvailable(tools, name);
+    const Tool *tool = tools != nullptr ? tools->find(name) : nullptr;
+    return tool != nullptr && tool->available();
 }
 
 bool wantsTools(const ChatResponse &response, const ToolLoopHooks &hooks)
@@ -60,7 +68,8 @@ ToolResult executeCall(const ResponseToolCall &call, const ToolRegistry *tools,
         return hooks.runLocalTool(call);
     }
 
-    if (hooks.offered && !hooks.offered(call.name))
+    // 未开放给本循环，或注册了但当前不可用（Tool::available），一律按“未开放”拒绝
+    if ((hooks.offered && !hooks.offered(call.name)) || !registryToolAvailable(tools, call.name))
     {
         path = CallPath::NotOffered;
         result.model_content = "错误：未知工具 " + call.name;

@@ -23,6 +23,7 @@
 #include "Tool/ToolRegistry.h"
 #include "WebSearch/SearchProvider.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -157,7 +158,8 @@ private:
     std::function<std::string(GuidanceScene)> guidance;
 };
 
-// 与 main.cpp 相同的注册顺序（组装顺序与注册顺序无关，由 composeToolGuidance 的布局决定）
+// 与 main.cpp 相同的注册顺序（组装顺序与注册顺序无关，由 composeToolGuidance 的布局决定）。
+// 联网两个工具与 main.cpp 一样始终注册（L2.a 稳定外壳），withWeb 只决定它们的活值开关
 class ProductionTools
 {
 public:
@@ -174,11 +176,9 @@ public:
           listReminders(reminderService),
           cancelReminder(reminderService)
     {
-        if (withWeb)
-        {
-            registry.registerTool(std::make_unique<ActionTool>(webSearch));
-            registry.registerTool(std::make_unique<ActionTool>(webFetch));
-        }
+        setWebEnabled(withWeb);
+        registry.registerTool(std::make_unique<ActionTool>(webSearch));
+        registry.registerTool(std::make_unique<ActionTool>(webFetch));
         registry.registerTool(std::make_unique<GetTimeTool>());
         registry.registerTool(std::make_unique<ActionTool>(currentModel));
         registry.registerTool(std::make_unique<GuidanceStubTool>(
@@ -199,6 +199,17 @@ public:
     }
 
     bool ready() const { return !directory.path().empty(); }
+
+    // 与配置重载的应用函数同一做法：整份替换活值
+    void setWebEnabled(bool enabled)
+    {
+        WebSearchOptions search = *webSearchOptions.get();
+        search.enabled = enabled;
+        webSearchOptions.set(search);
+        WebFetchOptions fetch = *webFetchOptions.get();
+        fetch.enabled = enabled;
+        webFetchOptions.set(fetch);
+    }
 
     TemporaryDirectory directory;
     Live<DockOptions> network{DockOptions{}};
@@ -243,6 +254,43 @@ TEST(ToolGuidanceTest, ConversationMatchesPreRefactorTextWithoutOptionalTools)
     EXPECT_EQ(composeToolGuidance(tools.registry, tools.registry.names(), GuidanceScene::Conversation,
                                   kContext),
               std::string(kGoldenConversationCore));
+}
+
+// L2.a：联网工具始终注册，开关是活值。同一个注册表，开关一换，下一次列名字与组装的规则
+// 就分别等于“启用”和“关闭”两种状态的金样；工具表（allSchemas）同步
+TEST(ToolGuidanceTest, WebSwitchesFlipGuidanceAndSchemasOnSameRegistry)
+{
+    ProductionTools tools(true, true);
+    ASSERT_TRUE(tools.ready());
+    const std::string enabled = std::string(kGoldenConversationCore) +
+                                goldenConversationWebSearch("2026-10-31") +
+                                kGoldenConversationWebFetch + kGoldenConversationReminder;
+    const std::string disabled = std::string(kGoldenConversationCore) + kGoldenConversationReminder;
+    const auto contains = [](const std::vector<std::string> &values, const std::string &value)
+    { return std::find(values.begin(), values.end(), value) != values.end(); };
+    const std::size_t allTools = tools.registry.registeredNames().size();
+
+    tools.setWebEnabled(false);
+    EXPECT_EQ(composeToolGuidance(tools.registry, tools.registry.names(), GuidanceScene::Conversation,
+                                  kContext),
+              disabled);
+    EXPECT_FALSE(contains(tools.registry.names(), "klein_web_search"));
+    EXPECT_FALSE(contains(tools.registry.names(), "klein_web_fetch"));
+    EXPECT_EQ(tools.registry.allSchemas().size(), allTools - 2);
+    EXPECT_FALSE(tools.registry.schemaFor("klein_web_search").has_value());
+    EXPECT_NE(tools.registry.find("klein_web_search"), nullptr) << "仍注册着，只是不开放";
+    // 开放名单里点了名也不提：规则只给当前可用的工具
+    EXPECT_EQ(composeToolGuidance(tools.registry, {"klein_web_search", "klein_web_fetch"},
+                                  GuidanceScene::GroupTurn, kContext),
+              "");
+
+    tools.setWebEnabled(true);
+    EXPECT_EQ(composeToolGuidance(tools.registry, tools.registry.names(), GuidanceScene::Conversation,
+                                  kContext),
+              enabled);
+    EXPECT_TRUE(contains(tools.registry.names(), "klein_web_search"));
+    EXPECT_EQ(tools.registry.allSchemas().size(), allTools);
+    EXPECT_TRUE(tools.registry.schemaFor("klein_web_fetch").has_value());
 }
 
 TEST(ToolGuidanceTest, ConversationWebToolsCarryRuntimeDateAnchor)
