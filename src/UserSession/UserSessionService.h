@@ -13,10 +13,19 @@
 #include "../Application/BotIdentity.h"
 #include "../ChatService/ChatOptions.h"
 #include "../Port/ChatRequest.h"
+#include "../utils/Live.h"
 
 class ConversationStore;
 class MemoryService;
 class ImageAssetStore;
+
+// 这个用户现在用哪个模型：手动选过（#切换模型）用自己选的，没选过跟随当前默认模型
+// （用户定规 2026-11-15：默认模型改了老用户跟）。解析用户模型的唯一实现，
+// 请求装配与查询当前模型（#查询模型 / get_current_model）都经它
+inline std::string resolveModelName(const Person &person, const ChatOptions &chat)
+{
+    return person.current_model.value_or(chat.defaultModel);
+}
 
 struct ChatCallBundle
 {
@@ -36,8 +45,9 @@ public:
     // soulFile：默认人格文件，用户无持久化人格时读取；文件缺失/为空时
     // 退回内置默认 "你是<bot.name>，部署者的AI助手。"
     // soul.md 原文直接作为 system prompt（人格编译链路已于 2026-09-18 移除）
+    // chat：活值（ADR-023），每次操作开头取一份快照，重载后下一次操作即用新值
     UserSessionService(const ModelRegistry &mr, ConversationStore &store, const BotIdentity &bot,
-                       const ChatOptions &chat, const std::string &soulFile = "source/soul.md");
+                       const Live<ChatOptions> &chat, const std::string &soulFile = "source/soul.md");
     void setMemoryService(MemoryService *service);
     void setImageAssetStore(ImageAssetStore *store);
     void ensureUserExists(const uint64_t user_id);
@@ -54,6 +64,7 @@ public:
     void resetChat(const uint64_t user_id);
     // 彻底重置（#重置上下文）：内存、SQLite 原始历史、长期记忆和图片资源全删
     void resetContext(const uint64_t user_id);
+    // 当前生效的模型名（resolveModelName）：手动选过的，或当前默认模型
     std::string getModelName(uint64_t user_id);
     void setPersonality(const uint64_t user_id, const std::string &Personality);
     void resetPersonality(const uint64_t user_id);
@@ -90,7 +101,7 @@ private:
     std::string loadSoulFallback() const;
     const ModelRegistry &registry;
     BotIdentity botIdentity;
-    ChatOptions chatOptions;
+    const Live<ChatOptions> &chatOptions;
     std::string soul_file;
     ConversationStore &store;
     MemoryService *memoryService = nullptr;

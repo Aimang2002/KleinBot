@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -88,6 +89,54 @@ bool startsWith(const std::string &text, const std::string &prefix)
     return text.compare(0, prefix.size(), prefix) == 0;
 }
 
+// 按脚本回复的假主模型：记下每次请求用的模型名。toolCallFirst 时第一次回复一个未注册
+// 工具的调用（工具循环会带着错误结果再请求一次），并在这次模型调用期间执行 duringFirstCall
+// （模拟回复进行中发生了重载）；其余回复固定“好的”
+class ScriptedChatPort final : public LLMPort
+{
+public:
+    ScriptedChatPort(std::vector<std::string> *models, bool toolCallFirst,
+                     std::function<void()> duringFirstCall = {})
+        : models(models), toolCallFirst(toolCallFirst), duringFirstCall(std::move(duringFirstCall))
+    {
+    }
+
+    ChatResponse request_chat(const ChatModel &, const std::string &modelName, const ChatRequest &) override
+    {
+        models->push_back(modelName);
+        ChatResponse response;
+        response.code = 200;
+        if (models->size() == 1)
+        {
+            if (duringFirstCall)
+                duringFirstCall();
+            if (toolCallFirst)
+            {
+                response.finish_reason = "tool_calls";
+                response.tool_calls.push_back({"call-1", "no_such_tool", "{}"});
+                return response;
+            }
+        }
+        response.content = "好的";
+        response.finish_reason = "stop";
+        return response;
+    }
+    VisionResponse request_vision(const ChatModel &, const std::string &, const std::string &,
+                                  const std::string &) override
+    {
+        return {};
+    }
+    ImageResponse request_image(const ChatModel &, const std::string &, const std::string &) override
+    {
+        return {};
+    }
+
+private:
+    std::vector<std::string> *models;
+    bool toolCallFirst;
+    std::function<void()> duringFirstCall;
+};
+
 // ChatService 私聊链路夹具：Fake 主模型 + 关闭的长期记忆 + 空工具表 + 临时库
 struct PrivateChatFixture
 {
@@ -96,8 +145,9 @@ struct PrivateChatFixture
           registry(writeRegistry()),
           dock(DockOptions{}),
           memory(directory.path() + "/conversation.db", store, dock, registry, memoryOptions()),
-          session(registry, store, bot, chatOptions()),
-          chat(dock, session, registry, tools, memory, chatOptions(), 1)
+          liveChat(chatOptions()),
+          session(registry, store, bot, liveChat),
+          chat(dock, session, registry, tools, memory, liveChat, 1)
     {
         dock.registerStandard("Fake", std::make_unique<FakeChatPort>(&captured));
     }
@@ -107,7 +157,7 @@ struct PrivateChatFixture
     std::string writeRegistry()
     {
         const std::string path = directory.path() + "/models.json";
-        std::ofstream(path) << R"({"Models":[{"ModelName":["test-model"],"api_key":"k",)"
+        std::ofstream(path) << R"({"Models":[{"ModelName":["test-model","next-model"],"api_key":"k",)"
                                R"("api_endpoint":"https://example.test/chat","APIStandard":"Fake"}]})";
         return path;
     }
@@ -142,6 +192,7 @@ struct PrivateChatFixture
     Dock dock;
     MemoryService memory;
     BotIdentity bot;
+    Live<ChatOptions> liveChat;
     UserSessionService session;
     ToolRegistry tools;
     ChatService chat;
@@ -306,4 +357,48 @@ TEST(ChatServiceDigestTest, ReplyInCharacterIgnoresDigestAndAnchor)
     auto bundle = fixture.session.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
     EXPECT_FALSE(bundle->evicted_lines.empty());
+}
+
+// 配置实时生效 L1.a：ChatService 与 UserSessionService 共用同一个 chat 活值。一次回复开头
+// 取的快照管到这次回复结束：模型调用期间重载换了默认模型，这次回复工具轮之后的请求仍用
+// 原模型；下一次回复改用新的默认模型（该用户没手动选过模型）
+TEST(ChatServiceLiveConfigTest, ReloadDuringReplyKeepsItsModelNextReplyFollows)
+{
+    PrivateChatFixture fixture;
+    std::vector<std::string> models;
+    ChatOptions reloaded = PrivateChatFixture::chatOptions();
+    reloaded.defaultModel = "next-model";
+    fixture.dock.registerStandard(
+        "Fake", std::make_unique<ScriptedChatPort>(&models, true, [&fixture, reloaded]() {
+            fixture.liveChat.set(reloaded);
+        }));
+
+    const ChatReply first = fixture.chat.reply(10, "第一句");
+    EXPECT_EQ(first.text, "好的");
+    ASSERT_EQ(models.size(), 2U) << "一次工具轮：两次模型请求";
+    EXPECT_EQ(models[0], "test-model");
+    EXPECT_EQ(models[1], "test-model") << "重载发生在回复进行中，这次回复不换模型";
+
+    const ChatReply second = fixture.chat.reply(10, "第二句");
+    EXPECT_EQ(second.text, "好的");
+    ASSERT_EQ(models.size(), 3U);
+    EXPECT_EQ(models[2], "next-model");
+}
+
+// 杂务回退（buildOnce，worker 端点未配置时用默认模型）同样在每次调用开头取默认模型
+TEST(ChatServiceLiveConfigTest, BuildOnceFallsBackToTheCurrentDefaultModel)
+{
+    PrivateChatFixture fixture;
+    std::vector<std::string> models;
+    fixture.dock.registerStandard("Fake", std::make_unique<ScriptedChatPort>(&models, false));
+
+    EXPECT_EQ(fixture.chat.buildOnce("系统", "问题"), "好的");
+    ChatOptions reloaded = PrivateChatFixture::chatOptions();
+    reloaded.defaultModel = "next-model";
+    fixture.liveChat.set(reloaded);
+    EXPECT_EQ(fixture.chat.buildOnce("系统", "问题"), "好的");
+
+    ASSERT_EQ(models.size(), 2U);
+    EXPECT_EQ(models[0], "test-model");
+    EXPECT_EQ(models[1], "next-model");
 }

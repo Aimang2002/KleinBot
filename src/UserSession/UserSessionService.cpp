@@ -32,7 +32,7 @@ const char *const kServiceContractFrame =
 }
 
 UserSessionService::UserSessionService(const ModelRegistry &mr, ConversationStore &store,
-                                       const BotIdentity &bot, const ChatOptions &chat,
+                                       const BotIdentity &bot, const Live<ChatOptions> &chat,
                                        const std::string &soulFile)
     : registry(mr), botIdentity(bot), chatOptions(chat),
       default_personality("你是" + bot.name + "，部署者的AI助手。"),
@@ -60,11 +60,8 @@ Person UserSessionService::createDefaultPerson(const uint64_t user_id)
     person.system_prompt = this->store.loadPersona(user_id);
     if (person.system_prompt.empty())
         person.system_prompt = this->loadSoulFallback();
-    person.current_model = chatOptions.defaultModel;
+    // 模型不在这里复制：current_model 留空 = 跟随默认模型，见 resolveModelName
     person.isOpenVoiceMode = false;
-    person.temperature = chatOptions.temperature;
-    person.frequency_penalty = chatOptions.frequencyPenalty;
-    person.presence_penalty = chatOptions.presencePenalty;
 
     return person;
 }
@@ -161,10 +158,10 @@ void UserSessionService::resetContext(const uint64_t user_id)
 
 std::string UserSessionService::getModelName(uint64_t user_id)
 {
+    const Live<ChatOptions>::Snapshot chat = this->chatOptions.get();
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
-    auto res = this->user_messages->find(user_id);
-    return res->second.current_model;
+    return resolveModelName(this->user_messages->find(user_id)->second, *chat);
 }
 
 void UserSessionService::setPersonality(const uint64_t user_id, const std::string &Personality)
@@ -293,30 +290,32 @@ std::string UserSessionService::getContextDigest(uint64_t user_id)
 std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_t &user_id,
                                                                    bool trimWindow)
 {
+    // 本次装配用的配置快照：模型解析、采样参数、存活时间都取这一份（ADR-023）。
+    // 在业务锁外取，活值的锁不与 mutex_message 嵌套
+    const Live<ChatOptions>::Snapshot chat = this->chatOptions.get();
     std::lock_guard<std::mutex> locker(this->mutex_message);
     this->ensureUserExistsUnlock(user_id);
     Person &p = this->user_messages->find(user_id)->second;
 
     // 模型查找：找不到直接返回 nullopt，让上层报错
-    std::optional<ChatModel> model = registry.find(p.current_model);
+    const std::string modelName = resolveModelName(p, *chat);
+    std::optional<ChatModel> model = registry.find(modelName);
     if (!model)
     {
-        LOG_ERROR("模型未注册：" + p.current_model);
+        LOG_ERROR("模型未注册：" + modelName);
         return std::nullopt;
     }
 
     ChatCallBundle result;
     result.model = std::move(*model);
-    result.model_name = p.current_model;
+    result.model_name = modelName;
 
     // 超参数 + system_prompt：人格 + 服务契约（契约总是包裹在人格外层，含自定义人格）
-    // 采样参数跟随配置实时值（而非建用户时的快照）：改配置+重启后对所有用户生效，
-    // 温度/惩罚项是全局口味，不该被用户创建时刻的旧值钉死。用户级覆盖位保留字段
-    // （person.temperature 等），待未来出现独立调参入口时再启用
+    // 采样参数取本次快照：温度/惩罚项是全局口味，重载后下一次请求即对所有用户生效
     result.request.system_prompt = p.system_prompt + kServiceContractFrame;
-    result.request.temperature = this->chatOptions.temperature;
-    result.request.frequency_penalty = this->chatOptions.frequencyPenalty;
-    result.request.presence_penalty = this->chatOptions.presencePenalty;
+    result.request.temperature = chat->temperature;
+    result.request.frequency_penalty = chat->frequencyPenalty;
+    result.request.presence_penalty = chat->presencePenalty;
 
     // ===== 上下文窗口裁切（token 水位 + 滚动摘要，2026-11-08） =====
     //   1. 丢弃超过存活时间的旧消息（仅在缓存已冷的场景生效，
@@ -333,7 +332,7 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
     //      交杂务模型合并进 Person::context_digest（不在锁内调模型）
     // 注意：裁切不回写 user_chatHistory，原始历史保持完整
     const time_t now = std::time(nullptr);
-    const time_t survival = chatOptions.messageSurvivalSeconds;
+    const time_t survival = chat->messageSurvivalSeconds;
 
     std::vector<ChatMessage> filtered;
     filtered.reserve(p.user_chatHistory.size());

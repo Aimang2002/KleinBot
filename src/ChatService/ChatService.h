@@ -10,6 +10,7 @@
 #include "../Port/OutboundMessage.h"
 #include "../Port/ChatRequest.h"
 #include "../Application/ContextDigest.h"
+#include "../utils/Live.h"
 #include <optional>
 #include <string>
 #include <vector>
@@ -27,9 +28,10 @@ struct ChatReply
 class ChatService
 {
 public:
+    // chatConfig：活值（ADR-023），每次操作开头取一份快照，重载后下一次操作即用新值
     ChatService(Dock &dock, UserSessionService &USS, const ModelRegistry &models,
                 const ToolRegistry &tools, MemoryService &memoryService,
-                const ChatOptions &chatConfig, uint64_t managerId)
+                const Live<ChatOptions> &chatConfig, uint64_t managerId)
         : dock(dock), userSession(USS), models(models), tools(tools), memoryService(memoryService),
           chatConfig(chatConfig), managerId(managerId) {}
     // situationNote：单轮情境注记（如新朋友第一句话），追加在 system prompt 内——
@@ -82,7 +84,7 @@ private:
     const ModelRegistry &models;
     const ToolRegistry &tools;
     MemoryService &memoryService;
-    ChatOptions chatConfig;
+    const Live<ChatOptions> &chatConfig;
     uint64_t managerId;
     DigestWorker digestWorker;
 

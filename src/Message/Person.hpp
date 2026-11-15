@@ -6,6 +6,7 @@
 #include <string>
 #include <ctime>
 #include <cstdint>
+#include <optional>
 
 struct TimestampedMessage
 {
@@ -35,12 +36,11 @@ struct Person
 
     // 会话设定
     std::string system_prompt;
-    double temperature = 0.7;       // 温度
-    double frequency_penalty = 0.0; // 频率惩罚
-    double presence_penalty = 0.0;  // 存在惩罚
 
-    // 用户当前模型
-    std::string current_model;
+    // 用户手动选的模型（#切换模型）；空 = 没选过，跟随当前默认模型 chat.default_model
+    // （用户定规 2026-11-15：默认模型改了老用户跟）。实际用哪个模型一律经
+    // resolveModelName（UserSessionService.h）解析。只在内存，重启即空
+    std::optional<std::string> current_model;
 
     // 其他信息
     bool isOpenVoiceMode = false; // 是否开启语音模式，默认为否

@@ -382,7 +382,8 @@ TEST_F(PanelServerFixture, PostInvalidConfigReturns422AndKeepsFile)
 }
 
 // 面板保存走注入的“重载并应用”入口（ADR-023）：换一张带 applies 行的小表注入，
-// 保存后对应活值被替换；返回给前端的字段与档位仍来自产品规则表，与改造前相同
+// 保存后对应活值被替换；返回给前端的字段不变，diff 与 counts 来自产品规则表
+// （chat.temperature 自 L1.a 起接通实时生效，档位为 dynamic）
 namespace
 {
 void applyChatForPanelTest(LiveSettings &live, const RuntimeSettings &next)
@@ -423,8 +424,9 @@ TEST_F(PanelServerFixture, PostConfigReloadsThroughInjectedReloader)
         EXPECT_TRUE(body["reloadSuccess"].get<bool>());
         ASSERT_EQ(body["diff"].size(), 1U);
         EXPECT_EQ(body["diff"][0]["path"], "chat.temperature");
-        EXPECT_EQ(body["diff"][0]["impact"], "rebuild");
-        EXPECT_EQ(body["counts"]["rebuild"], 1);
+        EXPECT_EQ(body["diff"][0]["impact"], "dynamic");
+        EXPECT_EQ(body["counts"]["dynamic"], 1);
+        EXPECT_EQ(body["counts"]["rebuild"], 0);
     }
     const Live<ChatOptions>::Snapshot after = live->chat.get();
     EXPECT_NE(after, before);

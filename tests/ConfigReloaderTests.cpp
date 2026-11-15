@@ -5,6 +5,9 @@
 #include "Bootstrap/ConfigSnapshotStore.h"
 #include "Bootstrap/LiveSettings.h"
 #include "Configuration/ConfigLoader.h"
+#include "ModelRegistry/ModelRegistry.h"
+#include "Persistence/ConversationStore.h"
+#include "UserSession/UserSessionService.h"
 
 #include <atomic>
 #include <chrono>
@@ -12,6 +15,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -230,9 +234,9 @@ TEST_F(ConfigReloaderFixture, ParsedButInvalidCandidateAppliesNothing)
     }
 }
 
-// 产品规则表（默认）还没有带应用函数的行：重载成功，所有活值的快照指针不变，
-// 反馈如实列出需重启与尚未接通的键
-TEST_F(ConfigReloaderFixture, ProductRulesApplyNothingAndKeepEveryLiveSnapshot)
+// 产品规则表（默认）：只有接通的行把新值换进活值（L1.a 起是 chat 组 6 个键），
+// 其余活值的快照指针不变；反馈如实列出已生效、需重启与尚未接通的键
+TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
 {
     ConfigReloader reloader(*store, *live);
     writeEdited([](nlohmann::json &config) {
@@ -250,18 +254,70 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyNothingAndKeepEveryLiveSnapshot)
     ASSERT_TRUE(report.result.success);
     EXPECT_EQ(report.result.diff.size(), 8U);
     EXPECT_EQ(store->current(), report.result.snapshot);
-    expectAllUnchanged(before, *live);
-    EXPECT_TRUE(report.applied.empty());
+    EXPECT_EQ(report.applied, (std::vector<std::string>{"chat.temperature"}));
     EXPECT_EQ(report.restartOnly,
               (std::vector<std::string>{"chat.worker_threads", "storage.conversation_database"}));
     EXPECT_EQ(report.notWired,
-              (std::vector<std::string>{"bot.group_chat_enabled", "chat.temperature", "voice.enabled",
-                                        "voice.host", "voice.port", "network.proxy"}));
+              (std::vector<std::string>{"bot.group_chat_enabled", "voice.enabled", "voice.host",
+                                        "voice.port", "network.proxy"}));
+
+    const LiveSnapshots after = snapshotsOf(*live);
+    EXPECT_NE(after.chat, before.chat);
+    EXPECT_DOUBLE_EQ(after.chat->temperature, 0.3);
+    EXPECT_DOUBLE_EQ(before.chat->temperature, 1.0) << "替换前取到的快照不变";
+    EXPECT_EQ(after.models, before.models);
+    EXPECT_EQ(after.voice, before.voice);
+    EXPECT_EQ(after.memory, before.memory);
+    EXPECT_EQ(after.webSearch, before.webSearch);
+    EXPECT_EQ(after.webFetch, before.webFetch);
+    EXPECT_EQ(after.dock, before.dock);
+    EXPECT_EQ(after.glance, before.glance);
+    EXPECT_EQ(after.message, before.message);
     EXPECT_EQ(summarizeReload(report),
-              "配置已刷新：8 项变化，已生效 0 项。\n"
+              "配置已刷新：8 项变化，已生效 1 项。\n"
               "需重启才能生效 2 项：chat.worker_threads、storage.conversation_database。\n"
-              "尚未接通实时生效、需重启 6 项：bot.group_chat_enabled、chat.temperature、"
-              "voice.enabled、voice.host、voice.port、network.proxy。");
+              "尚未接通实时生效、需重启 5 项：bot.group_chat_enabled、voice.enabled、voice.host、"
+              "voice.port、network.proxy。");
+}
+
+// 端到端（L1.a）：真实的重载入口 + 产品规则表 + 持活值的 UserSessionService。
+// 同时改一个接通的 chat 键与只能重启的 chat.worker_threads：模块下一次装配请求就用新温度，
+// 重载前装配好的请求不变；反馈里已生效 1 项、需重启 1 项
+TEST_F(ConfigReloaderFixture, ReloadedChatKeyReachesUserSessionOnNextRequest)
+{
+    const std::filesystem::path directory =
+        path.parent_path() / (path.stem().string() + "-module");
+    std::filesystem::create_directories(directory);
+    const std::string registryPath = (directory / "models.json").string();
+    std::ofstream(registryPath) << R"({"Models":[{"ModelName":["test-model"],"api_key":"k",)"
+                                   R"("api_endpoint":"https://example.test/chat","APIStandard":"OpenAI"}]})";
+    {
+        ModelRegistry registry(registryPath);
+        ConversationStore conversations((directory / "conversation.db").string());
+        UserSessionService session(registry, conversations, BotIdentity{}, live->chat);
+        ConfigReloader reloader(*store, *live);
+
+        const std::optional<ChatCallBundle> before = session.buildChatRequest(10);
+        ASSERT_TRUE(before.has_value());
+        EXPECT_DOUBLE_EQ(before->request.temperature, 1.0);
+
+        writeEdited([](nlohmann::json &config) {
+            config["chat"]["temperature"] = 0.3;
+            config["chat"]["worker_threads"] = 3;
+        });
+        const ConfigReloadReport report = reloader.reload();
+
+        ASSERT_TRUE(report.result.success);
+        const std::optional<ChatCallBundle> after = session.buildChatRequest(10);
+        ASSERT_TRUE(after.has_value());
+        EXPECT_DOUBLE_EQ(after->request.temperature, 0.3);
+        EXPECT_DOUBLE_EQ(before->request.temperature, 1.0) << "重载前装配好的请求不受影响";
+        EXPECT_EQ(summarizeReload(report),
+                  "配置已刷新：2 项变化，已生效 1 项。\n"
+                  "需重启才能生效 1 项：chat.worker_threads。");
+    }
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
 }
 
 // 带应用函数的行：新快照发布之后换进活值，同一个应用函数只调一次；

@@ -13,8 +13,10 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <regex>
 #include <sqlite3.h>
 #include <string>
@@ -126,7 +128,8 @@ TEST(UserSessionContractTest, ServiceContractWrapsPersonaAndCustomPersona)
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
-    UserSessionService session(registry, store, bot, options);
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
 
     // 默认人格（测试目录无 soul.md → 内置兜底）在前，契约追加在后
     session.ensureUserExists(10);
@@ -160,7 +163,8 @@ TEST(UserSessionFirstContactTest, ReportsTrueOnlyOncePerUser)
     ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
     ChatOptions options;
     BotIdentity bot;
-    UserSessionService session(registry, store, bot, options);
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
 
     // 进程内每用户只报一次首次接触，用户之间互不影响
     EXPECT_TRUE(session.takeFirstContact(10));
@@ -181,8 +185,9 @@ TEST(UserSessionFirstContactTest, ChatHistoryPersistsForEveryUser)
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
+    Live<ChatOptions> liveChat(options);
 
-    UserSessionService session(registry, store, bot, options);
+    UserSessionService session(registry, store, bot, liveChat);
     EXPECT_FALSE(session.hasChatHistory(30001));
     session.appendMessage(30001, "user", "你好，收到请回答");
     session.appendMessage(30001, "assistant", "你好呀");
@@ -190,7 +195,7 @@ TEST(UserSessionFirstContactTest, ChatHistoryPersistsForEveryUser)
     EXPECT_FALSE(session.hasChatHistory(30002));
 
     // 冷启动：重建服务实例，历史从 SQLite 读回，上下文跨重启保留
-    UserSessionService reloaded(registry, store, bot, options);
+    UserSessionService reloaded(registry, store, bot, liveChat);
     EXPECT_TRUE(reloaded.hasChatHistory(30001));
     EXPECT_FALSE(reloaded.hasChatHistory(30002));
 }
@@ -231,7 +236,8 @@ TEST(UserSessionContextBoundaryTest, RequestOnlyContextStaysOutOfPersistedHistor
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
-    UserSessionService session(registry, store, bot, options);
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
 
     const std::string userText = "这张图什么意思？";
     const std::string groupContext = "[群聊背景]\nA: 深渊开了\nB: 红莲扰动 400";
@@ -292,7 +298,8 @@ TEST(UserSessionWindowTest, KeepsHistoryHeadStableUntilHighWatermark)
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
-    UserSessionService session(registry, store, bot, options);
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
     const std::size_t unit = UserSessionService::kContextHighTokens / 10;
     ASSERT_EQ(UserSessionService::kContextLowTokens, unit * 5);
 
@@ -351,7 +358,8 @@ TEST(UserSessionWindowTest, AnchorMovesToNextUserMessage)
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
-    UserSessionService session(registry, store, bot, options);
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
     const std::size_t unit = UserSessionService::kContextLowTokens / 4;
 
     for (int i = 1; i <= 9; ++i)
@@ -374,7 +382,8 @@ TEST(UserSessionWindowTest, DigestCountsTowardWatermarkAndFollowsResetSemantics)
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
-    UserSessionService session(registry, store, bot, options);
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
     const std::size_t unit = UserSessionService::kContextHighTokens / 10;
 
     for (int i = 1; i <= 10; ++i)
@@ -416,7 +425,8 @@ TEST(UserSessionWindowTest, BuildWithoutTrimLeavesAnchorForNextReply)
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
-    UserSessionService session(registry, store, bot, options);
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
     const std::size_t unit = UserSessionService::kContextHighTokens / 10;
 
     for (int i = 1; i <= 11; ++i)
@@ -441,12 +451,13 @@ TEST(UserSessionWindowTest, DropsExpiredMessagesOnColdStartLoad)
     options.defaultModel = "test-model";
     options.messageSurvivalSeconds = 3600;
     BotIdentity bot;
+    Live<ChatOptions> liveChat(options);
 
     const time_t now = std::time(nullptr);
     store.append(10, "user", "过期消息", now - 7200);
     store.append(10, "assistant", "存活消息", now);
 
-    UserSessionService session(registry, store, bot, options);
+    UserSessionService session(registry, store, bot, liveChat);
     auto bundle = session.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
     EXPECT_EQ(bundle->request.history.size(), 1U);
@@ -489,9 +500,10 @@ TEST(UserSessionWindowTest, LightResetClearsWindowKeepsHistoryAndPersistsAcrossR
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
+    Live<ChatOptions> liveChat(options);
 
     {
-        UserSessionService session(registry, store, bot, options);
+        UserSessionService session(registry, store, bot, liveChat);
         session.appendMessage(10, "user", "旧话题提问");
         session.appendMessage(10, "assistant", "旧话题回答");
         session.resetChat(10);
@@ -519,7 +531,7 @@ TEST(UserSessionWindowTest, LightResetClearsWindowKeepsHistoryAndPersistsAcrossR
     }
 
     // 模拟重启：新实例冷启动只加载起点之后的消息，旧话题不会复活
-    UserSessionService restarted(registry, store, bot, options);
+    UserSessionService restarted(registry, store, bot, liveChat);
     auto bundle = restarted.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
     EXPECT_TRUE(bundle->request.history.empty());
@@ -534,8 +546,9 @@ TEST(UserSessionWindowTest, HeavyResetClearsBoundaryAndAllHistory)
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
+    Live<ChatOptions> liveChat(options);
 
-    UserSessionService session(registry, store, bot, options);
+    UserSessionService session(registry, store, bot, liveChat);
     session.appendMessage(10, "user", "第一轮");
     session.resetChat(10);
     session.appendMessage(10, "user", "第二轮");
@@ -544,7 +557,7 @@ TEST(UserSessionWindowTest, HeavyResetClearsBoundaryAndAllHistory)
     EXPECT_TRUE(store.loadAll(10).empty());
     EXPECT_EQ(store.contextStartId(10), 0);
 
-    UserSessionService restarted(registry, store, bot, options);
+    UserSessionService restarted(registry, store, bot, liveChat);
     auto bundle = restarted.buildChatRequest(10);
     ASSERT_TRUE(bundle.has_value());
     EXPECT_TRUE(bundle->request.history.empty());
@@ -578,6 +591,7 @@ TEST(UserSessionWindowTest, PersonaPersistsAcrossRestartAndResetRestoresSoulFile
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
+    Live<ChatOptions> liveChat(options);
 
     const std::string soulPath = temporaryDirectory.path() + "/soul.md";
     {
@@ -587,24 +601,24 @@ TEST(UserSessionWindowTest, PersonaPersistsAcrossRestartAndResetRestoresSoulFile
 
     // 无持久化人格时回退 soul.md（首尾空白被裁掉）
     {
-        UserSessionService session(registry, store, bot, options, soulPath);
+        UserSessionService session(registry, store, bot, liveChat, soulPath);
         EXPECT_EQ(session.getUserConfig(10).system_prompt, "默认人格正文");
     }
 
     // #设置人格 落库，重启后恢复
     {
-        UserSessionService session(registry, store, bot, options, soulPath);
+        UserSessionService session(registry, store, bot, liveChat, soulPath);
         session.setPersonality(10, "自定义人格");
         EXPECT_EQ(session.getUserConfig(10).system_prompt, "自定义人格");
     }
     {
-        UserSessionService restarted(registry, store, bot, options, soulPath);
+        UserSessionService restarted(registry, store, bot, liveChat, soulPath);
         EXPECT_EQ(restarted.getUserConfig(10).system_prompt, "自定义人格");
     }
 
     // #人格还原 清掉持久化并重读 soul.md
     {
-        UserSessionService session(registry, store, bot, options, soulPath);
+        UserSessionService session(registry, store, bot, liveChat, soulPath);
         session.resetPersonality(10);
         EXPECT_EQ(session.getUserConfig(10).system_prompt, "默认人格正文");
     }
@@ -612,14 +626,14 @@ TEST(UserSessionWindowTest, PersonaPersistsAcrossRestartAndResetRestoresSoulFile
 
     // 彻底重置删历史但保留人格
     {
-        UserSessionService session(registry, store, bot, options, soulPath);
+        UserSessionService session(registry, store, bot, liveChat, soulPath);
         session.setPersonality(10, "保留我");
         session.appendMessage(10, "user", "内容");
         session.resetContext(10);
         EXPECT_EQ(session.getUserConfig(10).system_prompt, "保留我");
     }
     {
-        UserSessionService restarted(registry, store, bot, options, soulPath);
+        UserSessionService restarted(registry, store, bot, liveChat, soulPath);
         EXPECT_EQ(restarted.getUserConfig(10).system_prompt, "保留我");
     }
 }
@@ -632,11 +646,123 @@ TEST(UserSessionWindowTest, MissingSoulFileFallsBackToBuiltinDefault)
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
+    Live<ChatOptions> liveChat(options);
 
-    UserSessionService session(registry, store, bot, options,
+    UserSessionService session(registry, store, bot, liveChat,
                                temporaryDirectory.path() + "/no-such-soul.md");
     EXPECT_EQ(session.getUserConfig(10).system_prompt,
               "你是Klein，部署者的AI助手。");
+}
+
+// 配置实时生效 L1.a：chat 组持活值（ADR-023）。换进新快照后，下一次装配请求就用新的
+// 采样参数与存活时间；换之前已经装配好的请求不变（一次操作只用自己开头取的那份）
+TEST(UserSessionLiveConfigTest, NextRequestUsesReloadedSamplingAndSurvival)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    options.temperature = 0.9;
+    options.frequencyPenalty = 0.1;
+    options.presencePenalty = 0.2;
+    options.messageSurvivalSeconds = 3600;
+    BotIdentity bot;
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
+
+    // 两分钟前的一条（冷启动读回）+ 刚说的一条
+    store.append(10, "user", "两分钟前的话", std::time(nullptr) - 120);
+    session.appendMessage(10, "user", "刚说的话");
+
+    const std::optional<ChatCallBundle> before = session.buildChatRequest(10);
+    ASSERT_TRUE(before.has_value());
+    EXPECT_DOUBLE_EQ(before->request.temperature, 0.9);
+    EXPECT_DOUBLE_EQ(before->request.frequency_penalty, 0.1);
+    EXPECT_DOUBLE_EQ(before->request.presence_penalty, 0.2);
+    EXPECT_EQ(before->request.history.size(), 2U);
+
+    ChatOptions reloaded = options;
+    reloaded.temperature = 0.3;
+    reloaded.frequencyPenalty = 0.4;
+    reloaded.presencePenalty = 0.5;
+    reloaded.messageSurvivalSeconds = 60; // 两分钟前那条从此过期
+    liveChat.set(reloaded);
+
+    const std::optional<ChatCallBundle> after = session.buildChatRequest(10);
+    ASSERT_TRUE(after.has_value());
+    EXPECT_DOUBLE_EQ(after->request.temperature, 0.3);
+    EXPECT_DOUBLE_EQ(after->request.frequency_penalty, 0.4);
+    EXPECT_DOUBLE_EQ(after->request.presence_penalty, 0.5);
+    ASSERT_EQ(after->request.history.size(), 1U);
+    EXPECT_EQ(after->request.history[0].content, "刚说的话");
+    EXPECT_DOUBLE_EQ(before->request.temperature, 0.9) << "换之前装配好的请求不受影响";
+    EXPECT_EQ(before->request.history.size(), 2U);
+}
+
+// 默认模型跟随（用户定规 2026-11-15：默认模型改了老用户跟）：没手动选过模型的用户——
+// 包括默认模型改动之前就已存在的——跟着当前默认模型走；#切换模型 选过的保持自己的选择
+TEST(UserSessionLiveConfigTest, UsersWithoutManualChoiceFollowTheDefaultModel)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    const std::string registryPath = temporaryDirectory.path() + "/models.json";
+    std::ofstream(registryPath) << R"({"Models":[{"ModelName":["old-default","new-default","manual-pick"],)"
+                                   R"("api_key":"key","api_endpoint":"https://example.test/chat",)"
+                                   R"("APIStandard":"OpenAI"}]})";
+    ModelRegistry registry(registryPath);
+    ChatOptions options;
+    options.defaultModel = "old-default";
+    BotIdentity bot;
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
+
+    session.ensureUserExists(10);           // 老用户：改默认模型之前就已存在
+    session.switchModel(20, "manual-pick"); // 手动选过
+    EXPECT_FALSE(session.getUserConfig(10).current_model.has_value()) << "没选过 = 空";
+    EXPECT_EQ(session.getModelName(10), "old-default");
+    EXPECT_EQ(session.getModelName(20), "manual-pick");
+    const std::optional<ChatCallBundle> beforeReload = session.buildChatRequest(10);
+    ASSERT_TRUE(beforeReload.has_value());
+    EXPECT_EQ(beforeReload->model_name, "old-default");
+
+    ChatOptions reloaded = options;
+    reloaded.defaultModel = "new-default";
+    liveChat.set(reloaded);
+
+    EXPECT_EQ(session.getModelName(10), "new-default");
+    EXPECT_EQ(session.getModelName(30), "new-default") << "新用户同样用当前默认模型";
+    EXPECT_EQ(session.getModelName(20), "manual-pick");
+    const std::optional<ChatCallBundle> follower = session.buildChatRequest(10);
+    ASSERT_TRUE(follower.has_value());
+    EXPECT_EQ(follower->model_name, "new-default");
+    const std::optional<ChatCallBundle> chooser = session.buildChatRequest(20);
+    ASSERT_TRUE(chooser.has_value());
+    EXPECT_EQ(chooser->model_name, "manual-pick");
+}
+
+// 新默认模型不在注册表里：沿用原有的报错路径——跟随默认的用户装配请求返回空
+// （ChatService 回“当前模型未注册”），查询当前模型照实给出这个名字；手动选过的不受影响
+TEST(UserSessionLiveConfigTest, UnregisteredDefaultModelKeepsTheExistingErrorPath)
+{
+    TemporaryDirectory temporaryDirectory;
+    ConversationStore store(temporaryDirectory.path() + "/conversation.db");
+    ModelRegistry registry(writeModelRegistryFile(temporaryDirectory.path()));
+    ChatOptions options;
+    options.defaultModel = "test-model";
+    BotIdentity bot;
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
+    session.switchModel(20, "test-model");
+    ASSERT_TRUE(session.buildChatRequest(10).has_value());
+
+    ChatOptions reloaded = options;
+    reloaded.defaultModel = "missing-model";
+    liveChat.set(reloaded);
+
+    EXPECT_EQ(session.getModelName(10), "missing-model");
+    EXPECT_FALSE(session.buildChatRequest(10).has_value());
+    EXPECT_TRUE(session.buildChatRequest(20).has_value());
 }
 
 TEST(ResetCommandsIntegrationTest, MapsTriggersToLightAndHeavyResets)
@@ -647,7 +773,8 @@ TEST(ResetCommandsIntegrationTest, MapsTriggersToLightAndHeavyResets)
     ChatOptions options;
     options.defaultModel = "test-model";
     BotIdentity bot;
-    UserSessionService session(registry, store, bot, options);
+    Live<ChatOptions> liveChat(options);
+    UserSessionService session(registry, store, bot, liveChat);
 
     ResetChatCommand light(session);
     ResetContextCommand heavy(session);

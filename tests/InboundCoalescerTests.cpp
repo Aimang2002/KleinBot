@@ -284,8 +284,9 @@ struct PrivateMessageFixture
           registry(writeRegistry()),
           dock(DockOptions{}),
           memory(directory.path() + "/conversation.db", store, dock, registry, memoryOptions()),
-          session(registry, store, bot, chatOptions()),
-          chat(dock, session, registry, tools, memory, chatOptions(), 1),
+          liveChat(chatOptions()),
+          session(registry, store, bot, liveChat),
+          chat(dock, session, registry, tools, memory, liveChat, 1),
           assets(directory.path() + "/assets.db", directory.path() + "/assets"),
           commands(1),
           voice(VoiceOptions{}),
@@ -330,6 +331,7 @@ struct PrivateMessageFixture
     Dock dock;
     MemoryService memory;
     BotIdentity bot;
+    Live<ChatOptions> liveChat;
     UserSessionService session;
     ToolRegistry tools;
     ChatService chat;

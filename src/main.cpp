@@ -416,8 +416,9 @@ int main(int argc, char **argv)
 	ReminderStore reminderStore(dbPath);
 	// 构造即重建内存队列：24 小时内漏触发的提醒会补发，超窗的滚动或丢弃
 	ReminderService reminderService(reminderStore);
-	// 默认人格来自 source/soul.md，用户人格持久化在会话库 user_persona 表
-	UserSessionService userSession(models, conversationStore, settings.bot, settings.chat,
+	// 默认人格来自 source/soul.md，用户人格持久化在会话库 user_persona 表；
+	// chat 组配置持活值（ADR-023），重载后下一次请求即用新值
+	UserSessionService userSession(models, conversationStore, settings.bot, liveSettings.chat,
 	                                "source/soul.md");
 	Dock dock(settings.dock, &running);
 	MemoryService memoryService(dbPath, conversationStore, dock, models, settings.memory);
@@ -455,12 +456,13 @@ int main(int argc, char **argv)
 	}
 	if (settings.webFetch.enabled)
 	{
-		// 超长正文走默认小模型做"按问题摘录"，失败时 Action 自动降级为截断
-		const std::string distillModel = settings.chat.defaultModel;
+		// 超长正文走默认小模型做"按问题摘录"，失败时 Action 自动降级为截断；
+		// 默认模型每次摘录时从活值现取（ADR-023），重载后下一次摘录即用新值
 		webFetchAction = std::make_unique<WebFetchAction>(
 			settings.webFetch, &running, WebFetchAction::HttpGet{},
-				[&dock, &models, distillModel](const std::string &prompt)
+				[&dock, &models, &liveSettings](const std::string &prompt)
 				{
+					const std::string distillModel = liveSettings.chat.get()->defaultModel;
 					const std::optional<ChatModel> modelPtr = models.find(distillModel);
 					if (!modelPtr)
 						return std::string{};
@@ -506,7 +508,8 @@ int main(int argc, char **argv)
 		registeredTools += toolName;
 	}
 	LOG_INFO("已注册模型工具：" + registeredTools);
-	ChatService chatService(dock, userSession, models, tools, memoryService, settings.chat, settings.bot.managerId);
+	ChatService chatService(dock, userSession, models, tools, memoryService, liveSettings.chat,
+							settings.bot.managerId);
 	// 杂务模型调用 seam：话题会话（压缩/情绪基调）与 judge 共用一份。模型按名字经注册表在
 	// 每次调用时解析（热重载即时生效）；显式配置了 endpoint 的旧形态仍直连；名字未注册时
 	// 保持空端点，由 buildOnceWith 回退默认对话模型
@@ -807,7 +810,9 @@ int main(int argc, char **argv)
 		const TaskSubmitResult submitResult = messageWorkers.submit(
 			shared->user_id,
 			[&messageClass, &eventRouter, &perceptionChannel, &groupContextService,
-			 maxMessageTokens = settings.chat.maxMessageTokens, shared]() {
+			 &liveSettings, shared]() {
+			// 长度上限在任务开头从活值取一次（ADR-023），重载后下一批消息即用新值
+			const std::size_t maxMessageTokens = liveSettings.chat.get()->maxMessageTokens;
 			for (std::size_t index = 0; index < shared->messages.size(); ++index)
 				workingThread(messageClass, eventRouter, perceptionChannel, groupContextService,
 							  shared->messages[index], maxMessageTokens,

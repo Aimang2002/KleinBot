@@ -1,4 +1,5 @@
 #include "ConfigRules.h"
+#include "LiveSettings.h"
 
 namespace
 {
@@ -6,8 +7,18 @@ constexpr ConfigChangeImpact Dynamic = ConfigChangeImpact::Dynamic;
 constexpr ConfigChangeImpact Rebuild = ConfigChangeImpact::Rebuild;
 constexpr ConfigChangeImpact Restart = ConfigChangeImpact::Restart;
 
+// 应用函数：重载成功后，把新的运行时设置整份换进对应的活值（只替换快照，不会失败）。
+// 一组一个；同组几个键一起变化时，ConfigReloader 只调一次
+
+// chat：ChatOptions 里没有只能重启的字段（线程数在 MessageExecutionOptions），整份替换即可
+void applyChat(LiveSettings &live, const RuntimeSettings &next)
+{
+    live.chat.set(next.chat);
+}
+
 // 每行：差异里的路径、生效方式、比较的 Schema 字段。表的顺序就是差异条目的输出顺序。
-// restart() 的键只能重启生效；notYet(档位) 的键还没接通实时生效，档位保持改造前的值
+// applies(应用函数) 的键重载成功后立即生效；restart() 的键只能重启生效；
+// notYet(档位) 的键还没接通实时生效，档位保持改造前的值
 constexpr ConfigRule kProductRules[] = {
     {"schema_version", restart(), field<&SchemaConfig::schemaVersion>},
 
@@ -18,15 +29,15 @@ constexpr ConfigRule kProductRules[] = {
     {"bot.aliases",            notYet(Restart), field<&SchemaConfig::bot, &BotSchema::aliases>},
     {"bot.group_chat_enabled", notYet(Dynamic), field<&SchemaConfig::bot, &BotSchema::groupChatEnabled>},
 
-    // chat
-    {"chat.default_model",            notYet(Rebuild), field<&SchemaConfig::chat, &ChatSchema::defaultModel>},
-    {"chat.temperature",              notYet(Rebuild), field<&SchemaConfig::chat, &ChatSchema::temperature>},
-    {"chat.top_p",                    notYet(Rebuild), field<&SchemaConfig::chat, &ChatSchema::topP>},
-    {"chat.frequency_penalty",        notYet(Rebuild), field<&SchemaConfig::chat, &ChatSchema::frequencyPenalty>},
-    {"chat.presence_penalty",         notYet(Rebuild), field<&SchemaConfig::chat, &ChatSchema::presencePenalty>},
-    {"chat.max_message_tokens",       notYet(Rebuild), field<&SchemaConfig::chat, &ChatSchema::maxMessageTokens>},
-    {"chat.worker_threads",           restart(),       field<&SchemaConfig::chat, &ChatSchema::workerThreads>},
-    {"chat.message_survival_seconds", notYet(Rebuild), field<&SchemaConfig::chat, &ChatSchema::messageSurvivalSeconds>},
+    // chat：top_p 还没送进请求、修法待定，尚未接通；worker_threads 只能重启
+    {"chat.default_model",            applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::defaultModel>},
+    {"chat.temperature",              applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::temperature>},
+    {"chat.top_p",                    notYet(Rebuild),    field<&SchemaConfig::chat, &ChatSchema::topP>},
+    {"chat.frequency_penalty",        applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::frequencyPenalty>},
+    {"chat.presence_penalty",         applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::presencePenalty>},
+    {"chat.max_message_tokens",       applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::maxMessageTokens>},
+    {"chat.worker_threads",           restart(),          field<&SchemaConfig::chat, &ChatSchema::workerThreads>},
+    {"chat.message_survival_seconds", applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::messageSurvivalSeconds>},
 
     // models：drawing / vision / worker 各四个字段
     {"models.drawing.model", notYet(Rebuild),

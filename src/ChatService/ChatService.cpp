@@ -233,6 +233,8 @@ std::string ChatService::buildOnceWith(const ModelEndpointOptions &worker,
                                        const std::string &userPrompt,
                                        long timeoutMs)
 {
+    // 本次调用的配置快照（ADR-023）：回退用的默认模型取这一份
+    const Live<ChatOptions>::Snapshot chat = this->chatConfig.get();
     ChatRequest request;
     request.temperature = 0.3; // 判断/压缩类任务要稳定，不要创造性
     request.timeout_ms = timeoutMs;
@@ -247,13 +249,13 @@ std::string ChatService::buildOnceWith(const ModelEndpointOptions &worker,
     }
     else
     {
-        const std::optional<ChatModel> model = this->models.find(chatConfig.defaultModel);
+        const std::optional<ChatModel> model = this->models.find(chat->defaultModel);
         if (!model)
         {
-            LOG_ERROR("DEFAULT_MODEL 未在 ModelsName.json 注册：" + chatConfig.defaultModel);
+            LOG_ERROR("DEFAULT_MODEL 未在 ModelsName.json 注册：" + chat->defaultModel);
             return {};
         }
-        response = this->dock.RequestChat(*model, chatConfig.defaultModel, request);
+        response = this->dock.RequestChat(*model, chat->defaultModel, request);
     }
     if (response.cancelled)
         return {};

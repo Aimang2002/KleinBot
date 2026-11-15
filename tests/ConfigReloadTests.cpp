@@ -88,6 +88,33 @@ TEST(ConfigDiffTest, ClassifiesDynamicRebuildAndRestartChanges)
                                ConfigChangeImpact::Restart));
 }
 
+// 配置实时生效 L1.a：chat 组 6 个键接通应用，档位由 Rebuild 变为 Dynamic；
+// top_p 还没送进请求、尚未接通（仍为 Rebuild），worker_threads 只能重启
+TEST(ConfigDiffTest, ChatKeysAreDynamicExceptTopPAndWorkerThreads)
+{
+    SchemaConfig current;
+    SchemaConfig candidate = current;
+    candidate.chat.defaultModel = "next-model";
+    candidate.chat.temperature = 0.5;
+    candidate.chat.topP = 0.5;
+    candidate.chat.frequencyPenalty = 0.5;
+    candidate.chat.presencePenalty = 0.5;
+    candidate.chat.maxMessageTokens = 1024;
+    candidate.chat.workerThreads = 4;
+    candidate.chat.messageSurvivalSeconds = 60;
+
+    const ConfigDiff diff = compareConfig(current, candidate);
+
+    EXPECT_EQ(diff.size(), 8U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 6U);
+    for (const char *path : {"chat.default_model", "chat.temperature", "chat.frequency_penalty",
+                             "chat.presence_penalty", "chat.max_message_tokens",
+                             "chat.message_survival_seconds"})
+        EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Dynamic)) << path;
+    EXPECT_TRUE(containsChange(diff, "chat.top_p", ConfigChangeImpact::Rebuild));
+    EXPECT_TRUE(containsChange(diff, "chat.worker_threads", ConfigChangeImpact::Restart));
+}
+
 TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)
 {
     TemporaryConfigFile file;
