@@ -4,7 +4,10 @@
 
 using json = nlohmann::json;
 
+#include "Bootstrap/ConfigReloader.h"
+#include "Bootstrap/ConfigRules.h"
 #include "Bootstrap/ConfigSnapshotStore.h"
+#include "Bootstrap/LiveSettings.h"
 #include "Configuration/ConfigLoader.h"
 #include "Configuration/ConfigWriter.h"
 #include "ModelRegistry/ModelRegistry.h"
@@ -98,12 +101,14 @@ protected:
         const ConfigLoadResult initial = loader.loadText(panelConfig);
         ASSERT_TRUE(initial.canStart());
         store = std::make_unique<ConfigSnapshotStore>(configPath.string(), initial.config);
+        live = std::make_unique<LiveSettings>(store->current()->runtime);
+        reloader = std::make_unique<ConfigReloader>(*store, *live);
 
         settings.accessToken = "panel-token";
         settings.bind = "127.0.0.1";
         settings.port = 0;
 
-        server = ConfigPanelServer::buildServer(settings, configPath.string(), *store,
+        server = ConfigPanelServer::buildServer(settings, configPath.string(), *store, *reloader,
                                                 *registry, groupsService);
         port = server->bind_to_any_port("127.0.0.1");
         ASSERT_GT(port, 0);
@@ -112,6 +117,8 @@ protected:
 
     std::unique_ptr<ModelRegistry> registry;
     std::unique_ptr<ConfigSnapshotStore> store;
+    std::unique_ptr<LiveSettings> live;
+    std::unique_ptr<ConfigReloader> reloader;
 
     void TearDown() override
     {
@@ -372,6 +379,63 @@ TEST_F(PanelServerFixture, PostInvalidConfigReturns422AndKeepsFile)
     EXPECT_FALSE(body["diagnostics"].empty());
     EXPECT_EQ(readFile(), before);
     EXPECT_EQ(store->current()->schema->bot.name, "Klein");
+}
+
+// 面板保存走注入的“重载并应用”入口（ADR-023）：换一张带 applies 行的小表注入，
+// 保存后对应活值被替换；返回给前端的字段与档位仍来自产品规则表，与改造前相同
+namespace
+{
+void applyChatForPanelTest(LiveSettings &live, const RuntimeSettings &next)
+{
+    live.chat.set(next.chat);
+}
+
+const ConfigRule kPanelApplyingRules[] = {
+    {"chat.temperature", applies(applyChatForPanelTest),
+     field<&SchemaConfig::chat, &ChatSchema::temperature>},
+};
+}
+
+TEST_F(PanelServerFixture, PostConfigReloadsThroughInjectedReloader)
+{
+    ConfigReloader applying(*store, *live, ruleTable(kPanelApplyingRules));
+    server->stop();
+    serverThread->join();
+    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store, applying,
+                                            *registry, groupsService);
+    port = server->bind_to_any_port("127.0.0.1");
+    serverThread = std::make_unique<std::thread>([this]() { server->listen_after_bind(); });
+
+    const Live<ChatOptions>::Snapshot before = live->chat.get();
+    {
+        httplib::Client client("127.0.0.1", port);
+        const auto fetched = client.Get("/api/config", authHeaders());
+        ASSERT_TRUE(fetched != nullptr);
+        ASSERT_EQ(fetched->status, 200);
+        nlohmann::json candidate = nlohmann::json::parse(fetched->body);
+        candidate["chat"]["temperature"] = 0.25;
+        const auto posted = client.Post("/api/config", authHeaders(), candidate.dump(),
+                                        "application/json");
+        ASSERT_TRUE(posted != nullptr);
+        ASSERT_EQ(posted->status, 200);
+
+        const nlohmann::json body = nlohmann::json::parse(posted->body);
+        EXPECT_TRUE(body["reloadSuccess"].get<bool>());
+        ASSERT_EQ(body["diff"].size(), 1U);
+        EXPECT_EQ(body["diff"][0]["path"], "chat.temperature");
+        EXPECT_EQ(body["diff"][0]["impact"], "rebuild");
+        EXPECT_EQ(body["counts"]["rebuild"], 1);
+    }
+    const Live<ChatOptions>::Snapshot after = live->chat.get();
+    EXPECT_NE(after, before);
+    EXPECT_DOUBLE_EQ(after->temperature, 0.25);
+    EXPECT_DOUBLE_EQ(before->temperature, 1.0);
+
+    // applying 在本用例结束时析构：先停掉引用它的服务器
+    server->stop();
+    serverThread->join();
+    serverThread.reset();
+    server.reset();
 }
 
 TEST_F(PanelServerFixture, RootServesPageFileWithoutAuth)
@@ -885,7 +949,7 @@ TEST_F(PanelServerFixture, GetGroupsReturnsInjectedServiceSnapshot)
     // 重建 server 以携带注入（fixture 的 server 已在 SetUp 起好，此处替换）
     server->stop();
     serverThread->join();
-    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store,
+    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store, *reloader,
                                             *registry, groupsService);
     port = server->bind_to_any_port("127.0.0.1");
     serverThread = std::make_unique<std::thread>([this]() { server->listen_after_bind(); });
@@ -929,7 +993,7 @@ TEST_F(PanelServerFixture, GetBotInfoReturnsVersionAndLoginInfo)
     });
     server->stop();
     serverThread->join();
-    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store,
+    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store, *reloader,
                                             *registry, groupsService, &api);
     port = server->bind_to_any_port("127.0.0.1");
     serverThread = std::make_unique<std::thread>([this]() { server->listen_after_bind(); });
@@ -977,7 +1041,7 @@ TEST_F(PanelServerFixture, PerceptionEndpointsToggleStateImmediately)
     groupsService = groupsOwner.get();
     server->stop();
     serverThread->join();
-    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store,
+    server = ConfigPanelServer::buildServer(settings, configPath.string(), *store, *reloader,
                                             *registry, groupsService);
     port = server->bind_to_any_port("127.0.0.1");
     serverThread = std::make_unique<std::thread>([this]() { server->listen_after_bind(); });

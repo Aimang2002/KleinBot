@@ -24,6 +24,13 @@ CONFIGURATION_FORBIDDEN_TARGETS = {
     "ModelApiCaller",
     "Network",
 }
+# Bootstrap（运行时设置映射、活值集合、规则表、重载入口）只给组合根与面板用（ADR-023）：
+# src 顶层的 main.cpp（owner 为 None）、Bootstrap 自身与 WebUI 之外，任何模块都不得包含
+BOOTSTRAP_ALLOWED_OWNERS = {
+    None,
+    "Bootstrap",
+    "WebUI",
+}
 
 
 def included_module(include: str):
@@ -54,6 +61,11 @@ def scan(source_root: Path):
             if owner == "Configuration" and target in CONFIGURATION_FORBIDDEN_TARGETS:
                 violations.append(
                     f"{relative}:{line_number}: Configuration must not include {target}"
+                )
+            if target == "Bootstrap" and owner not in BOOTSTRAP_ALLOWED_OWNERS:
+                violations.append(
+                    f"{relative}:{line_number}: module {owner} must not include Bootstrap "
+                    "(only main.cpp, Bootstrap and WebUI may)"
                 )
     return violations
 

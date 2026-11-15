@@ -9,7 +9,9 @@
 #include "Application/EventRouter.h"
 #include "Application/InboundCoalescer.h"
 #include "Port/ToolNames.h"
+#include "Bootstrap/ConfigReloader.h"
 #include "Bootstrap/ConfigSnapshotStore.h"
+#include "Bootstrap/LiveSettings.h"
 #include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
 #include "Configuration/ConfigTemplate.h"
@@ -117,23 +119,6 @@ void logConfigDiagnostics(const std::vector<ConfigDiagnostic> &diagnostics)
 		else
 			LOG_INFO(message);
 	}
-}
-
-std::string summarizeReload(const ConfigReloadResult &result)
-{
-	if (!result.success)
-		return "配置刷新失败，继续使用当前内存快照。";
-	if (result.diff.empty())
-		return "配置校验通过，内存快照无变化。";
-
-	return "配置内存快照已更新：" + std::to_string(result.diff.size()) +
-		" 项变化（动态 " +
-		std::to_string(result.diff.count(ConfigChangeImpact::Dynamic)) +
-		"、需重建 " +
-		std::to_string(result.diff.count(ConfigChangeImpact::Rebuild)) +
-		"、需重启 " +
-		std::to_string(result.diff.count(ConfigChangeImpact::Restart)) +
-		"）。当前运行模块尚未重新应用这些参数。";
 }
 
 bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::milliseconds duration)
@@ -384,6 +369,11 @@ int main(int argc, char **argv)
 	ConfigSnapshotStore configStore(configPath, schema);
 	const std::shared_ptr<const ConfigSnapshot> startupSnapshot = configStore.current();
 	const RuntimeSettings &settings = startupSnapshot->runtime;
+	// 活值集合与唯一的“重载并应用”入口（ADR-023）：声明在所有服务之前、最后析构。
+	// #刷新配置文件 与面板保存都经 configReloader；规则表里带应用函数的行在重载成功后
+	// 把新值换进 liveSettings，反馈按规则表如实列出已生效与需重启的键
+	LiveSettings liveSettings(settings);
+	ConfigReloader configReloader(configStore, liveSettings);
 	init(settings.schemaVersion);
 	const TransportConfig &transportConfig = settings.transport;
 	LOG_INFO("当前通信模式：" + transportModeDisplayName(transportConfig.mode) +
@@ -445,16 +435,16 @@ int main(int argc, char **argv)
 		{ return userSession.getModelName(userId); });
 	VoiceModeAction voiceModeAction(userSession, globalVoice);
 	AdminControlAction adminControlAction(adminComputerStatus,
-		globalVoice, [&configStore]()
+		globalVoice, [&configReloader]()
 		{
-			ConfigReloadResult result = configStore.reload();
-			logConfigDiagnostics(result.diagnostics);
-			for (const ConfigChange &change : result.diff.changes())
+			const ConfigReloadReport report = configReloader.reload();
+			logConfigDiagnostics(report.result.diagnostics);
+			for (const ConfigChange &change : report.result.diff.changes())
 			{
 				LOG_INFO("配置变化：" + change.path + " [" +
 					configChangeImpactName(change.impact) + "]");
 			}
-			return summarizeReload(result);
+			return summarizeReload(report);
 		});
 	if (settings.webSearch.enabled)
 	{
@@ -791,8 +781,8 @@ int main(int argc, char **argv)
 	{
 		panelThread = std::thread(
 			ConfigPanelServer::run,
-			settings.webUi, configPath, std::ref(configStore), std::ref(models),
-			groupListService.get(), std::cref(running), &activeApiChannel);
+			settings.webUi, configPath, std::cref(configStore), std::ref(configReloader),
+			std::ref(models), groupListService.get(), std::cref(running), &activeApiChannel);
 	}
 
 	// 推送门暂时搁置（2026-10-25）：保留空线程对象供清理链复用，不再启动 HTTP 门。

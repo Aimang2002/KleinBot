@@ -221,7 +221,7 @@ bool sleepWhileRunning(const std::atomic<bool> &running, std::chrono::millisecon
 
 // 供应商外呼接口共用的密钥解析：请求显式携带明文优先；
 // 掩码哨兵/缺省时按 index 回退注册表中已保存的密钥
-std::string resolveProviderApiKey(const json &body, ConfigSnapshotStore &store)
+std::string resolveProviderApiKey(const json &body, const ConfigSnapshotStore &store)
 {
     std::string apiKey;
     if (body.contains("api_key") && body["api_key"].is_string())
@@ -290,7 +290,7 @@ json queryBotInfo(OneBotApiChannel *apiChannel)
     return info;
 }
 
-json buildBotInfoResponse(ConfigSnapshotStore &store, OneBotApiChannel *apiChannel)
+json buildBotInfoResponse(const ConfigSnapshotStore &store, OneBotApiChannel *apiChannel)
 {
     const auto uptime = std::chrono::steady_clock::now() - kProcessStart;
     const RuntimeSettings &settings = store.current()->runtime;
@@ -318,7 +318,8 @@ json buildBotInfoResponse(ConfigSnapshotStore &store, OneBotApiChannel *apiChann
 
 std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSettings &settings,
                                                                 const std::string &configPath,
-                                                                ConfigSnapshotStore &store,
+                                                                const ConfigSnapshotStore &store,
+                                                                ConfigReloader &reloader,
                                                                 ModelRegistry &models,
                                                                 GroupListService *groups,
                                                                 OneBotApiChannel *apiChannel)
@@ -377,8 +378,8 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
         response.set_content(maskSecrets(document).dump(), "application/json");
     });
 
-    server->Post("/api/config", [configPath, &store, writer, groups](const httplib::Request &request,
-                                                                    httplib::Response &response) {
+    server->Post("/api/config", [configPath, &reloader, writer, groups](const httplib::Request &request,
+                                                                       httplib::Response &response) {
         json candidate;
         try
         {
@@ -401,7 +402,9 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
             return;
         }
 
-        const ConfigReloadResult reload = store.reload();
+        // 与 #刷新配置文件 同一个“重载并应用”入口；返回字段与改造前相同
+        const ConfigReloadReport report = reloader.reload();
+        const ConfigReloadResult &reload = report.result;
         const json body = {{"diff", diffToArray(reload.diff)},
                            {"counts", {{"dynamic", reload.diff.count(ConfigChangeImpact::Dynamic)},
                                        {"rebuild", reload.diff.count(ConfigChangeImpact::Rebuild)},
@@ -792,9 +795,9 @@ std::unique_ptr<httplib::Server> ConfigPanelServer::buildServer(const WebUiSetti
 }
 
 void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
-                            ConfigSnapshotStore &store, ModelRegistry &models,
-                            GroupListService *groups, const std::atomic<bool> &running,
-                            OneBotApiChannel *apiChannel)
+                            const ConfigSnapshotStore &store, ConfigReloader &reloader,
+                            ModelRegistry &models, GroupListService *groups,
+                            const std::atomic<bool> &running, OneBotApiChannel *apiChannel)
 {
     // 页面是面板唯一入口：缺失时报错并放弃启动，不起一个只会回 500 的空服务；
     // 运行中文件被删的场景仍由 GET / 的 500 分支兜底
@@ -812,7 +815,7 @@ void ConfigPanelServer::run(WebUiSettings settings, std::string configPath,
     while (running.load())
     {
         std::unique_ptr<httplib::Server> server =
-            buildServer(settings, configPath, store, models, groups, apiChannel);
+            buildServer(settings, configPath, store, reloader, models, groups, apiChannel);
         std::atomic<bool> serverActive{true};
         // 看门狗：running 置假后调 stop() 让阻塞中的 listen 返回
         std::thread watchdog([&running, &serverActive, &server]() {

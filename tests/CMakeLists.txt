@@ -6,6 +6,7 @@ add_executable(kleinbot_tests
     CommandAdapterTests.cpp
     ConfigPanelServerTests.cpp
     ConfigReloadTests.cpp
+    ConfigReloaderTests.cpp
     ConfigRulesTests.cpp
     ConfigTemplateTests.cpp
     ConfigWriterTests.cpp

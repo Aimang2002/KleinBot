@@ -1,0 +1,293 @@
+#include <gtest/gtest.h>
+
+#include "Bootstrap/ConfigReloader.h"
+#include "Bootstrap/ConfigRules.h"
+#include "Bootstrap/ConfigSnapshotStore.h"
+#include "Bootstrap/LiveSettings.h"
+#include "Configuration/ConfigLoader.h"
+
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace
+{
+const char *kBaseConfig = R"({
+    "schema_version": 1,
+    "bot": {"id": 10001, "manager_id": 10002, "name": "Klein"},
+    "chat": {"default_model": "test-model"},
+    "models": {},
+    "communication": {
+        "protocol": {"type": "onebot"},
+        "active_transport": "local",
+        "transports": {
+            "local": {"type": "reverse_websocket", "bind": "127.0.0.1", "port": 8600}
+        }
+    }
+})";
+
+// 测试用应用函数：计数，并把对应的一组换进活值
+std::atomic<int> chatApplyCalls{0};
+std::atomic<int> voiceApplyCalls{0};
+
+void applyChat(LiveSettings &live, const RuntimeSettings &next)
+{
+    chatApplyCalls.fetch_add(1);
+    live.chat.set(next.chat);
+}
+
+void applyVoice(LiveSettings &live, const RuntimeSettings &next)
+{
+    voiceApplyCalls.fetch_add(1);
+    live.voice.set(next.voice);
+}
+
+// 小表：两行共用 applyChat，验证同一个应用函数一次重载只调一次
+const ConfigRule kApplyingRules[] = {
+    {"chat.temperature",    applies(applyChat),                 field<&SchemaConfig::chat, &ChatSchema::temperature>},
+    {"chat.top_p",          applies(applyChat),                 field<&SchemaConfig::chat, &ChatSchema::topP>},
+    {"voice.host",          applies(applyVoice),                field<&SchemaConfig::voice, &VoiceSchema::host>},
+    {"memory.batch_turns",  notYet(ConfigChangeImpact::Rebuild), field<&SchemaConfig::memory, &MemorySchema::batchTurns>},
+    {"chat.worker_threads", restart(),                          field<&SchemaConfig::chat, &ChatSchema::workerThreads>},
+};
+
+// 并发用例：比较函数总报“变了”，应用函数检测有没有两次应用同时进行
+std::atomic<int> slowInside{0};
+std::atomic<int> slowOverlaps{0};
+std::atomic<int> slowCalls{0};
+
+bool alwaysChanged(const SchemaConfig &, const SchemaConfig &)
+{
+    return true;
+}
+
+void applySlowly(LiveSettings &live, const RuntimeSettings &next)
+{
+    if (slowInside.fetch_add(1) != 0)
+        slowOverlaps.fetch_add(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    live.chat.set(next.chat);
+    slowInside.fetch_sub(1);
+    slowCalls.fetch_add(1);
+}
+
+const ConfigRule kSlowRules[] = {
+    {"chat.temperature", applies(applySlowly), alwaysChanged},
+};
+
+// 全部活值的快照：持有 shared_ptr，旧快照不会被释放，指针比较不会撞上复用的地址
+struct LiveSnapshots
+{
+    Live<ChatOptions>::Snapshot chat;
+    Live<ModelRuntimeSettings>::Snapshot models;
+    Live<VoiceOptions>::Snapshot voice;
+    Live<MemoryOptions>::Snapshot memory;
+    Live<WebSearchOptions>::Snapshot webSearch;
+    Live<WebFetchOptions>::Snapshot webFetch;
+    Live<DockOptions>::Snapshot dock;
+    Live<GlanceOptions>::Snapshot glance;
+    Live<MessageOptions>::Snapshot message;
+};
+
+LiveSnapshots snapshotsOf(const LiveSettings &live)
+{
+    return {live.chat.get(),      live.models.get(),   live.voice.get(),
+            live.memory.get(),    live.webSearch.get(), live.webFetch.get(),
+            live.dock.get(),      live.glance.get(),   live.message.get()};
+}
+
+void expectAllUnchanged(const LiveSnapshots &before, const LiveSettings &live)
+{
+    const LiveSnapshots now = snapshotsOf(live);
+    EXPECT_EQ(now.chat, before.chat);
+    EXPECT_EQ(now.models, before.models);
+    EXPECT_EQ(now.voice, before.voice);
+    EXPECT_EQ(now.memory, before.memory);
+    EXPECT_EQ(now.webSearch, before.webSearch);
+    EXPECT_EQ(now.webFetch, before.webFetch);
+    EXPECT_EQ(now.dock, before.dock);
+    EXPECT_EQ(now.glance, before.glance);
+    EXPECT_EQ(now.message, before.message);
+}
+
+class ConfigReloaderFixture : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        path = std::filesystem::temp_directory_path() /
+               ("kleinbot-config-reloader-" + std::to_string(suffix) + ".json");
+        write(kBaseConfig);
+        const ConfigLoadResult initial = ConfigLoader().loadText(kBaseConfig);
+        ASSERT_TRUE(initial.canStart());
+        store = std::make_unique<ConfigSnapshotStore>(path.string(), initial.config);
+        live = std::make_unique<LiveSettings>(store->current()->runtime);
+        chatApplyCalls = 0;
+        voiceApplyCalls = 0;
+    }
+
+    void TearDown() override
+    {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    }
+
+    void write(const std::string &content) const
+    {
+        std::ofstream output(path);
+        output << content;
+    }
+
+    void writeEdited(const std::function<void(nlohmann::json &)> &edit) const
+    {
+        nlohmann::json document = nlohmann::json::parse(kBaseConfig);
+        edit(document);
+        write(document.dump());
+    }
+
+    std::filesystem::path path;
+    std::unique_ptr<ConfigSnapshotStore> store;
+    std::unique_ptr<LiveSettings> live;
+};
+}
+
+// 校验不过：快照、活值都不变，不调用任何应用函数
+TEST_F(ConfigReloaderFixture, FailedReloadAppliesNothing)
+{
+    ConfigReloader reloader(*store, *live, ruleTable(kApplyingRules));
+    // 候选里带应用函数的那一行变了，但文件被截断、不是合法 JSON
+    nlohmann::json candidate = nlohmann::json::parse(kBaseConfig);
+    candidate["chat"]["temperature"] = 0.3;
+    const std::string text = candidate.dump();
+    write(text.substr(0, text.size() - 1));
+    const std::shared_ptr<const ConfigSnapshot> snapshotBefore = store->current();
+    const LiveSnapshots before = snapshotsOf(*live);
+
+    const ConfigReloadReport report = reloader.reload();
+
+    EXPECT_FALSE(report.result.success);
+    EXPECT_FALSE(report.result.diagnostics.empty());
+    EXPECT_EQ(store->current(), snapshotBefore);
+    expectAllUnchanged(before, *live);
+    EXPECT_EQ(chatApplyCalls.load(), 0);
+    EXPECT_EQ(voiceApplyCalls.load(), 0);
+    EXPECT_TRUE(report.applied.empty());
+    EXPECT_TRUE(report.restartOnly.empty());
+    EXPECT_TRUE(report.notWired.empty());
+    EXPECT_EQ(summarizeReload(report), "配置刷新失败，继续使用当前内存快照。");
+}
+
+// 产品规则表（默认）还没有带应用函数的行：重载成功，所有活值的快照指针不变，
+// 反馈如实列出需重启与尚未接通的键
+TEST_F(ConfigReloaderFixture, ProductRulesApplyNothingAndKeepEveryLiveSnapshot)
+{
+    ConfigReloader reloader(*store, *live);
+    writeEdited([](nlohmann::json &config) {
+        config["bot"]["group_chat_enabled"] = false;
+        config["chat"]["temperature"] = 0.3;
+        config["chat"]["worker_threads"] = 3;
+        config["voice"] = {{"enabled", true}, {"host", "127.0.0.1"}, {"port", "9880"}};
+        config["storage"] = {{"conversation_database", "next.db"}};
+        config["network"] = {{"proxy", "http://127.0.0.1:7890"}};
+    });
+    const LiveSnapshots before = snapshotsOf(*live);
+
+    const ConfigReloadReport report = reloader.reload();
+
+    ASSERT_TRUE(report.result.success);
+    EXPECT_EQ(report.result.diff.size(), 8U);
+    EXPECT_EQ(store->current(), report.result.snapshot);
+    expectAllUnchanged(before, *live);
+    EXPECT_TRUE(report.applied.empty());
+    EXPECT_EQ(report.restartOnly,
+              (std::vector<std::string>{"chat.worker_threads", "storage.conversation_database"}));
+    EXPECT_EQ(report.notWired,
+              (std::vector<std::string>{"bot.group_chat_enabled", "chat.temperature", "voice.enabled",
+                                        "voice.host", "voice.port", "network.proxy"}));
+    EXPECT_EQ(summarizeReload(report),
+              "配置已刷新：8 项变化，已生效 0 项。\n"
+              "需重启才能生效 2 项：chat.worker_threads、storage.conversation_database。\n"
+              "尚未接通实时生效、需重启 6 项：bot.group_chat_enabled、chat.temperature、"
+              "voice.enabled、voice.host、voice.port、network.proxy。");
+}
+
+// 带应用函数的行：新快照发布之后换进活值，同一个应用函数只调一次；
+// 没变化的行不应用，其他活值不动
+TEST_F(ConfigReloaderFixture, AppliesChangedRowsOnceAfterPublishing)
+{
+    ConfigReloader reloader(*store, *live, ruleTable(kApplyingRules));
+    writeEdited([](nlohmann::json &config) {
+        config["chat"]["temperature"] = 0.3;
+        config["chat"]["top_p"] = 0.8;
+        config["chat"]["worker_threads"] = 3;
+        config["memory"] = {{"batch_turns", 4}};
+    });
+    const LiveSnapshots before = snapshotsOf(*live);
+
+    const ConfigReloadReport report = reloader.reload();
+
+    ASSERT_TRUE(report.result.success);
+    EXPECT_EQ(report.applied, (std::vector<std::string>{"chat.temperature", "chat.top_p"}));
+    EXPECT_EQ(report.restartOnly, (std::vector<std::string>{"chat.worker_threads"}));
+    EXPECT_EQ(report.notWired, (std::vector<std::string>{"memory.batch_turns"}));
+    EXPECT_EQ(chatApplyCalls.load(), 1) << "同一个应用函数一次重载只调一次";
+    EXPECT_EQ(voiceApplyCalls.load(), 0) << "没变化的行不应用";
+
+    const Live<ChatOptions>::Snapshot chat = live->chat.get();
+    EXPECT_NE(chat, before.chat);
+    EXPECT_DOUBLE_EQ(chat->temperature, 0.3);
+    EXPECT_DOUBLE_EQ(chat->topP, 0.8);
+    EXPECT_DOUBLE_EQ(chat->temperature, store->current()->runtime.chat.temperature);
+    EXPECT_DOUBLE_EQ(before.chat->temperature, 1.0) << "替换前取到的快照不变";
+    EXPECT_EQ(live->voice.get(), before.voice);
+    EXPECT_EQ(live->memory.get(), before.memory);
+    EXPECT_EQ(live->message.get(), before.message);
+    EXPECT_EQ(summarizeReload(report),
+              "配置已刷新：4 项变化，已生效 2 项。\n"
+              "需重启才能生效 1 项：chat.worker_threads。\n"
+              "尚未接通实时生效、需重启 1 项：memory.batch_turns。");
+
+    // 文件没再变：第二次重载没有变化，不应用，活值不动
+    const LiveSnapshots afterFirst = snapshotsOf(*live);
+    const ConfigReloadReport again = reloader.reload();
+    ASSERT_TRUE(again.result.success);
+    EXPECT_TRUE(again.applied.empty());
+    EXPECT_EQ(chatApplyCalls.load(), 1);
+    expectAllUnchanged(afterFirst, *live);
+    EXPECT_EQ(summarizeReload(again), "配置校验通过，内存快照无变化。");
+}
+
+// 并发的重载排队执行：发布与应用不会交错
+TEST_F(ConfigReloaderFixture, ConcurrentReloadsAreSerialized)
+{
+    slowInside = 0;
+    slowOverlaps = 0;
+    slowCalls = 0;
+    ConfigReloader reloader(*store, *live, ruleTable(kSlowRules));
+    std::atomic<int> failures{0};
+
+    std::vector<std::thread> threads;
+    for (int thread = 0; thread < 4; ++thread)
+    {
+        threads.emplace_back([&reloader, &failures]() {
+            for (int round = 0; round < 5; ++round)
+            {
+                if (!reloader.reload().result.success)
+                    failures.fetch_add(1);
+            }
+        });
+    }
+    for (std::thread &thread : threads)
+        thread.join();
+
+    EXPECT_EQ(failures.load(), 0);
+    EXPECT_EQ(slowCalls.load(), 20);
+    EXPECT_EQ(slowOverlaps.load(), 0);
+}

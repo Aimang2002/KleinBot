@@ -3,17 +3,18 @@
 
 /*
  * 配置规则表（ADR-023，配置实时生效）：每个配置键一行——差异里显示的路径、
- * 比较哪个 Schema 字段、怎么生效。compareConfig 与测试都遍历同一张表，档位只来自这里。
- * 新增配置键 = 表里加一行，并回答“怎么生效”。
+ * 比较哪个 Schema 字段、怎么生效。比较（compareConfig）、应用与反馈（ConfigReloader）、
+ * 测试都遍历同一张表，档位只来自这里。新增配置键 = 表里加一行，并回答“怎么生效”。
  *
  * 生效方式只能由三个工厂产生（ConfigEffect 的构造函数是私有的）：
  *   restart()       只能重启生效。档位 Restart，没有应用函数。
  *   applies(函数)   重载成功后调用该函数，把新值换进活值。档位 Dynamic。
  *                   参数是函数引用，传不了空指针：没有应用函数就造不出“实时生效”。
- *   notYet(原档位)  过渡期：这个键还没接通实时生效，保留改造前的档位，没有应用函数。
- *                   L2 结束时清零并删除。
+ *   notYet(原档位)  过渡期：这个键还没接通实时生效，保留改造前的档位，没有应用函数；
+ *                   重载反馈里如实列为“尚未接通实时生效、需重启”。L2 结束时清零并删除。
  *
- * 只有 Bootstrap 与测试包含本头文件。
+ * 只有 Bootstrap、组合根、面板与测试包含本头文件（业务模块不得包含 Bootstrap/，
+ * 由 tests/architecture_dependency_test.py 机检）。
  */
 #include "ConfigDiff.h"
 #include "../Configuration/SchemaConfig.h"
