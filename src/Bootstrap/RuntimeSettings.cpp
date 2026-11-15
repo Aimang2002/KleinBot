@@ -82,7 +82,6 @@ RuntimeSettings buildRuntimeSettings(const SchemaConfig &schema)
     result.chat = {
         schema.chat.defaultModel,
         schema.chat.temperature,
-        schema.chat.topP,
         schema.chat.frequencyPenalty,
         schema.chat.presencePenalty,
         schema.chat.maxMessageTokens,

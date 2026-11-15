@@ -8,7 +8,6 @@ struct ChatOptions
 {
     std::string defaultModel;
     double temperature = 1.0;
-    double topP = 1.0;
     double frequencyPenalty = 0.0;
     double presencePenalty = 0.0;
     std::size_t maxMessageTokens = 4096;

@@ -63,7 +63,7 @@ void applyVoice(LiveSettings &live, const RuntimeSettings &next)
 // 小表：两行共用 applyChat，验证同一个应用函数一次重载只调一次
 const ConfigRule kApplyingRules[] = {
     {"chat.temperature",    applies(applyChat),                 field<&SchemaConfig::chat, &ChatSchema::temperature>},
-    {"chat.top_p",          applies(applyChat),                 field<&SchemaConfig::chat, &ChatSchema::topP>},
+    {"chat.presence_penalty", applies(applyChat),               field<&SchemaConfig::chat, &ChatSchema::presencePenalty>},
     {"voice.host",          applies(applyVoice),                field<&SchemaConfig::voice, &VoiceSchema::host>},
     {"memory.batch_turns",  notYet(ConfigChangeImpact::Rebuild), field<&SchemaConfig::memory, &MemorySchema::batchTurns>},
     {"chat.worker_threads", restart(),                          field<&SchemaConfig::chat, &ChatSchema::workerThreads>},
@@ -684,7 +684,7 @@ TEST_F(ConfigReloaderFixture, AppliesChangedRowsOnceAfterPublishing)
     ConfigReloader reloader(*store, *live, ruleTable(kApplyingRules));
     writeEdited([](nlohmann::json &config) {
         config["chat"]["temperature"] = 0.3;
-        config["chat"]["top_p"] = 0.8;
+        config["chat"]["presence_penalty"] = 0.8;
         config["chat"]["worker_threads"] = 3;
         config["memory"] = {{"batch_turns", 4}};
     });
@@ -693,7 +693,7 @@ TEST_F(ConfigReloaderFixture, AppliesChangedRowsOnceAfterPublishing)
     const ConfigReloadReport report = reloader.reload();
 
     ASSERT_TRUE(report.result.success);
-    EXPECT_EQ(report.applied, (std::vector<std::string>{"chat.temperature", "chat.top_p"}));
+    EXPECT_EQ(report.applied, (std::vector<std::string>{"chat.temperature", "chat.presence_penalty"}));
     EXPECT_EQ(report.restartOnly, (std::vector<std::string>{"chat.worker_threads"}));
     EXPECT_EQ(report.notWired, (std::vector<std::string>{"memory.batch_turns"}));
     EXPECT_EQ(chatApplyCalls.load(), 1) << "同一个应用函数一次重载只调一次";
@@ -702,7 +702,7 @@ TEST_F(ConfigReloaderFixture, AppliesChangedRowsOnceAfterPublishing)
     const Live<ChatOptions>::Snapshot chat = live->chat.get();
     EXPECT_NE(chat, before.chat);
     EXPECT_DOUBLE_EQ(chat->temperature, 0.3);
-    EXPECT_DOUBLE_EQ(chat->topP, 0.8);
+    EXPECT_DOUBLE_EQ(chat->presencePenalty, 0.8);
     EXPECT_DOUBLE_EQ(chat->temperature, store->current()->runtime.chat.temperature);
     EXPECT_DOUBLE_EQ(before.chat->temperature, 1.0) << "替换前取到的快照不变";
     EXPECT_EQ(live->voice.get(), before.voice);
@@ -721,6 +721,59 @@ TEST_F(ConfigReloaderFixture, AppliesChangedRowsOnceAfterPublishing)
     EXPECT_EQ(chatApplyCalls.load(), 1);
     expectAllUnchanged(afterFirst, *live);
     EXPECT_EQ(summarizeReload(again), "配置校验通过，内存快照无变化。");
+}
+
+// chat.top_p 已删除（2026-11-15）。线上旧配置里还写着它：启动照常（只有一条未知字段告警，
+// 没有 Error/Fatal），重载照常发布、照常应用别的键，删掉的键不进差异、不进反馈
+namespace
+{
+bool hasUnknownFieldWarning(const std::vector<ConfigDiagnostic> &diagnostics, const std::string &path)
+{
+    for (const ConfigDiagnostic &diagnostic : diagnostics)
+    {
+        if (diagnostic.path == path && diagnostic.severity == ConfigSeverity::Warning &&
+            diagnostic.category == ConfigErrorCategory::Unknown)
+            return true;
+    }
+    return false;
+}
+}
+
+TEST_F(ConfigReloaderFixture, LegacyTopPOnlyWarnsAtStartupAndReload)
+{
+    nlohmann::json legacy = nlohmann::json::parse(kBaseConfig);
+    legacy["chat"]["top_p"] = 0.9;
+
+    // 启动：能启动（canStart 即没有 Error/Fatal），top_p 只是一条未知字段告警
+    const ConfigLoadResult startup = ConfigLoader().loadText(legacy.dump());
+    ASSERT_TRUE(startup.canStart());
+    EXPECT_TRUE(hasUnknownFieldWarning(startup.diagnostics, "chat.top_p"));
+
+    // 重载：文件里新加上 top_p 并改了温度，重载成功，温度照常生效
+    ConfigReloader reloader(*store, *live);
+    writeEdited([](nlohmann::json &config) {
+        config["chat"]["top_p"] = 0.9;
+        config["chat"]["temperature"] = 0.4;
+    });
+    ConfigReloadReport report = reloader.reload();
+    ASSERT_TRUE(report.result.success);
+    EXPECT_EQ(store->current(), report.result.snapshot);
+    EXPECT_TRUE(hasUnknownFieldWarning(report.result.diagnostics, "chat.top_p"));
+    EXPECT_EQ(report.applied, (std::vector<std::string>{"chat.temperature"}));
+    EXPECT_TRUE(report.restartOnly.empty());
+    EXPECT_DOUBLE_EQ(live->chat.get()->temperature, 0.4);
+    EXPECT_EQ(summarizeReload(report), "配置已刷新：1 项变化，已生效 1 项。");
+
+    // 只改 top_p 的值：没有任何变化
+    writeEdited([](nlohmann::json &config) {
+        config["chat"]["top_p"] = 0.5;
+        config["chat"]["temperature"] = 0.4;
+    });
+    report = reloader.reload();
+    ASSERT_TRUE(report.result.success);
+    EXPECT_TRUE(report.result.diff.empty());
+    EXPECT_TRUE(hasUnknownFieldWarning(report.result.diagnostics, "chat.top_p"));
+    EXPECT_EQ(summarizeReload(report), "配置校验通过，内存快照无变化。");
 }
 
 // 并发的重载排队执行：发布与应用不会交错

@@ -400,6 +400,46 @@ TEST_F(PanelServerFixture, PostLiveSwitchesReportsDynamicAndAppliesToLiveValues)
     EXPECT_EQ(live->glance.get()->perGroupPerMinute, 12);
 }
 
+// chat.top_p 已删除（2026-11-15）：文件里还留着它时，面板照常读、照常保存与重载，
+// 写回结果里只有一条未知字段告警（不是 422）；别的键照常生效
+TEST_F(PanelServerFixture, PostConfigWithLegacyTopPSavesAndWarns)
+{
+    nlohmann::json legacy = nlohmann::json::parse(panelConfig);
+    legacy["chat"]["top_p"] = 0.9;
+    writeFile(legacy.dump(4));
+
+    httplib::Client client("127.0.0.1", port);
+    const auto fetched = client.Get("/api/config", authHeaders());
+    ASSERT_TRUE(fetched != nullptr);
+    ASSERT_EQ(fetched->status, 200);
+    nlohmann::json candidate = nlohmann::json::parse(fetched->body);
+    ASSERT_TRUE(candidate["chat"].contains("top_p"));
+    candidate["chat"]["temperature"] = 0.3;
+    const auto posted = client.Post("/api/config", authHeaders(), candidate.dump(),
+                                    "application/json");
+    ASSERT_TRUE(posted != nullptr);
+    ASSERT_EQ(posted->status, 200);
+
+    const nlohmann::json body = nlohmann::json::parse(posted->body);
+    EXPECT_TRUE(body["reloadSuccess"].get<bool>());
+    ASSERT_EQ(body["diff"].size(), 1U);
+    EXPECT_EQ(body["diff"][0]["path"], "chat.temperature");
+    EXPECT_EQ(body["diff"][0]["impact"], "dynamic");
+    bool warned = false;
+    for (const auto &warning : body["warnings"])
+    {
+        if (warning["path"] == "chat.top_p" && warning["severity"] == "warning")
+            warned = true;
+    }
+    EXPECT_TRUE(warned);
+    for (const auto &diagnostic : body["diagnostics"])
+    {
+        EXPECT_NE(diagnostic["severity"], "error");
+        EXPECT_NE(diagnostic["severity"], "fatal");
+    }
+    EXPECT_DOUBLE_EQ(live->chat.get()->temperature, 0.3);
+}
+
 TEST_F(PanelServerFixture, PostInvalidConfigReturns422AndKeepsFile)
 {
     const std::string before = readFile();
@@ -497,6 +537,9 @@ TEST_F(PanelServerFixture, RootServesPageFileWithoutAuth)
     // 不再有字段提示
     EXPECT_NE(result->body.find("PASSTHROUGH_PATHS = new Set([\"bot.aliases\"])"), std::string::npos);
     EXPECT_EQ(result->body.find("\"bot.aliases\":"), std::string::npos);
+    // chat.top_p 已删除：旧配置里的残留不渲染，保存后随收集从文件里消失
+    EXPECT_NE(result->body.find("chat: [\"top_p\"]"), std::string::npos);
+    EXPECT_EQ(result->body.find("\"chat.top_p\":"), std::string::npos);
 }
 
 TEST_F(PanelServerFixture, RootReturns500WhenPageFileMissing)

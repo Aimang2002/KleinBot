@@ -125,7 +125,7 @@ constexpr ConfigRuleTable ruleTable(const ConfigRule (&rows)[N])
     return ConfigRuleTable{rows, N};
 }
 
-// 产品规则表：90 个配置键，表的顺序就是差异条目的输出顺序
+// 产品规则表：89 个配置键，表的顺序就是差异条目的输出顺序
 ConfigRuleTable productConfigRules();
 
 #endif // CONFIG_RULES_H

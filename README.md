@@ -254,7 +254,7 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 - `glance.enabled`：下一张图起开始或停止瞥视（已排队的图照常看完）；仍需要启动时观察通道已开启（群内容缓冲在启动时建立）、视觉模型就绪。
 - `glance.per_group_per_minute`：下一张图起按新预算。
 
-其余配置仍需重启机器人才生效：`schema_version`、`bot.id`、`bot.manager_id`、`chat.worker_threads`、`web_search.provider`、`storage`、通信配置 `communication`、`webui`、`push`。`chat.top_p` 目前没有送进模型请求，配置了也不起作用。
+其余配置仍需重启机器人才生效：`schema_version`、`bot.id`、`bot.manager_id`、`chat.worker_threads`、`web_search.provider`、`storage`、通信配置 `communication`、`webui`、`push`。`chat.top_p` 已删除（从未送进模型请求）；旧配置里还留着这个键时照常启动和刷新，只给一条“未知字段已忽略”的告警，删掉即可。
 
 ### Web 配置面板（可选）
 

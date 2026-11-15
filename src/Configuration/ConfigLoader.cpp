@@ -650,14 +650,15 @@ ConfigLoadResult ConfigLoader::loadDocument(const json &document) const
     const json *chat = decoder.object(document, "chat", "chat", true);
     if (chat != nullptr)
     {
+        // chat.top_p 已删除（2026-11-15：从未送进模型请求）。旧配置里残留时按未知字段告警后忽略，
+        // 不报错，启动与重载照常
         decoder.unknownFields(*chat,
-                              {"default_model", "temperature", "top_p", "frequency_penalty",
+                              {"default_model", "temperature", "frequency_penalty",
                                "presence_penalty", "max_message_tokens", "worker_threads",
                                "message_survival_seconds"},
                               "chat");
         config.chat.defaultModel = decoder.string(*chat, "default_model", "chat.default_model", {}, true);
         config.chat.temperature = decoder.number(*chat, "temperature", "chat.temperature", 1.0, 0.0, 2.0);
-        config.chat.topP = decoder.number(*chat, "top_p", "chat.top_p", 1.0, 0.0, 1.0);
         config.chat.frequencyPenalty = decoder.number(*chat, "frequency_penalty", "chat.frequency_penalty", 0.0, -2.0, 2.0);
         config.chat.presencePenalty = decoder.number(*chat, "presence_penalty", "chat.presence_penalty", 0.0, -2.0, 2.0);
         config.chat.maxMessageTokens = static_cast<std::size_t>(decoder.integer(

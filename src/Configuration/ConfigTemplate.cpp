@@ -48,7 +48,6 @@ nlohmann::json defaultDocument(const std::string &webUiToken)
         "chat": {
             "default_model": "your-chat-model",
             "temperature": 1.0,
-            "top_p": 1.0,
             "frequency_penalty": 0.0,
             "presence_penalty": 0.0,
             "max_message_tokens": 4096,

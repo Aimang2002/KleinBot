@@ -130,10 +130,9 @@ constexpr ConfigRule kProductRules[] = {
     {"bot.aliases",            applies(applyBotNames), field<&SchemaConfig::bot, &BotSchema::aliases>},
     {"bot.group_chat_enabled", applies(applyGroupChat), field<&SchemaConfig::bot, &BotSchema::groupChatEnabled>},
 
-    // chat：top_p 还没送进请求、修法待定，尚未接通；worker_threads 只能重启
+    // chat：worker_threads 只能重启
     {"chat.default_model",            applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::defaultModel>},
     {"chat.temperature",              applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::temperature>},
-    {"chat.top_p",                    notYet(Rebuild),    field<&SchemaConfig::chat, &ChatSchema::topP>},
     {"chat.frequency_penalty",        applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::frequencyPenalty>},
     {"chat.presence_penalty",         applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::presencePenalty>},
     {"chat.max_message_tokens",       applies(applyChat), field<&SchemaConfig::chat, &ChatSchema::maxMessageTokens>},

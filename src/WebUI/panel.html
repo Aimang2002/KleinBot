@@ -1624,7 +1624,7 @@
     const KEY_LABELS = {
       enabled: "启用", id: "QQ 号", manager_id: "管理员 QQ",
       name: "名称", group_chat_enabled: "启用群聊", default_model: "默认模型",
-      temperature: "温度 temperature", top_p: "Top P", frequency_penalty: "频率惩罚",
+      temperature: "温度 temperature", frequency_penalty: "频率惩罚",
       presence_penalty: "存在惩罚", max_message_tokens: "单条消息最大 token",
       worker_threads: "工作线程数", message_survival_seconds: "消息存活（秒）",
       drawing: "画图模型", vision: "视觉模型", worker: "轻量模型",
@@ -1694,7 +1694,6 @@
       "bot.group_chat_enabled": "是否响应群聊消息，关闭后仅私聊可用（保存即生效）。",
       "chat.default_model": "默认对话模型：从模型注册表下拉选择（模型在「模型供应商」页维护）；需重启生效。",
       "chat.temperature": "采样温度 0~2：越高回答越随机，常用 0.7~1.0。",
-      "chat.top_p": "核采样 0~1：与温度二选一调节随机性。",
       "chat.frequency_penalty": "频率惩罚 -2~2：正值降低字词重复倾向。",
       "chat.presence_penalty": "存在惩罚 -2~2：正值鼓励引入新话题。",
       "chat.max_message_tokens": "单条消息的 token 上限，超出会提示用户精简。",
@@ -1766,7 +1765,7 @@
     let passthroughFields = {};
     // 从“消息处理”（原聊天参数）归入“模型设置”模块展示的字段：
     // 配置里仍在 chat 分组，data-path 不变，保存时写回 chat
-    const CHAT_MODEL_FIELDS = ["default_model", "temperature", "top_p",
+    const CHAT_MODEL_FIELDS = ["default_model", "temperature",
       "frequency_penalty", "presence_penalty"];
     const SECTION_KEY_ORDER = {
       bot: ["id", "manager_id", "name"],
@@ -1790,9 +1789,11 @@
     const ARRAY_PATHS = new Set(["push.allowed_groups", "push.allowed_users"]);
 
     // 已废弃字段：不渲染、保存时随收集自然消失（旧配置残留值不再显示为可编辑项）；
-    // worker 不再单独成卡（2026-09-19）：模型下拉挪进"对话模型"，端点与密钥由注册表提供
+    // worker 不再单独成卡（2026-09-19）：模型下拉挪进"对话模型"，端点与密钥由注册表提供；
+    // chat.top_p 已删除（2026-11-15，从未送进模型请求）：旧配置里的残留不显示，保存后从文件里消失
     const HIDDEN_KEYS = {
-      models: ["registry_path", "stable_diffusion", "worker"]
+      models: ["registry_path", "stable_diffusion", "worker"],
+      chat: ["top_p"]
     };
 
     function orderedEntries(object, sectionKey) {
