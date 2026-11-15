@@ -5,6 +5,7 @@
 #include "MemoryStore.h"
 #include "../Persistence/ConversationStore.h"
 #include "MemoryOptions.h"
+#include "../utils/Live.h"
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -17,8 +18,11 @@
 class MemoryService
 {
 public:
+    // config 是组合根的活值（ADR-023）：model、batch_turns、idle_minutes、recall_limit 在使用处
+    // 取快照，改了下一次操作即用新值。enabled 只在构造时读一次，决定是否启动后台线程
+    // （运行中不跟随重载，L2.b 再改）
     MemoryService(const std::string &dbPath, ConversationStore &conversationStore,
-                  Dock &dock, const ModelRegistry &models, const MemoryOptions &config);
+                  Dock &dock, const ModelRegistry &models, const Live<MemoryOptions> &config);
     ~MemoryService();
 
     MemoryService(const MemoryService &) = delete;
@@ -47,16 +51,14 @@ private:
     };
 
     void workerLoop();
-    void processBatch(uint64_t user_id, PendingBatch batch);
+    void processBatch(uint64_t user_id, PendingBatch batch, const std::string &modelName);
     bool isEpochCurrent(uint64_t user_id, uint64_t epoch);
 
     MemoryStore store;
     ConversationStore &conversationStore;
     MemoryExtractor extractor;
-    bool enabled = true;
-    std::size_t batchTurns = 3;
-    std::size_t recallLimit = 8;
-    std::chrono::seconds idleDelay{std::chrono::minutes{1}};
+    const Live<MemoryOptions> &config;
+    bool enabled = true; // 启动值：记忆库可用且启动时 memory.enabled 为真
 
     std::thread worker;
     std::mutex queueMutex;

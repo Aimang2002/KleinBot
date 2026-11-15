@@ -165,6 +165,28 @@ TEST(ConfigDiffTest, VoiceKeysAreDynamic)
         EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Dynamic)) << path;
 }
 
+// 配置实时生效 L1.d：memory 除 enabled 外的 4 个键接通应用，档位变为 Dynamic；
+// enabled 决定是否起后台线程，尚未接通（仍为 Rebuild）
+TEST(ConfigDiffTest, MemoryKeysAreDynamicExceptEnabled)
+{
+    SchemaConfig current;
+    SchemaConfig candidate = current;
+    candidate.memory.enabled = !current.memory.enabled;
+    candidate.memory.model = "memory-next";
+    candidate.memory.batchTurns = current.memory.batchTurns + 1;
+    candidate.memory.idleMinutes = current.memory.idleMinutes + 1;
+    candidate.memory.recallLimit = current.memory.recallLimit + 1;
+
+    const ConfigDiff diff = compareConfig(current, candidate);
+
+    EXPECT_EQ(diff.size(), 5U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 4U);
+    for (const char *path : {"memory.model", "memory.batch_turns", "memory.idle_minutes",
+                             "memory.recall_limit"})
+        EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Dynamic)) << path;
+    EXPECT_TRUE(containsChange(diff, "memory.enabled", ConfigChangeImpact::Rebuild));
+}
+
 TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)
 {
     TemporaryConfigFile file;

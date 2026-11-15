@@ -56,13 +56,10 @@ bool coveredByStructuredFact(const TimestampedMessage &message,
 }
 
 MemoryService::MemoryService(const std::string &dbPath, ConversationStore &conversationStore,
-                             Dock &dock, const ModelRegistry &models, const MemoryOptions &config)
-    : store(dbPath), conversationStore(conversationStore), extractor(dock, models, config.model)
+                             Dock &dock, const ModelRegistry &models, const Live<MemoryOptions> &config)
+    : store(dbPath), conversationStore(conversationStore), extractor(dock, models), config(config)
 {
-    enabled = config.enabled && store.isOpen();
-    batchTurns = config.batchTurns;
-    recallLimit = config.recallLimit;
-    idleDelay = std::chrono::minutes(config.idleMinutes);
+    enabled = config.get()->enabled && store.isOpen();
     if (enabled)
     {
         worker = std::thread(&MemoryService::workerLoop, this);
@@ -101,6 +98,8 @@ std::string MemoryService::recall(uint64_t user_id, const std::vector<std::strin
                                   const std::vector<StructuredFactQuery> &factQueries,
                                   int64_t excludeConversationId)
 {
+    // 一次召回取一次配置快照
+    const std::size_t recallLimit = config.get()->recallLimit;
     const std::size_t effectiveLimit = limit == 0 ? recallLimit : std::min(limit, recallLimit);
     const std::size_t candidateLimit = effectiveLimit * 3;
     std::vector<MemoryItem> memories;
@@ -234,8 +233,9 @@ std::string MemoryService::recallForMessage(uint64_t user_id, const std::string 
     if (!explicitRecall && factQueries.empty())
         return {};
 
+    // limit 传 0 = 按配置的 recall_limit，由 recall 取那一份快照（同一次召回不取两次）
     const std::string result = recall(
-        user_id, {text}, recallLimit, factQueries, currentMessageId);
+        user_id, {text}, 0, factQueries, currentMessageId);
     if (result == "没有找到与这些检索词相关的长期记忆或原始对话。")
         return {};
     return result;
@@ -279,6 +279,11 @@ void MemoryService::workerLoop()
 {
     while (true)
     {
+        // 每一轮（挑一个批次并提取）开头取一次配置快照，在队列锁之外取：活值的锁不与
+        // queueMutex 嵌套。本轮挑批次用的 batch_turns、idle_minutes 与提取用的 model 都出自
+        // 这一份；配置换了，最迟下一轮（约 500 毫秒）起用新值，正在提取的批次不受影响
+        const Live<MemoryOptions>::Snapshot options = config.get();
+        const std::chrono::minutes idleDelay(options->idleMinutes);
         uint64_t selectedUser = 0;
         PendingBatch selectedBatch;
         {
@@ -290,7 +295,7 @@ void MemoryService::workerLoop()
             const auto now = std::chrono::steady_clock::now();
             for (auto iterator = pending.begin(); iterator != pending.end(); ++iterator)
             {
-                const bool batchReady = iterator->second.turns.size() >= batchTurns;
+                const bool batchReady = iterator->second.turns.size() >= options->batchTurns;
                 const bool idleReady = now - iterator->second.lastUpdated >= idleDelay;
                 if (!batchReady && !idleReady)
                     continue;
@@ -302,13 +307,13 @@ void MemoryService::workerLoop()
         }
 
         if (selectedUser != 0 && !selectedBatch.turns.empty())
-            processBatch(selectedUser, std::move(selectedBatch));
+            processBatch(selectedUser, std::move(selectedBatch), options->model);
     }
 }
 
-void MemoryService::processBatch(uint64_t user_id, PendingBatch batch)
+void MemoryService::processBatch(uint64_t user_id, PendingBatch batch, const std::string &modelName)
 {
-    auto mutations = extractor.extract(user_id, batch.turns);
+    auto mutations = extractor.extract(user_id, batch.turns, modelName);
     if (!isEpochCurrent(user_id, batch.epoch))
         return;
     for (const auto &mutation : mutations)

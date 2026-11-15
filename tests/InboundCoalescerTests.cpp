@@ -283,7 +283,8 @@ struct PrivateMessageFixture
         : store(directory.path() + "/conversation.db"),
           registry(writeRegistry()),
           dock(DockOptions{}),
-          memory(directory.path() + "/conversation.db", store, dock, registry, memoryOptions()),
+          liveMemory(memoryOptions()),
+          memory(directory.path() + "/conversation.db", store, dock, registry, liveMemory),
           liveChat(chatOptions()),
           session(registry, store, bot, liveChat),
           chat(dock, session, registry, tools, memory, liveChat, 1),
@@ -330,6 +331,7 @@ struct PrivateMessageFixture
     ConversationStore store;
     ModelRegistry registry;
     Dock dock;
+    Live<MemoryOptions> liveMemory;
     MemoryService memory;
     BotIdentity bot;
     Live<ChatOptions> liveChat;

@@ -241,6 +241,7 @@ HTTP 的两个方向使用不同认证语义：Klein 调用 OneBot API 时通过
 - `models.drawing`、`models.vision`、`models.worker` 的 `model`、`endpoint`、`api_key`、`api_standard`：生图、看图、群聊瞥视和后台杂务（话题会话、私聊摘要）下一次调用就用新配置。两处仍按启动时的配置：启动时视觉模型没配好、之后才补上的，群聊瞥视要重启才开始；决策层 judge（`affect.policy` 为 `judge` 时）用的 worker 端点。
 - `voice.enabled`：改了就把语音总开关置为新值；之后管理员的 `#激活语音`、`#冻结语音` 还能再改，以最后一次为准。只改其他 `voice` 参数时总开关不动。
 - `voice.host`、`voice.port`、`voice.reference_audio`、`voice.reference_text`：下一次合成语音就用新参数。
+- `memory.model`（没写时跟着 `chat.default_model` 走）、`memory.batch_turns`、`memory.idle_minutes`、`memory.recall_limit`：后台提取最迟一两秒内按新的批次条件挑下一批、用新模型，召回从下一次起按新条数。`memory.enabled` 仍要重启。
 
 其余配置仍需重启机器人才生效（`chat.top_p` 目前没有送进模型请求，配置了也不起作用）。
 

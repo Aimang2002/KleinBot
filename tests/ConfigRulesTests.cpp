@@ -45,7 +45,7 @@ TEST(ConfigRulesTest, PathsAreUniqueAndEveryRowIsComplete)
 
 // 接通实时生效的键，按表的顺序：每行都带应用函数、档位 Dynamic。
 // L1.a：chat 组除 top_p 与 worker_threads 外的 6 个；L1.b：models 的三个端点各 4 个字段；
-// L1.c：voice 的 5 个键（开关与合成参数）
+// L1.c：voice 的 5 个键（开关与合成参数）；L1.d：memory 除 enabled 外的 4 个
 TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
 {
     std::vector<std::string> wired;
@@ -69,8 +69,10 @@ TEST(ConfigRulesTest, AppliesRowsAreExactlyTheWiredKeys)
         // L1.c
         "voice.enabled", "voice.host", "voice.port", "voice.reference_audio_path",
         "voice.reference_text",
+        // L1.d
+        "memory.model", "memory.batch_turns", "memory.idle_minutes", "memory.recall_limit",
     };
-    EXPECT_EQ(wired.size(), 23U);
+    EXPECT_EQ(wired.size(), 27U);
     EXPECT_EQ(wired, expected);
 }
 

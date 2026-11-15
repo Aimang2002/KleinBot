@@ -8,6 +8,8 @@
 #include "Bootstrap/LiveSettings.h"
 #include "ComputerStatus/ComputerStatus.h"
 #include "Configuration/ConfigLoader.h"
+#include "Memory/MemoryService.h"
+#include "ModelApiCaller/Dock.hpp"
 #include "ModelApiCaller/ModelEndpointResolver.h"
 #include "ModelRegistry/ModelRegistry.h"
 #include "Persistence/ConversationStore.h"
@@ -15,10 +17,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -87,6 +91,59 @@ void applySlowly(LiveSettings &live, const RuntimeSettings &next)
 
 const ConfigRule kSlowRules[] = {
     {"chat.temperature", applies(applySlowly), alwaysChanged},
+};
+
+// 记下每次记忆提取请求用的模型名（后台线程调用，带锁），可等到第 N 次请求
+class ExtractionLog
+{
+public:
+    void record(const std::string &modelName)
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            names.push_back(modelName);
+        }
+        changed.notify_all();
+    }
+
+    std::vector<std::string> waitFor(std::size_t count)
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        changed.wait_for(lock, std::chrono::seconds(5), [&]() { return names.size() >= count; });
+        return names;
+    }
+
+private:
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::vector<std::string> names;
+};
+
+class ExtractionRecordingPort final : public LLMPort
+{
+public:
+    explicit ExtractionRecordingPort(ExtractionLog *log) : log(log) {}
+    ChatResponse request_chat(const ChatModel &, const std::string &modelName, const ChatRequest &) override
+    {
+        log->record(modelName);
+        ChatResponse response;
+        response.code = 200;
+        response.content = R"({"memories":[]})";
+        response.finish_reason = "stop";
+        return response;
+    }
+    VisionResponse request_vision(const ChatModel &, const std::string &, const std::string &,
+                                  const std::string &) override
+    {
+        return {};
+    }
+    ImageResponse request_image(const ChatModel &, const std::string &, const std::string &) override
+    {
+        return {};
+    }
+
+private:
+    ExtractionLog *log;
 };
 
 // 全部活值的快照：持有 shared_ptr，旧快照不会被释放，指针比较不会撞上复用的地址
@@ -246,7 +303,8 @@ TEST_F(ConfigReloaderFixture, ParsedButInvalidCandidateAppliesNothing)
 }
 
 // 产品规则表（默认）：只有接通的行把新值换进活值（L1.a 起 chat 组 6 个键，L1.b 起
-// models 的 12 个键，L1.c 起 voice 的 5 个键），其余活值的快照指针不变；
+// models 的 12 个键，L1.c 起 voice 的 5 个键，L1.d 起 memory 除 enabled 外的 4 个键），
+// 其余活值的快照指针不变；还没接通的字段在活值里保持运行值（决定 9 的同一做法）；
 // 反馈如实列出已生效、需重启与尚未接通的键
 TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
 {
@@ -257,6 +315,9 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
         config["chat"]["worker_threads"] = 3;
         config["models"]["vision"] = {{"model", "vision-next"}};
         config["voice"] = {{"enabled", true}, {"host", "127.0.0.1"}, {"port", "9880"}};
+        // 其余 memory 键写成与缺省节相同的值，只让 enabled 与 recall_limit 变化
+        config["memory"] = {{"enabled", false}, {"batch_turns", 10}, {"idle_minutes", 30},
+                            {"recall_limit", 5}};
         config["storage"] = {{"conversation_database", "next.db"}};
         config["network"] = {{"proxy", "http://127.0.0.1:7890"}};
     });
@@ -265,15 +326,15 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     const ConfigReloadReport report = reloader.reload();
 
     ASSERT_TRUE(report.result.success);
-    EXPECT_EQ(report.result.diff.size(), 9U);
+    EXPECT_EQ(report.result.diff.size(), 11U);
     EXPECT_EQ(store->current(), report.result.snapshot);
     EXPECT_EQ(report.applied,
               (std::vector<std::string>{"chat.temperature", "models.vision.model", "voice.enabled",
-                                        "voice.host", "voice.port"}));
+                                        "voice.host", "voice.port", "memory.recall_limit"}));
     EXPECT_EQ(report.restartOnly,
               (std::vector<std::string>{"chat.worker_threads", "storage.conversation_database"}));
     EXPECT_EQ(report.notWired,
-              (std::vector<std::string>{"bot.group_chat_enabled", "network.proxy"}));
+              (std::vector<std::string>{"bot.group_chat_enabled", "memory.enabled", "network.proxy"}));
 
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_NE(after.chat, before.chat);
@@ -288,16 +349,18 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_EQ(after.voice->host, "127.0.0.1");
     EXPECT_TRUE(*after.globalVoice) << "voice.enabled 变了：总开关置为新值";
     EXPECT_FALSE(*before.globalVoice);
-    EXPECT_EQ(after.memory, before.memory);
+    EXPECT_NE(after.memory, before.memory);
+    EXPECT_EQ(after.memory->recallLimit, 5U);
+    EXPECT_TRUE(after.memory->enabled) << "memory.enabled 尚未接通：活值里保持运行值";
     EXPECT_EQ(after.webSearch, before.webSearch);
     EXPECT_EQ(after.webFetch, before.webFetch);
     EXPECT_EQ(after.dock, before.dock);
     EXPECT_EQ(after.glance, before.glance);
     EXPECT_EQ(after.message, before.message);
     EXPECT_EQ(summarizeReload(report),
-              "配置已刷新：9 项变化，已生效 5 项。\n"
+              "配置已刷新：11 项变化，已生效 6 项。\n"
               "需重启才能生效 2 项：chat.worker_threads、storage.conversation_database。\n"
-              "尚未接通实时生效、需重启 2 项：bot.group_chat_enabled、network.proxy。");
+              "尚未接通实时生效、需重启 3 项：bot.group_chat_enabled、memory.enabled、network.proxy。");
 }
 
 // 端到端（L1.a）：真实的重载入口 + 产品规则表 + 持活值的 UserSessionService。
@@ -443,6 +506,64 @@ TEST_F(ConfigReloaderFixture, VoiceSwitchFollowsConfigChangesAndCommandsLastWrit
         ASSERT_TRUE(report.result.success);
         EXPECT_EQ(report.applied, (std::vector<std::string>{"voice.enabled"}));
         EXPECT_EQ(userTurnsVoiceOn(), "管理员尚未激活语音功能。");
+    }
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+}
+
+// 端到端（L1.d）：没写 memory.model 时，加载阶段取 chat.default_model 的值。改默认模型后，
+// 差异里 memory.model 跟着变、一并应用，记忆服务下一次提取就用新模型；显式写了
+// memory.model 的不跟随。第二次重载同时把 batch_turns 从 2 降到 1：重载前那一轮手里的
+// 旧快照挑不中新入队的单轮批次，提取只能出自新快照
+TEST_F(ConfigReloaderFixture, MemoryModelFollowsDefaultModelWhenNotConfigured)
+{
+    const std::filesystem::path directory =
+        path.parent_path() / (path.stem().string() + "-memory");
+    std::filesystem::create_directories(directory);
+    const std::string registryPath = (directory / "models.json").string();
+    std::ofstream(registryPath) << R"({"Models":[{"ModelName":["test-model","next-model"],"api_key":"k",)"
+                                   R"("api_endpoint":"https://example.test/chat","APIStandard":"Fake"}]})";
+    {
+        ModelRegistry registry(registryPath);
+        const std::string databasePath = (directory / "conversation.db").string();
+        ConversationStore conversations(databasePath);
+        std::atomic<bool> running{true};
+        Dock dock(DockOptions{}, &running);
+        ExtractionLog log;
+        dock.registerStandard("Fake", std::make_unique<ExtractionRecordingPort>(&log));
+        ConfigReloader reloader(*store, *live);
+
+        // memory 节里不写 model
+        writeEdited([](nlohmann::json &config) { config["memory"] = {{"batch_turns", 2}}; });
+        ASSERT_TRUE(reloader.reload().result.success);
+        EXPECT_EQ(live->memory.get()->model, "test-model");
+        MemoryService memory(databasePath, conversations, dock, registry, live->memory);
+        ASSERT_TRUE(memory.isEnabled());
+        memory.enqueueTurn(10, "我喜欢塞尔达", "记住了", 1, 2);
+        memory.enqueueTurn(10, "我住在上海", "好的", 3, 4);
+        EXPECT_EQ(log.waitFor(1), (std::vector<std::string>{"test-model"}));
+
+        writeEdited([](nlohmann::json &config) {
+            config["chat"]["default_model"] = "next-model";
+            config["memory"] = {{"batch_turns", 1}};
+        });
+        const ConfigReloadReport report = reloader.reload();
+        ASSERT_TRUE(report.result.success);
+        EXPECT_EQ(report.applied, (std::vector<std::string>{"chat.default_model", "memory.model",
+                                                            "memory.batch_turns"}));
+        memory.enqueueTurn(11, "我养了一只猫", "真好", 5, 6);
+        EXPECT_EQ(log.waitFor(2), (std::vector<std::string>{"test-model", "next-model"}));
+
+        // 显式写了 memory.model：默认模型再变，它不跟
+        writeEdited([](nlohmann::json &config) {
+            config["chat"]["default_model"] = "test-model";
+            config["memory"] = {{"batch_turns", 1}, {"model", "next-model"}};
+        });
+        const ConfigReloadReport pinned = reloader.reload();
+        ASSERT_TRUE(pinned.result.success);
+        EXPECT_EQ(pinned.applied, (std::vector<std::string>{"chat.default_model"}));
+        EXPECT_EQ(live->memory.get()->model, "next-model");
+        memory.shutdown();
     }
     std::error_code error;
     std::filesystem::remove_all(directory, error);

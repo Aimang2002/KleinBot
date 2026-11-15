@@ -421,7 +421,8 @@ int main(int argc, char **argv)
 	UserSessionService userSession(models, conversationStore, settings.bot, liveSettings.chat,
 	                                "source/soul.md");
 	Dock dock(settings.dock, &running);
-	MemoryService memoryService(dbPath, conversationStore, dock, models, settings.memory);
+	// 记忆参数持活值；memory.enabled 仍按启动值决定是否起后台线程（L2.b 再改）
+	MemoryService memoryService(dbPath, conversationStore, dock, models, liveSettings.memory);
 	userSession.setMemoryService(&memoryService);
 	userSession.setImageAssetStore(&imageAssetStore);
 	if (settings.bot.managerId != 0)

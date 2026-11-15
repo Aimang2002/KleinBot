@@ -9,13 +9,18 @@
 #include "ModelRegistry/ModelRegistry.h"
 #include "Persistence/ConversationStore.h"
 #include "Tool/RecallConversationTool.h"
+#include "utils/Live.h"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -371,7 +376,8 @@ TEST(MemoryServiceRecallTest, MixesLongTermMemoryWithIndependentRawHistory)
     options.enabled = true;
     options.model = "unused";
     options.idleMinutes = 60;
-    MemoryService service(databasePath, conversations, dock, models, options);
+    Live<MemoryOptions> liveOptions(options);
+    MemoryService service(databasePath, conversations, dock, models, liveOptions);
     RecallConversationTool tool(service);
     const auto schema = nlohmann::json::parse(tool.parametersSchema());
     EXPECT_TRUE(schema["properties"].contains("fact_queries"));
@@ -415,7 +421,8 @@ TEST(MemoryServiceRecallTest, AutomaticallyRecallsFactAndExcludesCurrentMessage)
     options.enabled = true;
     options.model = "unused";
     options.idleMinutes = 60;
-    MemoryService service(databasePath, conversations, dock, models, options);
+    Live<MemoryOptions> liveOptions(options);
+    MemoryService service(databasePath, conversations, dock, models, liveOptions);
 
     const std::string result = service.recallForMessage(
         10, "我现在最喜欢什么游戏？", currentMessageId);
@@ -425,5 +432,149 @@ TEST(MemoryServiceRecallTest, AutomaticallyRecallsFactAndExcludesCurrentMessage)
     EXPECT_EQ(result.find("[user] 我现在最喜欢什么游戏？"), std::string::npos);
     EXPECT_TRUE(service.recallForMessage(10, "今天天气怎么样？", 0).empty());
     EXPECT_TRUE(service.recallForMessage(10, "你觉得塞尔达传说怎么样？", 0).empty());
+    service.shutdown();
+}
+
+namespace
+{
+// 记下每次提取请求用的模型名（后台线程调用，带锁），可等到第 N 次请求
+class ExtractionLog
+{
+public:
+    void record(const std::string &modelName)
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            names.push_back(modelName);
+        }
+        changed.notify_all();
+    }
+
+    std::vector<std::string> waitFor(std::size_t count)
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        changed.wait_for(lock, std::chrono::seconds(5), [&]() { return names.size() >= count; });
+        return names;
+    }
+
+private:
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::vector<std::string> names;
+};
+
+class ExtractionRecordingPort final : public LLMPort
+{
+public:
+    explicit ExtractionRecordingPort(ExtractionLog *log) : log(log) {}
+    ChatResponse request_chat(const ChatModel &, const std::string &modelName, const ChatRequest &) override
+    {
+        log->record(modelName);
+        ChatResponse response;
+        response.code = 200;
+        response.content = R"({"memories":[]})";
+        response.finish_reason = "stop";
+        return response;
+    }
+    VisionResponse request_vision(const ChatModel &, const std::string &, const std::string &,
+                                  const std::string &) override
+    {
+        return {};
+    }
+    ImageResponse request_image(const ChatModel &, const std::string &, const std::string &) override
+    {
+        return {};
+    }
+
+private:
+    ExtractionLog *log;
+};
+
+std::size_t recallEntries(const std::string &text)
+{
+    std::size_t count = 0;
+    for (std::size_t at = text.find("\n- ["); at != std::string::npos; at = text.find("\n- [", at + 1))
+        ++count;
+    return count;
+}
+}
+
+// 配置实时生效（L1.d）：召回条数上限在每次召回时取当前配置。先按 3 条召回一次，
+// 改成 1 之后下一次只给 1 条；工具给的上限也不超过配置
+TEST(MemoryServiceLiveConfigTest, RecallUsesCurrentRecallLimit)
+{
+    RecallTemporaryDirectory temporaryDirectory;
+    const auto databasePath = temporaryDirectory.path() + "/memory.db";
+    const auto modelPath = temporaryDirectory.path() + "/models.json";
+    std::ofstream(modelPath) << R"({"Models":[]})";
+    ConversationStore conversations(databasePath);
+    for (int index = 1; index <= 5; ++index)
+        conversations.append(10, "user", "第" + std::to_string(index) + "次聊到塞尔达传说的地图。",
+                             1000 + index);
+
+    std::atomic<bool> running{true};
+    Dock dock(DockOptions{}, &running);
+    ModelRegistry models(modelPath);
+    MemoryOptions initial;
+    initial.enabled = false; // 只召回原始对话，不起后台线程
+    initial.recallLimit = 3;
+    Live<MemoryOptions> options(initial);
+    MemoryService service(databasePath, conversations, dock, models, options);
+
+    EXPECT_EQ(recallEntries(service.recall(10, {"塞尔达传说"}, 0)), 3U);
+
+    MemoryOptions next = initial;
+    next.recallLimit = 1;
+    options.set(next);
+    EXPECT_EQ(recallEntries(service.recall(10, {"塞尔达传说"}, 0)), 1U);
+    EXPECT_EQ(recallEntries(service.recall(10, {"塞尔达传说"}, 5)), 1U);
+    service.shutdown();
+}
+
+// 配置实时生效（L1.d）：后台线程每一轮开头取一份配置快照，batch_turns、idle_minutes、model
+// 改了，下一轮挑批次、下一次提取就用新值。每次换值都只放宽条件：换值前那一轮手里的旧快照
+// 挑不中新入队的批次，结果只能出自新快照，用例因此不依赖时序
+TEST(MemoryServiceLiveConfigTest, WorkerUsesCurrentBatchIdleAndModel)
+{
+    RecallTemporaryDirectory temporaryDirectory;
+    const auto databasePath = temporaryDirectory.path() + "/memory.db";
+    const auto modelPath = temporaryDirectory.path() + "/models.json";
+    std::ofstream(modelPath) << R"({"Models":[{"ModelName":["model-a","model-b"],"api_key":"k",)"
+                                R"("api_endpoint":"https://example.test/chat","APIStandard":"Fake"}]})";
+    ConversationStore conversations(databasePath);
+    std::atomic<bool> running{true};
+    Dock dock(DockOptions{}, &running);
+    ExtractionLog log;
+    dock.registerStandard("Fake", std::make_unique<ExtractionRecordingPort>(&log));
+    ModelRegistry models(modelPath);
+    MemoryOptions initial;
+    initial.enabled = true;
+    initial.model = "model-a";
+    initial.batchTurns = 3;
+    initial.idleMinutes = 60;
+    Live<MemoryOptions> options(initial);
+    MemoryService service(databasePath, conversations, dock, models, options);
+    ASSERT_TRUE(service.isEnabled());
+
+    // 换值之前：攒够 3 轮提取一次，用 model-a
+    for (int turn = 0; turn < 3; ++turn)
+        service.enqueueTurn(10, "第" + std::to_string(turn) + "句", "好的", 1 + turn * 2, 2 + turn * 2);
+    EXPECT_EQ(log.waitFor(1), (std::vector<std::string>{"model-a"}));
+
+    // batch_turns 3 → 2、model 换成 model-b：攒 2 轮就提取，用新模型
+    MemoryOptions next = initial;
+    next.batchTurns = 2;
+    next.model = "model-b";
+    options.set(next);
+    service.enqueueTurn(11, "我养了一只猫", "真好", 11, 12);
+    service.enqueueTurn(11, "它叫团子", "好名字", 13, 14);
+    EXPECT_EQ(log.waitFor(2), (std::vector<std::string>{"model-a", "model-b"}));
+
+    // idle_minutes 60 → 0、model 换回 model-a：1 轮攒不够一批，但空闲判定立即满足
+    next.idleMinutes = 0;
+    next.model = "model-a";
+    options.set(next);
+    service.enqueueTurn(12, "明天去爬山", "注意安全", 21, 22);
+    EXPECT_EQ(log.waitFor(3), (std::vector<std::string>{"model-a", "model-b", "model-a"}));
     service.shutdown();
 }

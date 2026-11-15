@@ -21,7 +21,8 @@ std::string jsonPayload(const std::string &content)
 }
 
 std::vector<MemoryMutation> MemoryExtractor::extract(uint64_t user_id,
-                                                     const std::vector<MemoryTurn> &turns)
+                                                     const std::vector<MemoryTurn> &turns,
+                                                     const std::string &modelName)
 {
     if (turns.empty())
         return {};

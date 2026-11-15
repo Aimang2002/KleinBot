@@ -1,14 +1,17 @@
 #include "ConfigRules.h"
 #include "LiveSettings.h"
 
+#include <utility>
+
 namespace
 {
 constexpr ConfigChangeImpact Dynamic = ConfigChangeImpact::Dynamic;
 constexpr ConfigChangeImpact Rebuild = ConfigChangeImpact::Rebuild;
 constexpr ConfigChangeImpact Restart = ConfigChangeImpact::Restart;
 
-// 应用函数：重载成功后，把新的运行时设置整份换进对应的活值（只替换快照，不会失败）。
-// 一组一个；同组几个键一起变化时，ConfigReloader 只调一次
+// 应用函数：重载成功后，把新的运行时设置换进对应的活值（只替换快照，不会失败）。
+// 一组一个；同组几个键一起变化时，ConfigReloader 只调一次。结构里有模块在读、但还没接通
+// 或只能重启的字段时，应用函数保持它的运行值（决定 9），活值里始终是模块实际在用的值
 
 // chat：ChatOptions 里没有只能重启的字段（线程数在 MessageExecutionOptions），整份替换即可
 void applyChat(LiveSettings &live, const RuntimeSettings &next)
@@ -43,6 +46,15 @@ void applyVoiceSwitch(LiveSettings &live, const RuntimeSettings &next)
 void applyVoice(LiveSettings &live, const RuntimeSettings &next)
 {
     live.voice.set(next.voice);
+}
+
+// memory：model、batch_turns、idle_minutes、recall_limit 换成新值；enabled 还没接通
+// （L2.b 前只按启动值决定是否起线程），保持运行值，与决定 9 同一做法
+void applyMemory(LiveSettings &live, const RuntimeSettings &next)
+{
+    MemoryOptions memory = next.memory;
+    memory.enabled = live.memory.get()->enabled;
+    live.memory.set(std::move(memory));
 }
 
 // 每行：差异里的路径、生效方式、比较的 Schema 字段。表的顺序就是差异条目的输出顺序。
@@ -102,12 +114,13 @@ constexpr ConfigRule kProductRules[] = {
     {"voice.reference_audio_path", applies(applyVoice),       field<&SchemaConfig::voice, &VoiceSchema::referenceAudioPath>},
     {"voice.reference_text",       applies(applyVoice),       field<&SchemaConfig::voice, &VoiceSchema::referenceText>},
 
-    // memory
-    {"memory.enabled",      notYet(Rebuild), field<&SchemaConfig::memory, &MemorySchema::enabled>},
-    {"memory.model",        notYet(Rebuild), field<&SchemaConfig::memory, &MemorySchema::model>},
-    {"memory.batch_turns",  notYet(Rebuild), field<&SchemaConfig::memory, &MemorySchema::batchTurns>},
-    {"memory.idle_minutes", notYet(Rebuild), field<&SchemaConfig::memory, &MemorySchema::idleMinutes>},
-    {"memory.recall_limit", notYet(Rebuild), field<&SchemaConfig::memory, &MemorySchema::recallLimit>},
+    // memory：enabled 决定是否起后台线程，L2.b 前尚未接通。没写 memory.model 时加载阶段
+    // 取 chat.default_model，所以改默认模型时这一行也会变、一并应用
+    {"memory.enabled",      notYet(Rebuild),     field<&SchemaConfig::memory, &MemorySchema::enabled>},
+    {"memory.model",        applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::model>},
+    {"memory.batch_turns",  applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::batchTurns>},
+    {"memory.idle_minutes", applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::idleMinutes>},
+    {"memory.recall_limit", applies(applyMemory), field<&SchemaConfig::memory, &MemorySchema::recallLimit>},
 
     // affect
     {"affect.enabled",     notYet(Restart), field<&SchemaConfig::affect, &AffectSchema::enabled>},
