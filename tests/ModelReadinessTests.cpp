@@ -71,7 +71,8 @@ TEST(GenerateImageToolReadinessTest, ExplainsWhenDrawingModelUnconfigured)
 {
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
-    Dock dock(DockOptions{});
+    Live<DockOptions> network{DockOptions{}};
+    Dock dock(network);
     ImageAssetStore store(temporaryDirectory.path() + "/assets.db",
                           temporaryDirectory.path() + "/images");
 
@@ -88,7 +89,8 @@ TEST(GenerateImageToolReadinessTest, ExplainsWhenDrawingApiKeyMissing)
 {
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
-    Dock dock(DockOptions{});
+    Live<DockOptions> network{DockOptions{}};
+    Dock dock(network);
     ImageAssetStore store(temporaryDirectory.path() + "/assets.db",
                           temporaryDirectory.path() + "/images");
 
@@ -106,7 +108,8 @@ TEST(InspectImageToolReadinessTest, ExplainsWhenVisionModelUnconfigured)
 {
     TemporaryDirectory temporaryDirectory;
     ASSERT_FALSE(temporaryDirectory.path().empty());
-    Dock dock(DockOptions{});
+    Live<DockOptions> network{DockOptions{}};
+    Dock dock(network);
     ImageAssetStore store(temporaryDirectory.path() + "/assets.db",
                           temporaryDirectory.path() + "/images");
 

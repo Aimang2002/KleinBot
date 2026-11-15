@@ -220,9 +220,9 @@ std::size_t appendResponse(char *data, std::size_t size, std::size_t count, void
 }
 }
 
-WebFetchAction::WebFetchAction(WebFetchOptions options, const std::atomic<bool> *running,
+WebFetchAction::WebFetchAction(const Live<WebFetchOptions> &options, const std::atomic<bool> *running,
                                HttpGet httpGet, Distiller distiller)
-    : options(std::move(options)), running(running),
+    : options(options), running(running),
       httpGet(std::move(httpGet)), distiller(std::move(distiller))
 {
 }
@@ -247,9 +247,10 @@ const ActionDescriptor &WebFetchAction::descriptor() const
     return value;
 }
 
-bool WebFetchAction::lookupCache(const std::string &key, FetchedPage &page)
+bool WebFetchAction::lookupCache(const WebFetchOptions &current, const std::string &key,
+                                 FetchedPage &page)
 {
-    if (options.cacheTtlSeconds <= 0 || options.cacheMaxEntries == 0)
+    if (current.cacheTtlSeconds <= 0 || current.cacheMaxEntries == 0)
         return false;
     std::lock_guard<std::mutex> guard(cacheMutex);
     const auto entry = cache.find(key);
@@ -266,13 +267,14 @@ bool WebFetchAction::lookupCache(const std::string &key, FetchedPage &page)
     return true;
 }
 
-void WebFetchAction::storeCache(const std::string &key, const FetchedPage &page)
+void WebFetchAction::storeCache(const WebFetchOptions &current, const std::string &key,
+                                const FetchedPage &page)
 {
-    if (options.cacheTtlSeconds <= 0 || options.cacheMaxEntries == 0)
+    if (current.cacheTtlSeconds <= 0 || current.cacheMaxEntries == 0)
         return;
     std::lock_guard<std::mutex> guard(cacheMutex);
     const auto now = std::chrono::steady_clock::now();
-    while (cache.size() >= options.cacheMaxEntries)
+    while (cache.size() >= current.cacheMaxEntries)
     {
         auto oldest = cache.begin();
         for (auto entry = cache.begin(); entry != cache.end(); ++entry)
@@ -286,15 +288,16 @@ void WebFetchAction::storeCache(const std::string &key, const FetchedPage &page)
     CacheEntry entry;
     entry.page = page;
     entry.page.text = truncateUtf8(page.text, kMaxCachedTextChars);
-    entry.expires = now + std::chrono::seconds(options.cacheTtlSeconds);
+    entry.expires = now + std::chrono::seconds(current.cacheTtlSeconds);
     entry.lastAccess = now;
     cache[key] = std::move(entry);
 }
 
-void WebFetchAction::loadPage(const std::string &url, FetchedPage &page)
+void WebFetchAction::loadPage(const WebFetchOptions &current, const std::string &url,
+                              FetchedPage &page)
 {
     const PageHttpResponse response =
-        httpGet ? httpGet(url) : performGet(url);
+        httpGet ? httpGet(url) : performGet(current, url);
 
     const std::string finalUrl = response.effectiveUrl.empty() ? url : response.effectiveUrl;
     const std::string finalUrlError = validatePublicHttpUrl(finalUrl);
@@ -341,14 +344,14 @@ void WebFetchAction::loadPage(const std::string &url, FetchedPage &page)
         throw std::runtime_error("网页返回状态码 " + std::to_string(response.statusCode));
 }
 
-PageHttpResponse WebFetchAction::performGet(const std::string &url)
+PageHttpResponse WebFetchAction::performGet(const WebFetchOptions &current, const std::string &url)
 {
     CURL *curl = curl_easy_init();
     if (curl == nullptr)
         throw std::runtime_error("无法初始化网页抓取请求");
 
     FetchBuffer buffer;
-    buffer.limit = options.maxResponseBytes;
+    buffer.limit = current.maxResponseBytes;
     curl_slist *headers = nullptr;
     headers = curl_slist_append(
         headers,
@@ -363,9 +366,9 @@ PageHttpResponse WebFetchAction::performGet(const std::string &url)
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
     CurlRequestControl::configure(
-        curl, running, options.connectTimeoutMs, options.requestTimeoutMs);
-    if (!options.proxy.empty())
-        curl_easy_setopt(curl, CURLOPT_PROXY, options.proxy.c_str());
+        curl, running, current.connectTimeoutMs, current.requestTimeoutMs);
+    if (!current.proxy.empty())
+        curl_easy_setopt(curl, CURLOPT_PROXY, current.proxy.c_str());
 
     const CURLcode result = curl_easy_perform(curl);
     long statusCode = 0;
@@ -395,6 +398,8 @@ PageHttpResponse WebFetchAction::performGet(const std::string &url)
 ActionResult WebFetchAction::execute(const nlohmann::json &arguments,
                                      const ActionContext &context)
 {
+    // 一次执行取一次配置快照，传给缓存、抓取与截断
+    const Live<WebFetchOptions>::Snapshot current = options.get();
     if (!arguments.is_object())
         return {R"({"error":"抓取参数必须是对象"})", {}, {}, false};
     const auto urlValue = arguments.find("url");
@@ -419,24 +424,24 @@ ActionResult WebFetchAction::execute(const nlohmann::json &arguments,
 
     const std::string cacheKey = stripFragment(url);
     FetchedPage page;
-    const bool fromCache = lookupCache(cacheKey, page);
+    const bool fromCache = lookupCache(*current, cacheKey, page);
     if (!fromCache)
     {
         try
         {
-            loadPage(url, page);
+            loadPage(*current, url, page);
         }
         catch (const std::exception &error)
         {
             return {nlohmann::json{{"error", error.what()}}.dump(), {}, {}, false};
         }
-        storeCache(cacheKey, page);
+        storeCache(*current, cacheKey, page);
     }
 
     std::string method = "direct";
     bool truncated = false;
     std::string content = page.text;
-    if (page.text.size() > options.maxContentChars)
+    if (page.text.size() > current->maxContentChars)
     {
         if (distiller)
         {
@@ -445,14 +450,14 @@ ActionResult WebFetchAction::execute(const nlohmann::json &arguments,
             if (!distilled.empty())
             {
                 method = "distilled";
-                content = truncateUtf8(distilled, options.maxContentChars);
+                content = truncateUtf8(distilled, current->maxContentChars);
             }
         }
         if (method == "direct")
         {
             method = "truncated";
             truncated = true;
-            content = truncateUtf8(page.text, options.maxContentChars);
+            content = truncateUtf8(page.text, current->maxContentChars);
         }
     }
 

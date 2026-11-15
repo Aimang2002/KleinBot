@@ -6,14 +6,17 @@
 #include "../../Port/VisionResponse.h"
 #include "../../Port/LLMPort.h"
 #include "../../Port/ChatRequest.h"
+#include "../../utils/Live.h"
+#include "../DockOptions.h"
 #include <atomic>
 #include <curl/curl.h>
 
 class AnthropicStandard : public LLMPort
 {
 public:
-    explicit AnthropicStandard(std::string proxy = {}, const std::atomic<bool> *running = nullptr)
-        : proxy(std::move(proxy)), running(running) {}
+    // network：组合根的活值（ADR-023），每次请求开头取一次代理，network.proxy 改了下一次请求即用新代理
+    explicit AnthropicStandard(const Live<DockOptions> &network, const std::atomic<bool> *running = nullptr)
+        : network(network), running(running) {}
     ChatResponse request_chat(const ChatModel &model, const std::string &model_name, const ChatRequest &request) override;
     VisionResponse request_vision(const ChatModel &model, const std::string &model_name, const std::string &prompt, const std::string &base64) override;
     ImageResponse request_image(const ChatModel &model, const std::string &model_name, const std::string &prompt) override;
@@ -22,8 +25,9 @@ public:
     ChatResponse chat_json_parse(const std::string &response);
 
 private:
-    // timeoutMs：0 = CurlRequestControl 默认超时
-    std::pair<std::string, long> http_post(const std::string &url, const std::string &api_key, const std::string &payload,
+    // proxy：本次请求开头取到的代理（空 = 直连）；timeoutMs：0 = CurlRequestControl 默认超时
+    std::pair<std::string, long> http_post(const std::string &proxy, const std::string &url,
+                                           const std::string &api_key, const std::string &payload,
                                            long timeoutMs = 0);
 
     VisionResponse vision_json_parse(const std::string &response);
@@ -32,7 +36,7 @@ private:
 
     std::string filterNonNormalChars(std::string str);
 
-    std::string proxy;
+    const Live<DockOptions> &network;
     const std::atomic<bool> *running;
 };
 

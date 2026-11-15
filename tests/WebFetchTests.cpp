@@ -4,6 +4,7 @@
 #include "Bootstrap/RuntimeSettings.h"
 #include "Configuration/ConfigLoader.h"
 #include "WebFetch/HtmlTextExtractor.h"
+#include "utils/Live.h"
 #include <array>
 #include <cstdlib>
 #include <string>
@@ -111,7 +112,8 @@ public:
 TEST(WebFetchActionTest, ReturnsDirectContentWithMetadata)
 {
     StaticPageFetch fetch;
-    WebFetchAction action(WebFetchOptions{}, nullptr, fetch.handler());
+    Live<WebFetchOptions> options{WebFetchOptions{}};
+    WebFetchAction action(options, nullptr, fetch.handler());
 
     const ActionResult result = action.execute(
         {{"url", "https://example.com/post/1"}}, {0, 0, "看看这篇文章"});
@@ -133,7 +135,8 @@ TEST(WebFetchActionTest, ReturnsDirectContentWithMetadata)
 TEST(WebFetchActionTest, RejectsInvalidUrlsBeforeAnyRequest)
 {
     StaticPageFetch fetch;
-    WebFetchAction action(WebFetchOptions{}, nullptr, fetch.handler());
+    Live<WebFetchOptions> options{WebFetchOptions{}};
+    WebFetchAction action(options, nullptr, fetch.handler());
 
     const std::array<std::string, 8> invalid{
         "", "ftp://example.com/file", "javascript:alert(1)", "not-a-url",
@@ -155,8 +158,9 @@ TEST(WebFetchActionTest, DistillsLongContentAroundProvidedQuestion)
     fetch.body = "<html><body><p>" + std::string(300, 'x') +
                  " 关键结论：售价 399 元，2026-08-18 发布。</p></body></html>";
     std::string capturedPrompt;
+    Live<WebFetchOptions> liveOptions(options);
     WebFetchAction action(
-        options, nullptr, fetch.handler(),
+        liveOptions, nullptr, fetch.handler(),
         [&capturedPrompt](const std::string &prompt)
         {
             capturedPrompt = prompt;
@@ -185,7 +189,8 @@ TEST(WebFetchActionTest, FallsBackToUtf8SafeTruncationWithoutDistiller)
     for (int index = 0; index < 120; ++index)
         chinese += "中";
     fetch.body = "<html><body><p>" + chinese + "</p></body></html>";
-    WebFetchAction action(options, nullptr, fetch.handler());
+    Live<WebFetchOptions> liveOptions(options);
+    WebFetchAction action(liveOptions, nullptr, fetch.handler());
 
     const ActionResult result = action.execute(
         {{"url", "https://example.com/long"}}, {0, 0, "总结一下"});
@@ -204,7 +209,8 @@ TEST(WebFetchActionTest, CachesFetchedPageAcrossQuestionsAndFragments)
     options.cacheTtlSeconds = 900;
     options.cacheMaxEntries = 8;
     StaticPageFetch fetch;
-    WebFetchAction action(options, nullptr, fetch.handler());
+    Live<WebFetchOptions> liveOptions(options);
+    WebFetchAction action(liveOptions, nullptr, fetch.handler());
 
     const ActionResult first = action.execute(
         {{"url", "https://example.com/page"}}, {0, 0, "第一问"});
@@ -216,12 +222,41 @@ TEST(WebFetchActionTest, CachesFetchedPageAcrossQuestionsAndFragments)
     EXPECT_EQ(nlohmann::json::parse(second.content).at("cached"), true);
 }
 
+// 配置实时生效（L1.e）：WebFetchAction 每次执行开头取一份快照。先抓一次（正文没超上限、
+// 进了缓存），把正文上限改小、缓存关掉之后，下一次就按新上限截断、不再命中缓存
+TEST(WebFetchActionTest, NextExecutionUsesReplacedOptions)
+{
+    WebFetchOptions initial;
+    initial.maxContentChars = 1000;
+    initial.cacheTtlSeconds = 900;
+    initial.cacheMaxEntries = 8;
+    Live<WebFetchOptions> options(initial);
+    StaticPageFetch fetch;
+    fetch.body = "<html><body><p>" + std::string(300, 'x') + "</p></body></html>";
+    WebFetchAction action(options, nullptr, fetch.handler());
+    const nlohmann::json arguments = {{"url", "https://example.com/long"}};
+
+    const nlohmann::json first = nlohmann::json::parse(action.execute(arguments, {0, 0, "q"}).content);
+    EXPECT_EQ(first.at("method"), "direct");
+    EXPECT_EQ(fetch.fetchCount, 1);
+
+    WebFetchOptions next = initial;
+    next.maxContentChars = 100;
+    next.cacheTtlSeconds = 0;
+    options.set(next);
+    const nlohmann::json second = nlohmann::json::parse(action.execute(arguments, {0, 0, "q"}).content);
+    EXPECT_EQ(second.at("method"), "truncated");
+    EXPECT_EQ(second.at("cached"), false);
+    EXPECT_EQ(fetch.fetchCount, 2);
+}
+
 TEST(WebFetchActionTest, ReportsHttpAndContentTypeErrors)
 {
     {
         StaticPageFetch fetch;
         fetch.statusCode = 404;
-        WebFetchAction action(WebFetchOptions{}, nullptr, fetch.handler());
+        Live<WebFetchOptions> options{WebFetchOptions{}};
+        WebFetchAction action(options, nullptr, fetch.handler());
         const ActionResult result = action.execute(
             {{"url", "https://example.com/missing"}}, {});
         const nlohmann::json document = nlohmann::json::parse(result.content);
@@ -233,7 +268,8 @@ TEST(WebFetchActionTest, ReportsHttpAndContentTypeErrors)
         StaticPageFetch fetch;
         fetch.contentType = "image/png";
         fetch.body = "\x89PNG...";
-        WebFetchAction action(WebFetchOptions{}, nullptr, fetch.handler());
+        Live<WebFetchOptions> options{WebFetchOptions{}};
+        WebFetchAction action(options, nullptr, fetch.handler());
         const ActionResult result = action.execute(
             {{"url", "https://example.com/pic.png"}}, {});
         const nlohmann::json document = nlohmann::json::parse(result.content);
@@ -247,7 +283,8 @@ TEST(WebFetchActionTest, RejectsRedirectsToInternalAddresses)
 {
     StaticPageFetch fetch;
     fetch.effectiveUrl = "http://127.0.0.1:8080/secret";
-    WebFetchAction action(WebFetchOptions{}, nullptr, fetch.handler());
+    Live<WebFetchOptions> options{WebFetchOptions{}};
+    WebFetchAction action(options, nullptr, fetch.handler());
 
     const ActionResult result = action.execute(
         {{"url", "https://public.example.com/redirect"}}, {});
@@ -263,7 +300,8 @@ TEST(WebFetchActionTest, PassesNonHtmlTextThroughAsEvidence)
     StaticPageFetch fetch;
     fetch.contentType = "application/json";
     fetch.body = R"({"items":[{"name":"Widget","price":399}]})";
-    WebFetchAction action(WebFetchOptions{}, nullptr, fetch.handler());
+    Live<WebFetchOptions> options{WebFetchOptions{}};
+    WebFetchAction action(options, nullptr, fetch.handler());
 
     const ActionResult result = action.execute(
         {{"url", "https://api.example.com/items"}}, {0, 0, "多少钱"});
@@ -280,7 +318,8 @@ TEST(WebFetchActionTest, FlagsNonUtf8CharsetForTheModel)
     fetch.contentType = "text/html";
     fetch.body = "<html><head><meta charset=\"gbk\"><title>页</title></head>"
                  "<body><p>内容</p></body></html>";
-    WebFetchAction action(WebFetchOptions{}, nullptr, fetch.handler());
+    Live<WebFetchOptions> options{WebFetchOptions{}};
+    WebFetchAction action(options, nullptr, fetch.handler());
 
     const ActionResult result = action.execute(
         {{"url", "https://example.com/cn"}}, {});
@@ -328,7 +367,8 @@ TEST(WebFetchIntegrationTest, FetchesRealPageWhenEnvironmentIsConfigured)
     if (target == nullptr || std::string(target).empty())
         GTEST_SKIP() << "KLEIN_WEB_FETCH_TEST_URL is not configured";
 
-    WebFetchAction action(WebFetchOptions{});
+    Live<WebFetchOptions> options{WebFetchOptions{}};
+    WebFetchAction action(options);
     const ActionResult result = action.execute({{"url", target}}, {0, 0, "页面主要内容"});
     const nlohmann::json document = nlohmann::json::parse(result.content);
 

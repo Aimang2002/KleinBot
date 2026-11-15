@@ -187,6 +187,43 @@ TEST(ConfigDiffTest, MemoryKeysAreDynamicExceptEnabled)
     EXPECT_TRUE(containsChange(diff, "memory.enabled", ConfigChangeImpact::Rebuild));
 }
 
+// 配置实时生效 L1.e：web_search（除 enabled、provider）、web_fetch（除 enabled）与 network.proxy
+// 接通应用，档位变为 Dynamic；两个 enabled 与 provider 尚未接通（仍为 Rebuild）
+TEST(ConfigDiffTest, WebSearchFetchAndProxyKeysAreDynamicExceptSwitchesAndProvider)
+{
+    SchemaConfig current;
+    SchemaConfig candidate = current;
+    candidate.webSearch.enabled = !current.webSearch.enabled;
+    candidate.webSearch.provider = "other";
+    candidate.webSearch.endpoint = "https://search.example.test";
+    candidate.webSearch.apiKey = "sk-next";
+    candidate.webSearch.searchDepth = "advanced";
+    candidate.webSearch.maxResults = current.webSearch.maxResults + 1;
+    candidate.webSearch.maxContentChars = current.webSearch.maxContentChars + 1;
+    candidate.webSearch.maxResponseBytes = current.webSearch.maxResponseBytes + 1;
+    candidate.webSearch.connectTimeoutMs = current.webSearch.connectTimeoutMs + 1;
+    candidate.webSearch.requestTimeoutMs = current.webSearch.requestTimeoutMs + 1;
+    candidate.webFetch.enabled = !current.webFetch.enabled;
+    candidate.webFetch.maxContentChars = current.webFetch.maxContentChars + 1;
+    candidate.webFetch.maxResponseBytes = current.webFetch.maxResponseBytes + 1;
+    candidate.webFetch.connectTimeoutMs = current.webFetch.connectTimeoutMs + 1;
+    candidate.webFetch.requestTimeoutMs = current.webFetch.requestTimeoutMs + 1;
+    candidate.webFetch.cacheTtlSeconds = current.webFetch.cacheTtlSeconds + 1;
+    candidate.webFetch.cacheMaxEntries = current.webFetch.cacheMaxEntries + 1;
+    candidate.proxy = "http://127.0.0.1:7890";
+
+    const ConfigDiff diff = compareConfig(current, candidate);
+
+    EXPECT_EQ(diff.size(), 18U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Dynamic), 15U);
+    EXPECT_EQ(diff.count(ConfigChangeImpact::Rebuild), 3U);
+    for (const char *path : {"web_search.enabled", "web_search.provider", "web_fetch.enabled"})
+        EXPECT_TRUE(containsChange(diff, path, ConfigChangeImpact::Rebuild)) << path;
+    EXPECT_TRUE(containsChange(diff, "network.proxy", ConfigChangeImpact::Dynamic));
+    EXPECT_TRUE(containsChange(diff, "web_search.endpoint", ConfigChangeImpact::Dynamic));
+    EXPECT_TRUE(containsChange(diff, "web_fetch.cache_max_entries", ConfigChangeImpact::Dynamic));
+}
+
 TEST(ConfigLoaderAffectTest, ParsesEnabledFlagAndClassifiesRestart)
 {
     TemporaryConfigFile file;

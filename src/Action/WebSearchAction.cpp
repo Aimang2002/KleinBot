@@ -27,8 +27,8 @@ std::string truncateUtf8(const std::string &value, std::size_t limit)
 }
 }
 
-WebSearchAction::WebSearchAction(SearchProvider &provider, WebSearchOptions options)
-    : provider(provider), options(std::move(options))
+WebSearchAction::WebSearchAction(SearchProvider &provider, const Live<WebSearchOptions> &options)
+    : provider(provider), options(options)
 {
 }
 
@@ -68,6 +68,8 @@ ActionResult WebSearchAction::execute(const nlohmann::json &arguments,
                                       const ActionContext &context)
 {
     (void)context;
+    // 一次执行取一次配置快照，之后都用这一份
+    const Live<WebSearchOptions>::Snapshot current = options.get();
     if (!arguments.is_object())
         return {R"({"error":"搜索参数必须是对象"})", {}, {}, false};
     const auto queryValue = arguments.find("query");
@@ -109,7 +111,7 @@ ActionResult WebSearchAction::execute(const nlohmann::json &arguments,
         request.days = static_cast<int>(value);
     }
 
-    std::size_t maxResults = options.maxResults;
+    std::size_t maxResults = current->maxResults;
     const auto requestedLimit = arguments.find("max_results");
     if (requestedLimit != arguments.end())
     {
@@ -119,7 +121,7 @@ ActionResult WebSearchAction::execute(const nlohmann::json &arguments,
         if (value < 1)
             return {R"({"error":"max_results 必须大于 0"})", {}, {}, false};
         maxResults = std::min<std::size_t>(
-            static_cast<std::size_t>(value), options.maxResults);
+            static_cast<std::size_t>(value), current->maxResults);
     }
     request.maxResults = maxResults;
 
@@ -141,7 +143,7 @@ ActionResult WebSearchAction::execute(const nlohmann::json &arguments,
                 {"source_id", sourceId++},
                 {"title", result.title},
                 {"url", result.url},
-                {"content", truncateUtf8(result.content, options.maxContentChars)}};
+                {"content", truncateUtf8(result.content, current->maxContentChars)}};
             if (result.publishedAt.has_value())
                 item["published_at"] = *result.publishedAt;
             if (result.score.has_value())

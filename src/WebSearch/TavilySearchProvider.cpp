@@ -84,19 +84,21 @@ std::vector<SearchResult> parseResults(const nlohmann::json &document,
 }
 }
 
-TavilySearchProvider::TavilySearchProvider(WebSearchOptions options,
+TavilySearchProvider::TavilySearchProvider(const Live<WebSearchOptions> &options,
                                            const std::atomic<bool> *running,
                                            HttpPost httpPost)
-    : options(std::move(options)), running(running), httpPost(std::move(httpPost))
+    : options(options), running(running), httpPost(std::move(httpPost))
 {
 }
 
 SearchResponse TavilySearchProvider::search(const SearchRequest &request)
 {
+    // 一次搜索取一次配置快照，之后都用这一份
+    const Live<WebSearchOptions>::Snapshot current = options.get();
     nlohmann::json payload{
         {"query", request.query},
         {"max_results", request.maxResults},
-        {"search_depth", options.searchDepth},
+        {"search_depth", current->searchDepth},
         {"include_answer", true},
         {"include_raw_content", false}};
     if (!request.topic.empty() && request.topic != "general")
@@ -107,8 +109,8 @@ SearchResponse TavilySearchProvider::search(const SearchRequest &request)
         payload["days"] = *request.days;
 
     const TavilyHttpResponse response = httpPost
-        ? httpPost(options.endpoint, options.apiKey, payload.dump())
-        : performPost(options.endpoint, options.apiKey, payload.dump());
+        ? httpPost(current->endpoint, current->apiKey, payload.dump())
+        : performPost(*current, current->endpoint, current->apiKey, payload.dump());
 
     nlohmann::json document;
     try
@@ -131,7 +133,8 @@ SearchResponse TavilySearchProvider::search(const SearchRequest &request)
     return output;
 }
 
-TavilyHttpResponse TavilySearchProvider::performPost(const std::string &endpoint,
+TavilyHttpResponse TavilySearchProvider::performPost(const WebSearchOptions &current,
+                                                     const std::string &endpoint,
                                                      const std::string &apiKey,
                                                      const std::string &payload) const
 {
@@ -140,7 +143,7 @@ TavilyHttpResponse TavilySearchProvider::performPost(const std::string &endpoint
         throw std::runtime_error("无法初始化搜索网络请求");
 
     ResponseBuffer responseBuffer;
-    responseBuffer.limit = options.maxResponseBytes;
+    responseBuffer.limit = current.maxResponseBytes;
     curl_slist *headers = nullptr;
     const std::string authorization = "Authorization: Bearer " + apiKey;
     headers = curl_slist_append(headers, "Content-Type: application/json");
@@ -155,9 +158,9 @@ TavilyHttpResponse TavilySearchProvider::performPost(const std::string &endpoint
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "KleinBot/2.4 web-search");
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
     CurlRequestControl::configure(
-        curl, running, options.connectTimeoutMs, options.requestTimeoutMs);
-    if (!options.proxy.empty())
-        curl_easy_setopt(curl, CURLOPT_PROXY, options.proxy.c_str());
+        curl, running, current.connectTimeoutMs, current.requestTimeoutMs);
+    if (!current.proxy.empty())
+        curl_easy_setopt(curl, CURLOPT_PROXY, current.proxy.c_str());
 
     const CURLcode result = curl_easy_perform(curl);
     long statusCode = 0;

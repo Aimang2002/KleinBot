@@ -4,6 +4,7 @@
 #include "Action.h"
 #include "WebToolGuidance.h"
 #include "../WebFetch/WebFetchOptions.h"
+#include "../utils/Live.h"
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -27,7 +28,9 @@ public:
     // 把提取提示词交给廉价模型蒸馏；返回空串表示蒸馏不可用，由调用方降级
     using Distiller = std::function<std::string(const std::string &prompt)>;
 
-    WebFetchAction(WebFetchOptions options, const std::atomic<bool> *running = nullptr,
+    // options：组合根的活值（ADR-023），每次执行开头取一份快照，传给下面的缓存与抓取。
+    // 缓存按插入时的配置算过期时间、按当前上限淘汰
+    WebFetchAction(const Live<WebFetchOptions> &options, const std::atomic<bool> *running = nullptr,
                    HttpGet httpGet = {}, Distiller distiller = {});
 
     const ActionDescriptor &descriptor() const override;
@@ -58,12 +61,12 @@ private:
         std::chrono::steady_clock::time_point lastAccess;
     };
 
-    bool lookupCache(const std::string &key, FetchedPage &page);
-    void storeCache(const std::string &key, const FetchedPage &page);
-    void loadPage(const std::string &url, FetchedPage &page);
-    PageHttpResponse performGet(const std::string &url);
+    bool lookupCache(const WebFetchOptions &current, const std::string &key, FetchedPage &page);
+    void storeCache(const WebFetchOptions &current, const std::string &key, const FetchedPage &page);
+    void loadPage(const WebFetchOptions &current, const std::string &url, FetchedPage &page);
+    PageHttpResponse performGet(const WebFetchOptions &current, const std::string &url);
 
-    WebFetchOptions options;
+    const Live<WebFetchOptions> &options;
     const std::atomic<bool> *running;
     HttpGet httpGet;
     Distiller distiller;

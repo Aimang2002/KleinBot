@@ -3,6 +3,7 @@
 
 #include "SearchProvider.h"
 #include "WebSearchOptions.h"
+#include "../utils/Live.h"
 #include <atomic>
 #include <functional>
 #include <string>
@@ -20,17 +21,19 @@ public:
         const std::string &endpoint, const std::string &apiKey,
         const std::string &payload)>;
 
-    TavilySearchProvider(WebSearchOptions options,
+    // options：组合根的活值（ADR-023），每次搜索开头取一份快照，改了下一次搜索即用新值
+    TavilySearchProvider(const Live<WebSearchOptions> &options,
                          const std::atomic<bool> *running = nullptr,
                          HttpPost httpPost = {});
 
     SearchResponse search(const SearchRequest &request) override;
 private:
-    TavilyHttpResponse performPost(const std::string &endpoint,
+    TavilyHttpResponse performPost(const WebSearchOptions &current,
+                                   const std::string &endpoint,
                                    const std::string &apiKey,
                                    const std::string &payload) const;
 
-    WebSearchOptions options;
+    const Live<WebSearchOptions> &options;
     const std::atomic<bool> *running;
     HttpPost httpPost;
 };

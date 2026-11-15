@@ -365,7 +365,8 @@ TEST(ChatPayloadBuilderTest, MergesConsecutiveAnthropicUserMessages)
 
 TEST(AnthropicStandardTest, ParsesToolUseBlocksAndMapsStopReason)
 {
-    AnthropicStandard standard;
+    Live<DockOptions> network{DockOptions{}};
+    AnthropicStandard standard(network);
     const std::string raw = R"({
         "id": "msg_1",
         "type": "message",
@@ -391,7 +392,8 @@ TEST(AnthropicStandardTest, ParsesToolUseBlocksAndMapsStopReason)
 
 TEST(AnthropicStandardTest, ParsesPlainTextResponseWithoutToolCalls)
 {
-    AnthropicStandard standard;
+    Live<DockOptions> network{DockOptions{}};
+    AnthropicStandard standard(network);
     const std::string raw = R"({
         "id": "msg_2",
         "type": "message",

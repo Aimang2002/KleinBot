@@ -370,7 +370,8 @@ TEST(MemoryServiceRecallTest, MixesLongTermMemoryWithIndependentRawHistory)
     }
 
     std::atomic<bool> running{true};
-    Dock dock(DockOptions{}, &running);
+    Live<DockOptions> network{DockOptions{}};
+    Dock dock(network, &running);
     ModelRegistry models(modelPath);
     MemoryOptions options;
     options.enabled = true;
@@ -415,7 +416,8 @@ TEST(MemoryServiceRecallTest, AutomaticallyRecallsFactAndExcludesCurrentMessage)
     }
 
     std::atomic<bool> running{true};
-    Dock dock(DockOptions{}, &running);
+    Live<DockOptions> network{DockOptions{}};
+    Dock dock(network, &running);
     ModelRegistry models(modelPath);
     MemoryOptions options;
     options.enabled = true;
@@ -513,7 +515,8 @@ TEST(MemoryServiceLiveConfigTest, RecallUsesCurrentRecallLimit)
                              1000 + index);
 
     std::atomic<bool> running{true};
-    Dock dock(DockOptions{}, &running);
+    Live<DockOptions> network{DockOptions{}};
+    Dock dock(network, &running);
     ModelRegistry models(modelPath);
     MemoryOptions initial;
     initial.enabled = false; // 只召回原始对话，不起后台线程
@@ -543,7 +546,8 @@ TEST(MemoryServiceLiveConfigTest, WorkerUsesCurrentBatchIdleAndModel)
                                 R"("api_endpoint":"https://example.test/chat","APIStandard":"Fake"}]})";
     ConversationStore conversations(databasePath);
     std::atomic<bool> running{true};
-    Dock dock(DockOptions{}, &running);
+    Live<DockOptions> network{DockOptions{}};
+    Dock dock(network, &running);
     ExtractionLog log;
     dock.registerStandard("Fake", std::make_unique<ExtractionRecordingPort>(&log));
     ModelRegistry models(modelPath);

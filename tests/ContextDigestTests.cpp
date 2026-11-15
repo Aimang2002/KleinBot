@@ -143,7 +143,7 @@ struct PrivateChatFixture
     PrivateChatFixture()
         : store(directory.path() + "/conversation.db"),
           registry(writeRegistry()),
-          dock(DockOptions{}),
+          dock(network),
           liveMemory(memoryOptions()),
           memory(directory.path() + "/conversation.db", store, dock, registry, liveMemory),
           liveChat(chatOptions()),
@@ -190,6 +190,7 @@ struct PrivateChatFixture
     DigestTemporaryDirectory directory;
     ConversationStore store;
     ModelRegistry registry;
+    Live<DockOptions> network{DockOptions{}};
     Dock dock;
     Live<MemoryOptions> liveMemory;
     MemoryService memory;

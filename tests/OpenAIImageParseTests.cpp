@@ -5,7 +5,8 @@
 // 生图响应解析（真机 2026-10-30：中转站默认只回 url，不回 b64_json）
 TEST(OpenAIImageParseTest, ReadsB64OrFallsBackToUrl)
 {
-    OpenAIStandard standard;
+    Live<DockOptions> network{DockOptions{}};
+    OpenAIStandard standard(network);
 
     const ImageResponse b64 = standard.draw_json_parse(
         R"({"created":1,"data":[{"b64_json":"aGVsbG8="}],"usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}})");

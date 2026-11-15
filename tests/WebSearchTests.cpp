@@ -6,6 +6,7 @@
 #include "Configuration/ConfigLoader.h"
 #include "WebSearch/SearchProvider.h"
 #include "WebSearch/TavilySearchProvider.h"
+#include "utils/Live.h"
 #include <cstdlib>
 
 namespace
@@ -33,7 +34,8 @@ TEST(WebSearchActionTest, PassesModelTimePolicyToProvider)
     FakeSearchProvider provider;
     WebSearchOptions options;
     options.maxResults = 3;
-    WebSearchAction action(provider, options);
+    Live<WebSearchOptions> liveOptions(options);
+    WebSearchAction action(provider, liveOptions);
 
     const ActionResult result = action.execute(
         {{"query", "中东局势"}, {"topic", "news"}, {"days", 1}, {"max_results", 9}},
@@ -51,7 +53,8 @@ TEST(WebSearchActionTest, PassesModelTimePolicyToProvider)
 TEST(WebSearchActionTest, AcceptsGeneralTimeRangeAndDefaults)
 {
     FakeSearchProvider provider;
-    WebSearchAction action(provider, WebSearchOptions{});
+    Live<WebSearchOptions> options{WebSearchOptions{}};
+    WebSearchAction action(provider, options);
 
     action.execute({{"query", "glm 发布"}, {"time_range", "week"}}, {});
 
@@ -68,7 +71,8 @@ TEST(WebSearchActionTest, KeepsUndatedAndStaleResultsAsEvidence)
     provider.results.push_back({"Old", "https://example.com/old", "old", "2024-01-01", 0.8});
     provider.results.push_back({"Undated", "https://example.com/undated", "undated", std::nullopt, 0.7});
     provider.answer = "综合摘要：局势近期有变化。";
-    WebSearchAction action(provider, WebSearchOptions{});
+    Live<WebSearchOptions> options{WebSearchOptions{}};
+    WebSearchAction action(provider, options);
 
     const ActionResult result = action.execute(
         {{"query", "中东局势"}, {"topic", "news"}, {"days", 1}},
@@ -86,7 +90,8 @@ TEST(WebSearchActionTest, KeepsUndatedAndStaleResultsAsEvidence)
 TEST(WebSearchActionTest, RejectsInvalidArgumentsWithoutCallingProvider)
 {
     FakeSearchProvider provider;
-    WebSearchAction action(provider, WebSearchOptions{});
+    Live<WebSearchOptions> options{WebSearchOptions{}};
+    WebSearchAction action(provider, options);
 
     const ActionResult emptyQuery = action.execute({{"query", "  "}}, {});
     EXPECT_TRUE(nlohmann::json::parse(emptyQuery.content).contains("error"));
@@ -113,12 +118,78 @@ TEST(WebSearchActionTest, TruncatesResultContentToConfiguredLimit)
     provider.results.push_back({"Docs", "https://example.com", "abcdef", std::nullopt, std::nullopt});
     WebSearchOptions options;
     options.maxContentChars = 4;
-    WebSearchAction action(provider, options);
+    Live<WebSearchOptions> liveOptions(options);
+    WebSearchAction action(provider, liveOptions);
 
     const ActionResult result = action.execute({{"query", "release"}}, {});
     const nlohmann::json document = nlohmann::json::parse(result.content);
 
     EXPECT_EQ(document.at("results").at(0).at("content"), "abcd…");
+}
+
+// 配置实时生效（L1.e）：WebSearchAction 每次执行开头取一份快照。先按 3 条、4 字执行一次，
+// 改成 2 条、2 字之后，下一次执行就用新上限
+TEST(WebSearchActionTest, NextExecutionUsesReplacedLimits)
+{
+    FakeSearchProvider provider;
+    provider.results.push_back({"Docs", "https://example.com", "abcdef", std::nullopt, std::nullopt});
+    WebSearchOptions initial;
+    initial.maxResults = 3;
+    initial.maxContentChars = 4;
+    Live<WebSearchOptions> options(initial);
+    WebSearchAction action(provider, options);
+    const nlohmann::json arguments = {{"query", "release"}, {"max_results", 9}};
+
+    const nlohmann::json before = nlohmann::json::parse(action.execute(arguments, {}).content);
+    EXPECT_EQ(provider.lastRequest.maxResults, 3U);
+    EXPECT_EQ(before.at("results").at(0).at("content"), "abcd…");
+
+    WebSearchOptions next = initial;
+    next.maxResults = 2;
+    next.maxContentChars = 2;
+    options.set(next);
+    const nlohmann::json after = nlohmann::json::parse(action.execute(arguments, {}).content);
+    EXPECT_EQ(provider.lastRequest.maxResults, 2U);
+    EXPECT_EQ(after.at("results").at(0).at("content"), "ab…");
+}
+
+// 配置实时生效（L1.e）：TavilySearchProvider 每次搜索开头取一份快照，端点、密钥、
+// 搜索深度改了，下一次搜索即用新值
+TEST(TavilySearchProviderTest, NextSearchUsesReplacedOptions)
+{
+    WebSearchOptions initial;
+    initial.endpoint = "https://a.example.test/search";
+    initial.apiKey = "key-a";
+    initial.searchDepth = "basic";
+    Live<WebSearchOptions> options(initial);
+    std::vector<std::string> endpoints;
+    std::vector<std::string> keys;
+    std::vector<std::string> depths;
+    TavilySearchProvider provider(
+        options, nullptr,
+        [&](const std::string &endpoint, const std::string &apiKey, const std::string &payload)
+        {
+            endpoints.push_back(endpoint);
+            keys.push_back(apiKey);
+            depths.push_back(nlohmann::json::parse(payload).at("search_depth").get<std::string>());
+            return TavilyHttpResponse{200, R"({"results":[]})"};
+        });
+    SearchRequest request;
+    request.query = "query";
+    request.maxResults = 3;
+
+    provider.search(request);
+    WebSearchOptions next = initial;
+    next.endpoint = "https://b.example.test/search";
+    next.apiKey = "key-b";
+    next.searchDepth = "advanced";
+    options.set(next);
+    provider.search(request);
+
+    EXPECT_EQ(endpoints, (std::vector<std::string>{"https://a.example.test/search",
+                                                   "https://b.example.test/search"}));
+    EXPECT_EQ(keys, (std::vector<std::string>{"key-a", "key-b"}));
+    EXPECT_EQ(depths, (std::vector<std::string>{"basic", "advanced"}));
 }
 
 TEST(TavilySearchProviderTest, BuildsPayloadAndParsesAnswerAndResults)
@@ -130,8 +201,9 @@ TEST(TavilySearchProviderTest, BuildsPayloadAndParsesAnswerAndResults)
     std::string receivedEndpoint;
     std::string receivedKey;
     nlohmann::json receivedPayload;
+    Live<WebSearchOptions> liveOptions(options);
     TavilySearchProvider provider(
-        options, nullptr,
+        liveOptions, nullptr,
         [&](const std::string &endpoint, const std::string &apiKey,
             const std::string &payload)
         {
@@ -167,8 +239,9 @@ TEST(TavilySearchProviderTest, BuildsPayloadAndParsesAnswerAndResults)
 TEST(TavilySearchProviderTest, ConvertsApiErrorIntoException)
 {
     WebSearchOptions options;
+    Live<WebSearchOptions> liveOptions(options);
     TavilySearchProvider provider(
-        options, nullptr,
+        liveOptions, nullptr,
         [](const std::string &, const std::string &, const std::string &)
         {
             return TavilyHttpResponse{401, R"({"detail":{"error":"invalid key"}})"};
@@ -244,7 +317,8 @@ TEST(TavilySearchProviderIntegrationTest, SearchesRealApiWhenEnvironmentIsConfig
     WebSearchOptions options;
     options.apiKey = apiKey;
     options.maxResults = 3;
-    TavilySearchProvider provider(options);
+    Live<WebSearchOptions> liveOptions(options);
+    TavilySearchProvider provider(liveOptions);
 
     SearchRequest request;
     request.query = "C++23 compiler support";

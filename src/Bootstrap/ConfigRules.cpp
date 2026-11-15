@@ -57,6 +57,38 @@ void applyMemory(LiveSettings &live, const RuntimeSettings &next)
     live.memory.set(std::move(memory));
 }
 
+// web_search：enabled 决定是否构造搜索对象（L2.a 前未接通），provider 决定构造哪一种实现
+// （只能重启），两者保持运行值；其余参数换成新值（proxy 与 network.proxy 同值）
+void applyWebSearch(LiveSettings &live, const RuntimeSettings &next)
+{
+    const Live<WebSearchOptions>::Snapshot running = live.webSearch.get();
+    WebSearchOptions webSearch = next.webSearch;
+    webSearch.enabled = running->enabled;
+    webSearch.provider = running->provider;
+    live.webSearch.set(std::move(webSearch));
+}
+
+// web_fetch：enabled 决定是否构造抓取对象（L2.a 前未接通），保持运行值；其余参数换成新值
+void applyWebFetch(LiveSettings &live, const RuntimeSettings &next)
+{
+    WebFetchOptions webFetch = next.webFetch;
+    webFetch.enabled = live.webFetch.get()->enabled;
+    live.webFetch.set(std::move(webFetch));
+}
+
+// network.proxy：一个键作用于三处——模型调用（Dock 的两个适配器）、搜索、抓取。
+// 三个活值一起换，每个只换 proxy，其余字段保持当前值（同一次重载里别的应用函数已换过的也不动）
+void applyProxy(LiveSettings &live, const RuntimeSettings &next)
+{
+    live.dock.set(next.dock);
+    WebSearchOptions webSearch = *live.webSearch.get();
+    webSearch.proxy = next.webSearch.proxy;
+    live.webSearch.set(std::move(webSearch));
+    WebFetchOptions webFetch = *live.webFetch.get();
+    webFetch.proxy = next.webFetch.proxy;
+    live.webFetch.set(std::move(webFetch));
+}
+
 // 每行：差异里的路径、生效方式、比较的 Schema 字段。表的顺序就是差异条目的输出顺序。
 // applies(应用函数) 的键重载成功后立即生效；restart() 的键只能重启生效；
 // notYet(档位) 的键还没接通实时生效，档位保持改造前的值
@@ -132,33 +164,34 @@ constexpr ConfigRule kProductRules[] = {
     {"glance.enabled",              notYet(Restart), field<&SchemaConfig::glance, &GlanceSchema::enabled>},
     {"glance.per_group_per_minute", notYet(Restart), field<&SchemaConfig::glance, &GlanceSchema::perGroupPerMinute>},
 
-    // web_search：provider 决定构造哪一种搜索实现，只能重启生效；档位保持改造前的 Rebuild
-    {"web_search.enabled",            notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::enabled>},
-    {"web_search.provider",           notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::provider>},
-    {"web_search.endpoint",           notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::endpoint>},
-    {"web_search.api_key",            notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::apiKey>},
-    {"web_search.search_depth",       notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::searchDepth>},
-    {"web_search.max_results",        notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::maxResults>},
-    {"web_search.max_content_chars",  notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::maxContentChars>},
-    {"web_search.max_response_bytes", notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::maxResponseBytes>},
-    {"web_search.connect_timeout_ms", notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::connectTimeoutMs>},
-    {"web_search.request_timeout_ms", notYet(Rebuild), field<&SchemaConfig::webSearch, &WebSearchSchema::requestTimeoutMs>},
+    // web_search：enabled 到 L2.a 才接通；provider 决定构造哪一种搜索实现，只能重启生效，
+    // 档位保持改造前的 Rebuild
+    {"web_search.enabled",            notYet(Rebuild),         field<&SchemaConfig::webSearch, &WebSearchSchema::enabled>},
+    {"web_search.provider",           notYet(Rebuild),         field<&SchemaConfig::webSearch, &WebSearchSchema::provider>},
+    {"web_search.endpoint",           applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::endpoint>},
+    {"web_search.api_key",            applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::apiKey>},
+    {"web_search.search_depth",       applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::searchDepth>},
+    {"web_search.max_results",        applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::maxResults>},
+    {"web_search.max_content_chars",  applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::maxContentChars>},
+    {"web_search.max_response_bytes", applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::maxResponseBytes>},
+    {"web_search.connect_timeout_ms", applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::connectTimeoutMs>},
+    {"web_search.request_timeout_ms", applies(applyWebSearch), field<&SchemaConfig::webSearch, &WebSearchSchema::requestTimeoutMs>},
 
-    // web_fetch
-    {"web_fetch.enabled",            notYet(Rebuild), field<&SchemaConfig::webFetch, &WebFetchSchema::enabled>},
-    {"web_fetch.max_content_chars",  notYet(Rebuild), field<&SchemaConfig::webFetch, &WebFetchSchema::maxContentChars>},
-    {"web_fetch.max_response_bytes", notYet(Rebuild), field<&SchemaConfig::webFetch, &WebFetchSchema::maxResponseBytes>},
-    {"web_fetch.connect_timeout_ms", notYet(Rebuild), field<&SchemaConfig::webFetch, &WebFetchSchema::connectTimeoutMs>},
-    {"web_fetch.request_timeout_ms", notYet(Rebuild), field<&SchemaConfig::webFetch, &WebFetchSchema::requestTimeoutMs>},
-    {"web_fetch.cache_ttl_seconds",  notYet(Rebuild), field<&SchemaConfig::webFetch, &WebFetchSchema::cacheTtlSeconds>},
-    {"web_fetch.cache_max_entries",  notYet(Rebuild), field<&SchemaConfig::webFetch, &WebFetchSchema::cacheMaxEntries>},
+    // web_fetch：enabled 到 L2.a 才接通
+    {"web_fetch.enabled",            notYet(Rebuild),        field<&SchemaConfig::webFetch, &WebFetchSchema::enabled>},
+    {"web_fetch.max_content_chars",  applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::maxContentChars>},
+    {"web_fetch.max_response_bytes", applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::maxResponseBytes>},
+    {"web_fetch.connect_timeout_ms", applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::connectTimeoutMs>},
+    {"web_fetch.request_timeout_ms", applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::requestTimeoutMs>},
+    {"web_fetch.cache_ttl_seconds",  applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::cacheTtlSeconds>},
+    {"web_fetch.cache_max_entries",  applies(applyWebFetch), field<&SchemaConfig::webFetch, &WebFetchSchema::cacheMaxEntries>},
 
     // storage
     {"storage.conversation_database", restart(), field<&SchemaConfig::storage, &StorageSchema::conversationDatabase>},
     {"storage.image_assets",          restart(), field<&SchemaConfig::storage, &StorageSchema::imageAssets>},
 
-    // network：代理同时作用于模型调用、搜索、抓取
-    {"network.proxy", notYet(Rebuild), field<&SchemaConfig::proxy>},
+    // network：代理同时作用于模型调用、搜索、抓取，应用函数一起换三个活值
+    {"network.proxy", applies(applyProxy), field<&SchemaConfig::proxy>},
 
     // communication：通信方式与协议端地址只能重启生效；档位保持改造前的 Rebuild。
     // active_profile 指 active_transport 选中的那一份传输档案

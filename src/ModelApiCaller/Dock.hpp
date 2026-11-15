@@ -19,11 +19,11 @@
 class Dock
 {
 public:
-    // 构造函数
-    explicit Dock(const DockOptions &network, const std::atomic<bool> *running = nullptr)
+    // network：组合根的活值（ADR-023）。两个适配器各自持引用，每次请求开头取一次代理
+    explicit Dock(const Live<DockOptions> &network, const std::atomic<bool> *running = nullptr)
     {
-        this->registryLLM.emplace("OpenAI", std::make_unique<OpenAIStandard>(network.proxy, running));
-        this->registryLLM.emplace("Anthropic", std::make_unique<AnthropicStandard>(network.proxy, running));
+        this->registryLLM.emplace("OpenAI", std::make_unique<OpenAIStandard>(network, running));
+        this->registryLLM.emplace("Anthropic", std::make_unique<AnthropicStandard>(network, running));
     }
 
     ChatResponse RequestChat(const ChatModel &model, const std::string &model_name, const ChatRequest &request)

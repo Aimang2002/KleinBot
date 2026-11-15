@@ -303,8 +303,9 @@ TEST_F(ConfigReloaderFixture, ParsedButInvalidCandidateAppliesNothing)
 }
 
 // 产品规则表（默认）：只有接通的行把新值换进活值（L1.a 起 chat 组 6 个键，L1.b 起
-// models 的 12 个键，L1.c 起 voice 的 5 个键，L1.d 起 memory 除 enabled 外的 4 个键），
-// 其余活值的快照指针不变；还没接通的字段在活值里保持运行值（决定 9 的同一做法）；
+// models 的 12 个键，L1.c 起 voice 的 5 个键，L1.d 起 memory 除 enabled 外的 4 个键，
+// L1.e 起搜索、抓取参数与 network.proxy），其余活值的快照指针不变；还没接通的字段在活值里
+// 保持运行值（决定 9 的同一做法）；
 // 反馈如实列出已生效、需重启与尚未接通的键
 TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
 {
@@ -330,11 +331,12 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_EQ(store->current(), report.result.snapshot);
     EXPECT_EQ(report.applied,
               (std::vector<std::string>{"chat.temperature", "models.vision.model", "voice.enabled",
-                                        "voice.host", "voice.port", "memory.recall_limit"}));
+                                        "voice.host", "voice.port", "memory.recall_limit",
+                                        "network.proxy"}));
     EXPECT_EQ(report.restartOnly,
               (std::vector<std::string>{"chat.worker_threads", "storage.conversation_database"}));
     EXPECT_EQ(report.notWired,
-              (std::vector<std::string>{"bot.group_chat_enabled", "memory.enabled", "network.proxy"}));
+              (std::vector<std::string>{"bot.group_chat_enabled", "memory.enabled"}));
 
     const LiveSnapshots after = snapshotsOf(*live);
     EXPECT_NE(after.chat, before.chat);
@@ -352,15 +354,16 @@ TEST_F(ConfigReloaderFixture, ProductRulesApplyOnlyWiredRows)
     EXPECT_NE(after.memory, before.memory);
     EXPECT_EQ(after.memory->recallLimit, 5U);
     EXPECT_TRUE(after.memory->enabled) << "memory.enabled 尚未接通：活值里保持运行值";
-    EXPECT_EQ(after.webSearch, before.webSearch);
-    EXPECT_EQ(after.webFetch, before.webFetch);
-    EXPECT_EQ(after.dock, before.dock);
+    EXPECT_EQ(after.dock->proxy, "http://127.0.0.1:7890") << "network.proxy 一个键换三个活值";
+    EXPECT_EQ(after.webSearch->proxy, "http://127.0.0.1:7890");
+    EXPECT_EQ(after.webFetch->proxy, "http://127.0.0.1:7890");
+    EXPECT_TRUE(before.dock->proxy.empty()) << "替换前取到的快照不变";
     EXPECT_EQ(after.glance, before.glance);
     EXPECT_EQ(after.message, before.message);
     EXPECT_EQ(summarizeReload(report),
-              "配置已刷新：11 项变化，已生效 6 项。\n"
+              "配置已刷新：11 项变化，已生效 7 项。\n"
               "需重启才能生效 2 项：chat.worker_threads、storage.conversation_database。\n"
-              "尚未接通实时生效、需重启 3 项：bot.group_chat_enabled、memory.enabled、network.proxy。");
+              "尚未接通实时生效、需重启 2 项：bot.group_chat_enabled、memory.enabled。");
 }
 
 // 端到端（L1.a）：真实的重载入口 + 产品规则表 + 持活值的 UserSessionService。
@@ -528,7 +531,7 @@ TEST_F(ConfigReloaderFixture, MemoryModelFollowsDefaultModelWhenNotConfigured)
         const std::string databasePath = (directory / "conversation.db").string();
         ConversationStore conversations(databasePath);
         std::atomic<bool> running{true};
-        Dock dock(DockOptions{}, &running);
+        Dock dock(live->dock, &running);
         ExtractionLog log;
         dock.registerStandard("Fake", std::make_unique<ExtractionRecordingPort>(&log));
         ConfigReloader reloader(*store, *live);
@@ -567,6 +570,61 @@ TEST_F(ConfigReloaderFixture, MemoryModelFollowsDefaultModelWhenNotConfigured)
     }
     std::error_code error;
     std::filesystem::remove_all(directory, error);
+}
+
+// network.proxy（L1.e）：一个键作用于模型调用、搜索、抓取三处，应用函数同时换三个活值，
+// 每个只换 proxy；搜索与抓取的 enabled 还没接通，活值里保持运行值
+TEST_F(ConfigReloaderFixture, ProxyChangeReachesModelSearchAndFetchTogether)
+{
+    ConfigReloader reloader(*store, *live);
+    const auto writeWeb = [this](const std::string &proxy, bool searchEnabled) {
+        writeEdited([proxy, searchEnabled](nlohmann::json &config) {
+            config["web_search"] = {{"enabled", searchEnabled},
+                                    {"api_key", {{"literal", "search-key"}}},
+                                    {"max_results", 7}};
+            config["web_fetch"] = {{"enabled", true}};
+            if (!proxy.empty())
+                config["network"] = {{"proxy", proxy}};
+        });
+    };
+
+    // 先把搜索、抓取的参数换成新值（代理还没配）
+    writeWeb("", true);
+    ASSERT_TRUE(reloader.reload().result.success);
+    EXPECT_EQ(live->webSearch.get()->maxResults, 7U);
+    EXPECT_FALSE(live->webSearch.get()->enabled) << "enabled 尚未接通：保持运行值";
+    EXPECT_FALSE(live->webFetch.get()->enabled);
+    const LiveSnapshots before = snapshotsOf(*live);
+
+    // 配上代理：三个活值一起换，其余字段不动
+    writeWeb("http://127.0.0.1:7890", true);
+    ConfigReloadReport report = reloader.reload();
+    ASSERT_TRUE(report.result.success);
+    EXPECT_EQ(report.applied, (std::vector<std::string>{"network.proxy"}));
+    const LiveSnapshots after = snapshotsOf(*live);
+    EXPECT_EQ(after.dock->proxy, "http://127.0.0.1:7890");
+    EXPECT_EQ(after.webSearch->proxy, "http://127.0.0.1:7890");
+    EXPECT_EQ(after.webFetch->proxy, "http://127.0.0.1:7890");
+    EXPECT_EQ(after.webSearch->maxResults, 7U);
+    EXPECT_EQ(after.webSearch->apiKey, "search-key");
+    EXPECT_FALSE(after.webSearch->enabled);
+    EXPECT_FALSE(after.webFetch->enabled);
+    EXPECT_TRUE(before.webSearch->proxy.empty()) << "替换前取到的快照不变";
+    EXPECT_EQ(after.chat, before.chat);
+    EXPECT_EQ(after.memory, before.memory);
+
+    // 去掉代理、同时关掉搜索：代理三处一起清空；搜索开关尚未接通，如实列出、活值不动。
+    // 加载器只在搜索开着时读 api_key，关掉后 api_key 读成空，所以它也列为已生效
+    writeWeb("", false);
+    report = reloader.reload();
+    ASSERT_TRUE(report.result.success);
+    EXPECT_EQ(report.applied, (std::vector<std::string>{"web_search.api_key", "network.proxy"}));
+    EXPECT_EQ(report.notWired, (std::vector<std::string>{"web_search.enabled"}));
+    EXPECT_FALSE(live->webSearch.get()->enabled);
+    EXPECT_TRUE(live->dock.get()->proxy.empty());
+    EXPECT_TRUE(live->webSearch.get()->proxy.empty());
+    EXPECT_TRUE(live->webFetch.get()->proxy.empty());
+    EXPECT_EQ(live->webSearch.get()->maxResults, 7U);
 }
 
 // 带应用函数的行：新快照发布之后换进活值，同一个应用函数只调一次；

@@ -162,12 +162,12 @@ class ProductionTools
 {
 public:
     ProductionTools(bool withWeb, bool withReminders)
-        : dock(DockOptions{}),
+        : dock(network),
           assets(directory.path() + "/assets.db", directory.path() + "/images"),
           reminderStore(directory.path() + "/reminders.db"),
           reminderService(reminderStore),
-          webSearch(searchProvider, WebSearchOptions{}),
-          webFetch(WebFetchOptions{}),
+          webSearch(searchProvider, webSearchOptions),
+          webFetch(webFetchOptions),
           currentModel([](std::uint64_t) { return std::string("model"); }),
           admin(computerStatus, globalVoice, [] { return std::string(); }),
           setReminder(reminderService),
@@ -201,6 +201,7 @@ public:
     bool ready() const { return !directory.path().empty(); }
 
     TemporaryDirectory directory;
+    Live<DockOptions> network{DockOptions{}};
     Dock dock;
     ImageAssetStore assets;
     ReminderStore reminderStore;
@@ -208,7 +209,9 @@ public:
     ComputerStatus computerStatus;
     Live<bool> globalVoice{false};
     NoSearchProvider searchProvider;
+    Live<WebSearchOptions> webSearchOptions{WebSearchOptions{}};
     WebSearchAction webSearch;
+    Live<WebFetchOptions> webFetchOptions{WebFetchOptions{}};
     WebFetchAction webFetch;
     GetCurrentModelAction currentModel;
     AdminControlAction admin;

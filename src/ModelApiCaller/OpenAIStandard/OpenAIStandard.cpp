@@ -18,6 +18,8 @@ ChatResponse OpenAIStandard::request_chat(const ChatModel &model, const std::str
         return response;
     }
     LOG_DEBUG("使用模型:" + model_name);
+    // 一次请求取一次代理快照：400 降级重发也用这一份
+    const Live<DockOptions>::Snapshot networkOptions = network.get();
 
     ChatResponse deserialize_result; // 反序列化response
 
@@ -28,8 +30,8 @@ ChatResponse OpenAIStandard::request_chat(const ChatModel &model, const std::str
               "，图片数 " + std::to_string(ChatPayloadBuilder::imageCount(request)));
 
     // 发送请求
-    std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload,
-                                                     request.timeout_ms);
+    std::pair<std::string, long> p = this->http_post(networkOptions->proxy, model.endpoint,
+                                                     model.api_key, payload, request.timeout_ms);
     if (CurlRequestControl::cancellationRequested(running))
     {
         deserialize_result.cancelled = true;
@@ -51,7 +53,8 @@ ChatResponse OpenAIStandard::request_chat(const ChatModel &model, const std::str
         payload_json.erase("frequency_penalty");
         payload_json.erase("presence_penalty");
         payload = payload_json.dump();
-        p = this->http_post(model.endpoint, model.api_key, payload, request.timeout_ms);
+        p = this->http_post(networkOptions->proxy, model.endpoint, model.api_key, payload,
+                            request.timeout_ms);
         if (CurlRequestControl::cancellationRequested(running))
         {
             deserialize_result.cancelled = true;
@@ -89,7 +92,8 @@ VisionResponse OpenAIStandard::request_vision(const ChatModel &model, const std:
     std::string payload = payload_json.dump();
 
     // 发送请求
-    std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
+    std::pair<std::string, long> p =
+        this->http_post(network.get()->proxy, model.endpoint, model.api_key, payload);
     if (CurlRequestControl::cancellationRequested(running))
     {
         VisionResponse response;
@@ -123,7 +127,8 @@ ImageResponse OpenAIStandard::request_image(const ChatModel &model, const std::s
     std::string payload = payload_json.dump();
 
     // 发送请求
-    std::pair<std::string, long> p = this->http_post(model.endpoint, model.api_key, payload);
+    std::pair<std::string, long> p =
+        this->http_post(network.get()->proxy, model.endpoint, model.api_key, payload);
     if (CurlRequestControl::cancellationRequested(running))
     {
         ImageResponse response;
@@ -135,7 +140,8 @@ ImageResponse OpenAIStandard::request_image(const ChatModel &model, const std::s
     return deserialize_result;
 }
 
-std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, const std::string &api_key, const std::string &payload,
+std::pair<std::string, long> OpenAIStandard::http_post(const std::string &proxy, const std::string &url,
+                                                       const std::string &api_key, const std::string &payload,
                                                        long timeoutMs)
 {
     if (url.empty() || api_key.empty())
@@ -168,7 +174,7 @@ std::pair<std::string, long> OpenAIStandard::http_post(const std::string &url, c
         const long timeout = timeoutMs > 0 ? timeoutMs : CurlRequestControl::kDefaultTimeoutMs;
         CurlRequestControl::configure(curl, running, timeout, timeout);
 
-        // 可选 HTTP 代理：.config.json 配置 "proxy" 非空时生效
+        // 可选 HTTP 代理：network.proxy 非空时生效（调用方在请求开头取的那一份）
         if (!proxy.empty())
         {
             curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());

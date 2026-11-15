@@ -420,7 +420,8 @@ int main(int argc, char **argv)
 	// chat 组配置持活值（ADR-023），重载后下一次请求即用新值
 	UserSessionService userSession(models, conversationStore, settings.bot, liveSettings.chat,
 	                                "source/soul.md");
-	Dock dock(settings.dock, &running);
+	// 两个模型适配器每次请求开头从活值取代理（network.proxy 改了下一次请求即用新代理）
+	Dock dock(liveSettings.dock, &running);
 	// 记忆参数持活值；memory.enabled 仍按启动值决定是否起后台线程（L2.b 再改）
 	MemoryService memoryService(dbPath, conversationStore, dock, models, liveSettings.memory);
 	userSession.setMemoryService(&memoryService);
@@ -450,10 +451,12 @@ int main(int argc, char **argv)
 			}
 			return summarizeReload(report);
 		});
+	// 搜索与抓取：是否构造、用哪种搜索实现仍按启动值（enabled 到 L2.a，provider 只能重启）；
+	// 构造出来的对象持活值，其余参数与代理改了下一次调用即用新值
 	if (settings.webSearch.enabled)
 	{
-		webSearchProvider = std::make_unique<TavilySearchProvider>(settings.webSearch, &running);
-		webSearchAction = std::make_unique<WebSearchAction>(*webSearchProvider, settings.webSearch);
+		webSearchProvider = std::make_unique<TavilySearchProvider>(liveSettings.webSearch, &running);
+		webSearchAction = std::make_unique<WebSearchAction>(*webSearchProvider, liveSettings.webSearch);
 		tools.registerTool(std::make_unique<ActionTool>(*webSearchAction));
 		LOG_INFO("联网搜索工具已启用，Provider：" + settings.webSearch.provider);
 	}
@@ -462,7 +465,7 @@ int main(int argc, char **argv)
 		// 超长正文走默认小模型做"按问题摘录"，失败时 Action 自动降级为截断；
 		// 默认模型每次摘录时从活值现取（ADR-023），重载后下一次摘录即用新值
 		webFetchAction = std::make_unique<WebFetchAction>(
-			settings.webFetch, &running, WebFetchAction::HttpGet{},
+			liveSettings.webFetch, &running, WebFetchAction::HttpGet{},
 				[&dock, &models, &liveSettings](const std::string &prompt)
 				{
 					const std::string distillModel = liveSettings.chat.get()->defaultModel;
