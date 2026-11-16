@@ -589,7 +589,6 @@
     }
 
     .page-meta {
-      font-family: var(--font-mono);
       font-size: var(--fs-12);
       color: var(--text-3);
       overflow-wrap: anywhere;
@@ -611,6 +610,22 @@
       font-size: var(--fs-13);
       line-height: var(--lh-loose);
       color: var(--text-2);
+    }
+
+    .page-hint code {
+      font-size: var(--fs-12);
+      overflow-wrap: anywhere;
+    }
+
+    /* 中文说明折行时避免最后一行只剩一两个字（不支持的浏览器忽略） */
+    .page-hint,
+    .row-hint,
+    .row-note,
+    .row-error,
+    .note,
+    .empty p,
+    dialog p {
+      text-wrap: pretty;
     }
 
     .page-effects {
@@ -775,7 +790,7 @@
       font-family: var(--font-mono);
       font-size: var(--fs-12);
       color: var(--text-3);
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
     }
 
     .badge {
@@ -1114,6 +1129,18 @@
       color: var(--accent);
     }
 
+    @media (hover: hover) {
+      .chip-vision:not(.on) {
+        opacity: 0;
+        transition: opacity var(--dur-fast) var(--ease);
+      }
+
+      .chip:hover .chip-vision,
+      .chip-vision:focus-visible {
+        opacity: 1;
+      }
+    }
+
     .chip-avatar,
     .pick-avatar {
       width: 18px;
@@ -1325,6 +1352,7 @@
       margin-top: var(--sp-1);
       font-size: var(--fs-12);
       color: var(--text-3);
+      white-space: pre-line;
       overflow-wrap: anywhere;
     }
 
@@ -1706,6 +1734,11 @@
         padding: 0 var(--sp-4);
       }
 
+      /* 上一条与 .empty 同优先级且在后，空状态卡片要把上下留白补回来 */
+      .card.empty {
+        padding: var(--sp-8) var(--sp-4);
+      }
+
       .row::before {
         left: calc(-1 * var(--sp-4));
       }
@@ -1741,8 +1774,10 @@
         bottom: calc(var(--savebar-h) + var(--sp-3) + env(safe-area-inset-bottom));
       }
 
+      /* 窄屏下浮层与触发区同宽，不越出内容列 */
       .model-pick {
-        width: min(360px, calc(100vw - 32px));
+        right: 0;
+        width: auto;
       }
     }
 
@@ -1815,6 +1850,7 @@
               <div class="page-meta" id="registryMeta">模型注册表</div>
               <h1 class="page-title" tabindex="-1">模型供应商</h1>
               <p class="page-hint">模型注册表里的每一组供应商：共享密钥的一批模型名、API 端点与协议标准。保存模型注册表后，机器人进程内立即换用新表，不需要重启。</p>
+              <p class="page-hint">API 端点填完整的对话接口地址，例如 <code class="mono">https://api.deepseek.com/v1/chat/completions</code>，模型列表从同一 base 段拉取。模型优先从端点拉取后勾选，端点不提供列表接口时用“手动输入”。模型名前的眼睛标记表示支持图片输入，可以点它切换，也可以用“检测是否支持图片输入”自动标注。面板不读取密钥原文，也无法显示是否已填写。</p>
             </div>
             <div class="page-head-actions">
               <button id="addProvider" class="btn btn-secondary" type="button">
@@ -1859,7 +1895,7 @@
           <div id="perceptionBody"></div>
         </section>
       </div>
-      <div id="saveBar" class="savebar">
+      <div id="saveBar" class="savebar" hidden>
         <div class="savebar-inner">
           <p id="saveStatus" class="savebar-status"></p>
           <div class="savebar-actions">
@@ -1906,7 +1942,7 @@
     const SECRET_KEYS = new Set(["api_key", "access_token", "secret"]);
     // 与 Dock 注册的协议适配器一一对应，大小写敏感；其他值调用时会报“并未支持”
     const API_STANDARDS = ["OpenAI", "Anthropic"];
-    // 模型名类配置字段：一律从模型注册表下拉选择（注册表在「模型供应商」页维护），
+    // 模型名类配置字段：一律从模型注册表下拉选择（注册表在“模型供应商”页维护），
     // 不再自定义输入；画图模型不在注册表内（独立绘图端点，保留自由输入）；
     // registryModelNames 为注册表拉取的模型名缓存
     const MODEL_SELECT_PATHS = new Set([
@@ -2001,7 +2037,7 @@
       "bot.manager_id": "管理员 QQ，可执行 #刷新配置文件 等管理命令；0 表示不设置。",
       "bot.name": "机器人昵称，用于群聊点名与人格提示词。",
       "bot.group_chat_enabled": "是否响应群聊消息，关闭后仅私聊可用。",
-      "chat.default_model": "默认对话模型：从模型注册表下拉选择（模型在「模型供应商」页维护）；没手动选过模型的用户跟着改。",
+      "chat.default_model": "默认对话模型：从模型注册表下拉选择（模型在“模型供应商”页维护）；没手动选过模型的用户跟着改。",
       "chat.temperature": "采样温度 0~2：越高回答越随机，常用 0.7~1.0。",
       "chat.frequency_penalty": "频率惩罚 -2~2：正值降低字词重复倾向。",
       "chat.presence_penalty": "存在惩罚 -2~2：正值鼓励引入新话题。",
@@ -2102,6 +2138,9 @@
     // 配置里类型为数组的键；值为 null/缺失时仍按数组渲染，否则面板无法写回数组——
     // 新增数组型配置键时必须登记（关联点）
     const ARRAY_PATHS = new Set(["push.allowed_groups", "push.allowed_users"]);
+    // 小数字段（后端是 double）：一律允许小数并按小数解析。不能按当前值猜——
+    // 温度存成 1 之后再填 0.7，按整数解析会被截成 0
+    const FLOAT_PATHS = new Set(["chat.temperature", "chat.frequency_penalty", "chat.presence_penalty"]);
 
     // 已废弃字段：不渲染、保存时随收集自然消失（旧配置残留值不再显示为可编辑项）；
     // worker 不再单独成卡（2026-09-19）：模型下拉挪进"对话模型"，端点与密钥由注册表提供；
@@ -2356,7 +2395,7 @@
       if (field.kind === "secret")
         return secretControl(typeof value === "string" ? value : SENTINEL);
       if (field.kind === "int")
-        return numberControl(Number.isFinite(value) ? value : null, true);
+        return numberControl(Number.isFinite(value) ? value : null, "int");
       const input = document.createElement("input");
       input.type = "text";
       input.value = value === undefined || value === null ? "" : String(value);
@@ -2563,7 +2602,7 @@
       loginRequired = true;
       const dialog = $("login");
       if (!dialog.open) {
-        $("loginError").textContent = "";
+        setLoginError("");
         dialog.showModal();
       }
       $("token").focus();
@@ -2629,8 +2668,9 @@
       host.appendChild(toast);
     }
 
+    // 诊断给人看的形式：“路径：说明”，不带英文 severity
     function diagnosticsText(items) {
-      return (items || []).map((d) => d.severity + " " + d.path + " - " + d.message).join("\n");
+      return (items || []).map((d) => (d.path ? d.path + "：" : "") + (d.message || "")).join("\n");
     }
 
     /* ---------- 主配置：侧边导航 + 面板 ---------- */
@@ -2701,6 +2741,30 @@
       return navItem({ key: PERCEPTION_KEY, label: "群聊设置", tag: "即时写入" });
     }
 
+    // 键名路径：每个点号后放一个 <wbr>，窄列里优先在点号处折行，不把单词拆开
+    function appendPathText(element, path) {
+      String(path).split(".").forEach((segment, index) => {
+        if (index > 0) element.append(".", document.createElement("wbr"));
+        element.append(segment);
+      });
+    }
+
+    // 页头元信息“来源 / 键名”：中文部分用正文字体，只把键名、路径这类 ASCII 段落设为等宽
+    function setMetaText(element, text) {
+      element.replaceChildren();
+      String(text).split(" / ").forEach((part, index) => {
+        if (index > 0) element.append(" / ");
+        if (/^[\x21-\x7e][\x20-\x7e·]*$/.test(part)) {
+          const code = document.createElement("code");
+          code.className = "mono";
+          code.textContent = part;
+          element.appendChild(code);
+        } else {
+          element.append(part);
+        }
+      });
+    }
+
     // 页头：来源与键名、标题（切页后焦点落在这里）、分区说明、生效统计
     function pageHead(meta, title, hint, withEffects) {
       const head = document.createElement("header");
@@ -2709,7 +2773,7 @@
       main.className = "page-head-main";
       const metaLine = document.createElement("div");
       metaLine.className = "page-meta";
-      metaLine.textContent = meta;
+      setMetaText(metaLine, meta);
       const heading = document.createElement("h1");
       heading.className = "page-title";
       heading.tabIndex = -1;
@@ -2761,8 +2825,9 @@
       $("modelsView").hidden = key !== MODELS_KEY;
       $("perceptionView").hidden = key !== PERCEPTION_KEY;
       $("botInfoView").hidden = key !== BOTINFO_KEY;
-      // 基础信息只读、群聊设置即时写入：这两页没有保存栏
-      $("saveBar").hidden = key === PERCEPTION_KEY || key === BOTINFO_KEY;
+      // 基础信息只读、群聊设置即时写入：这两页没有保存栏；配置还没读到时配置页也没有可保存的内容
+      $("saveBar").hidden = key === PERCEPTION_KEY || key === BOTINFO_KEY ||
+        (key !== MODELS_KEY && !configRendered());
       if (!saving) setButtonText($("save"), key === MODELS_KEY ? "保存模型注册表" : "保存配置");
       $("navToggleLabel").textContent = currentLabel ? "分区：" + currentLabel : "分区";
       updateSaveStatus();
@@ -2886,7 +2951,7 @@
       if (opts.showPath !== false) {
         const pathCode = document.createElement("code");
         pathCode.className = "path";
-        pathCode.textContent = path;
+        appendPathText(pathCode, path);
         head.appendChild(pathCode);
       }
       const badge = rulePath ? effectBadge(rulePath) : null;
@@ -2921,7 +2986,7 @@
       const target = controlTarget(element);
       if (!target) return element;
       target.id = id;
-      if (target.dataset.kind === "secret") {
+      if (target.dataset.kind === "secret" && opts.secretNote !== false) {
         const note = document.createElement("p");
         note.className = "row-hint";
         note.id = "secret-" + id;
@@ -2947,10 +3012,11 @@
       return element;
     }
 
-    function numberControl(value, forceInt) {
+    // mode："int" 只收整数，"float" 允许小数；不传时按当前值推断（其余数字键后端都是整数）
+    function numberControl(value, mode) {
       const input = document.createElement("input");
       input.type = "number";
-      const isInt = forceInt || Number.isInteger(value);
+      const isInt = mode === "int" || (mode !== "float" && Number.isInteger(value));
       input.step = isInt ? "1" : "any";
       if (!isInt) input.inputMode = "decimal";
       input.value = Number.isFinite(value) ? value : "";
@@ -3060,7 +3126,7 @@
       } else if (MODEL_SELECT_PATHS.has(path)) {
         // 字段特例（2026-09-19）：模型名一律从模型注册表下拉选择，不再自定义输入。
         // 当前值不在注册表（含留空跟随默认模型）时保留为独立选项，避免保存时被静默改写；
-        // 注册表为空时只剩当前值可选，先去「模型供应商」页添加
+        // 注册表为空时只剩当前值可选，先去“模型供应商”页添加
         const currentValue = value === null || value === undefined ? "" : String(value);
         const options = registryModelNames.includes(currentValue)
           ? registryModelNames.slice()
@@ -3078,10 +3144,16 @@
         control.spellcheck = false;
         control.dataset.kind = "json";
         control.dataset.original = JSON.stringify(arrayValue);
+        // 高度随内容行数（最多 10 行，多出来的在框内滚动），不截掉结尾的 ]
+        const fitRows = (area) => {
+          area.rows = Math.min(10, area.value.split("\n").length + 1);
+        };
+        fitRows(control);
+        control.addEventListener("input", () => fitRows(control));
       } else if (typeof value === "boolean") {
         control = switchControl(value);
       } else if (typeof value === "number") {
-        control = numberControl(value, false);
+        control = numberControl(value, FLOAT_PATHS.has(path) ? "float" : undefined);
       } else if (SECRET_KEYS.has(key)) {
         control = secretControl(typeof value === "string" ? value : SENTINEL);
       } else {
@@ -3397,7 +3469,7 @@
       if (connected && data.signature) {
         const sign = document.createElement("div");
         sign.className = "botinfo-sign";
-        sign.textContent = "「" + data.signature + "」";
+        sign.textContent = "“" + data.signature + "”";
         identity.appendChild(sign);
       }
       profile.append(avatar, identity);
@@ -3796,14 +3868,20 @@
       }
     }
 
+    // 配置是否已经渲染出分区：没有时页面上没有任何可保存的内容
+    function configRendered() {
+      return $("panes").querySelector(":scope > .pane") !== null;
+    }
+
     // 读取配置失败：首次读取时在页内说明并给“重试”；已有内容时保留页面，只在横幅里说明
     function showConfigLoadError(text, detail) {
       const panes = $("panes");
-      if (panes.querySelector(".pane")) {
+      if (configRendered()) {
         setBannerNotice(text, detail);
         return;
       }
       viewState(panes, text, { detail: detail, retry: loadConfig });
+      if (activePane !== MODELS_KEY) $("saveBar").hidden = true;
       const nav = $("sideNav");
       if (nav.querySelector(".nav-item") === null) {
         const note = document.createElement("p");
@@ -3814,7 +3892,8 @@
     }
 
     async function saveConfig() {
-      if (saving) return;
+      // 配置没读到时不能保存：请求体会是空对象
+      if (saving || !configRendered()) return;
       clearDiagnostics("config");
       setBannerNotice(null);
       const errors = [];
@@ -3838,7 +3917,7 @@
           return;
         }
         if (!response.ok) {
-          setBannerNotice("保存失败（HTTP " + response.status + "）。可稍后重试。",
+          setBannerNotice("配置未保存（HTTP " + response.status + "）。可稍后重试。",
             Array.isArray(body.diagnostics) ? diagnosticsText(body.diagnostics) : (body.error || ""));
           return;
         }
@@ -3850,7 +3929,8 @@
         updateSaveStatus();
         showToast(parts.title, parts.body, parts.isError);
       } catch (error) {
-        if (error.message !== "unauthorized") setBannerNotice(CONNECTION_ERROR_TEXT, error.message);
+        if (error.message !== "unauthorized")
+          setBannerNotice("配置未保存：" + CONNECTION_ERROR_TEXT, error.message);
       } finally {
         setSaving(false);
       }
@@ -4188,12 +4268,13 @@
       endpointInput.value = original.api_endpoint || "";
       endpointInput.placeholder = "https://api.example.com/v1/chat/completions";
       endpointInput.classList.add("mono");
-      card.appendChild(providerRow(cardId, "endpoint", "API 端点", "完整的对话接口地址，如 https://api.deepseek.com/v1/chat/completions；模型列表从同一 base 段拉取。", endpointInput));
+      card.appendChild(providerRow(cardId, "endpoint", "API 端点", "完整的对话接口地址。", endpointInput));
 
       const keyControl = secretControl(SENTINEL);
       const keyInput = controlTarget(keyControl);
       keyInput.dataset.field = "apiKey";
-      card.appendChild(providerRow(cardId, "apiKey", "API Key", "组内所有模型共享的密钥。", keyControl));
+      card.appendChild(providerRow(cardId, "apiKey", "API Key", "组内所有模型共享的密钥。留空保存会保持文件中的原值。",
+        keyControl, { secretNote: false }));
 
       const standardSelect = createComboSelect(
         ["OpenAI", "Anthropic"],
@@ -4260,9 +4341,9 @@
 
       const legend = document.createElement("p");
       legend.className = "model-legend";
-      legend.append(icon("eye"), "带绿色眼睛标记的模型支持图片输入。");
+      legend.append(icon("eye"), "带眼睛标记的模型支持图片输入。");
       modelZone.append(chips, legend, actions, manual, picker, dataList);
-      card.appendChild(providerRow(cardId, "models", "模型", "优先从端点拉取实际可用的模型勾选；个别端点不提供列表接口时用“手动输入”兜底。可以点 chip 上的眼睛标记手动切换是否支持图片输入，或用“检测是否支持图片输入”自动标注。", modelZone, { group: true }));
+      card.appendChild(providerRow(cardId, "models", "模型", "从端点拉取后勾选，或手动输入。", modelZone, { group: true }));
 
       function renderChips() {
         chips.textContent = "";
@@ -4273,6 +4354,8 @@
           const visionToggle = document.createElement("button");
           visionToggle.type = "button";
           visionToggle.className = "chip-vision" + (hasVision ? " on" : "");
+          // 不支持的模型不画常驻图标：有悬停的设备上，切换按钮只在悬停或聚焦时出现；
+          // 触屏没有悬停，按钮一直显示，用划线的眼睛与支持的模型区分（不只靠颜色）
           visionToggle.appendChild(icon(hasVision ? "eye" : "eye-off"));
           visionToggle.title = hasVision ? "已标注支持图片输入，点击取消" : "点击标注为支持图片输入";
           visionToggle.setAttribute("aria-label", name + " 支持图片输入");
@@ -4551,7 +4634,7 @@
         if (!response.ok) { setBannerNotice("读取模型注册表失败（HTTP " + response.status + "）。可稍后重试。"); return; }
         const body = await response.json();
         const info = $("registryInfo");
-        $("registryMeta").textContent = "模型注册表 / " + body.registry_path;
+        setMetaText($("registryMeta"), "模型注册表 / " + body.registry_path);
         info.textContent = body.exists ? "" : "注册表文件还不存在，第一次保存时会创建。";
         info.hidden = body.exists === true;
         const providers = $("providers");
@@ -4603,7 +4686,7 @@
           return;
         }
         if (!response.ok) {
-          setBannerNotice("保存失败（HTTP " + response.status + "）。可稍后重试。", body.error || "");
+          setBannerNotice("模型注册表未保存（HTTP " + response.status + "）。可稍后重试。", body.error || "");
           return;
         }
         await loadModels();
@@ -4626,7 +4709,8 @@
                                : "重启机器人后会读取新表。") + (kept ? "\n" + kept : ""),
                   !hotReloaded);
       } catch (error) {
-        if (error.message !== "unauthorized") setBannerNotice(CONNECTION_ERROR_TEXT, error.message);
+        if (error.message !== "unauthorized")
+          setBannerNotice("模型注册表未保存：" + CONNECTION_ERROR_TEXT, error.message);
       } finally {
         setSaving(false);
       }
@@ -5013,7 +5097,7 @@
           if (item.path) {
             const code = document.createElement("code");
             code.className = "path";
-            code.textContent = item.path;
+            appendPathText(code, item.path);
             text.appendChild(code);
           }
           text.append((item.label ? "）" : "") + "：" + item.message);
@@ -5143,7 +5227,15 @@
     });
     function setLoginError(text) {
       $("loginError").textContent = text;
-      if (text) $("token").select();
+      const input = $("token");
+      if (text) {
+        input.setAttribute("aria-invalid", "true");
+        input.setAttribute("aria-describedby", "loginError");
+        input.select();
+      } else {
+        input.removeAttribute("aria-invalid");
+        input.removeAttribute("aria-describedby");
+      }
     }
 
     $("loginForm").addEventListener("submit", async (event) => {
