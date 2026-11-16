@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "Action/AdminControlAction.h"
-#include "Action/VoiceModeAction.h"
+#include "Tool/SendVoiceTool.h"
 #include "Bootstrap/ConfigReloader.h"
 #include "Bootstrap/ConfigRules.h"
 #include "Bootstrap/ConfigSnapshotStore.h"
@@ -452,37 +452,30 @@ TEST_F(ConfigReloaderFixture, ReloadedModelEndpointReachesProviderOnNextCall)
 }
 
 // 端到端（L1.c）：语音总开关跟着 voice.enabled 的变化走，管理员命令也能改，后写者生效；
-// 只改合成参数时总开关不动。读开关的 VoiceModeAction 每次执行时现取
+// 只改合成参数时总开关不动。读开关的 send_voice 每次列工具时现取（2026-11-16 起没有每人语音模式，
+// 总开关决定 send_voice 开不开放；语音服务可达性这里固定为可达）
 TEST_F(ConfigReloaderFixture, VoiceSwitchFollowsConfigChangesAndCommandsLastWriterWins)
 {
     const std::filesystem::path directory =
         path.parent_path() / (path.stem().string() + "-voice");
     std::filesystem::create_directories(directory);
-    const std::string registryPath = (directory / "models.json").string();
-    std::ofstream(registryPath) << R"({"Models":[{"ModelName":["test-model"],"api_key":"k",)"
-                                   R"("api_endpoint":"https://example.test/chat","APIStandard":"OpenAI"}]})";
     {
-        ModelRegistry registry(registryPath);
-        ConversationStore conversations((directory / "conversation.db").string());
-        UserSessionService session(registry, conversations, live->bot, live->chat);
         ComputerStatus computerStatus;
-        VoiceModeAction voiceMode(session, live->globalVoice);
+        SendVoiceTool voiceTool(
+            live->globalVoice, [](const std::string &) { return std::string(); }, [] { return true; });
         AdminControlAction admin(computerStatus, live->globalVoice, [] { return std::string(); });
         ConfigReloader reloader(*store, *live);
-        const nlohmann::json turnOn = {{"enabled", true}};
         const nlohmann::json freeze = {{"action", "freeze_global_voice"}};
         const nlohmann::json activate = {{"action", "activate_global_voice"}};
-        ActionContext user;
-        user.user_id = 10;
-        const auto userTurnsVoiceOn = [&]() { return voiceMode.execute(turnOn, user).content; };
+        const auto voiceOffered = [&]() { return voiceTool.available(); };
         const auto writeVoice = [this](bool enabled, const std::string &host) {
             writeEdited([enabled, host](nlohmann::json &config) {
                 config["voice"] = {{"enabled", enabled}, {"host", host}, {"port", "9880"}};
             });
         };
 
-        // 启动时没配 voice：总开关关着，用户开不了语音
-        EXPECT_EQ(userTurnsVoiceOn(), "管理员尚未激活语音功能。");
+        // 启动时没配 voice：总开关关着，send_voice 不开放
+        EXPECT_FALSE(voiceOffered());
 
         // 配置打开语音：重载后总开关打开，下一次执行即放行
         writeVoice(true, "127.0.0.1");
@@ -490,12 +483,11 @@ TEST_F(ConfigReloaderFixture, VoiceSwitchFollowsConfigChangesAndCommandsLastWrit
         ASSERT_TRUE(report.result.success);
         EXPECT_EQ(report.applied,
                   (std::vector<std::string>{"voice.enabled", "voice.host", "voice.port"}));
-        EXPECT_EQ(userTurnsVoiceOn(), "语音已开启。");
-        EXPECT_TRUE(session.isVoiceMode(10));
+        EXPECT_TRUE(voiceOffered());
 
         // 管理员冻结：命令后写，开关关上
         EXPECT_EQ(admin.execute(freeze, ActionContext{}).content, "全局语音已冻结。");
-        EXPECT_EQ(userTurnsVoiceOn(), "管理员尚未激活语音功能。");
+        EXPECT_FALSE(voiceOffered());
 
         // 只改合成参数：voice.enabled 没变，总开关保持命令设的值
         writeVoice(true, "127.0.0.2");
@@ -504,16 +496,16 @@ TEST_F(ConfigReloaderFixture, VoiceSwitchFollowsConfigChangesAndCommandsLastWrit
         EXPECT_EQ(report.applied, (std::vector<std::string>{"voice.host"}));
         EXPECT_EQ(live->voice.get()->host, "127.0.0.2");
         EXPECT_FALSE(*live->globalVoice.get());
-        EXPECT_EQ(userTurnsVoiceOn(), "管理员尚未激活语音功能。");
+        EXPECT_FALSE(voiceOffered());
 
         // 管理员再激活，之后配置把 voice.enabled 改成 false：配置后写，开关关上
         EXPECT_EQ(admin.execute(activate, ActionContext{}).content, "全局语音已激活。");
-        EXPECT_EQ(userTurnsVoiceOn(), "语音已开启。");
+        EXPECT_TRUE(voiceOffered());
         writeVoice(false, "127.0.0.2");
         report = reloader.reload();
         ASSERT_TRUE(report.result.success);
         EXPECT_EQ(report.applied, (std::vector<std::string>{"voice.enabled"}));
-        EXPECT_EQ(userTurnsVoiceOn(), "管理员尚未激活语音功能。");
+        EXPECT_FALSE(voiceOffered());
     }
     std::error_code error;
     std::filesystem::remove_all(directory, error);

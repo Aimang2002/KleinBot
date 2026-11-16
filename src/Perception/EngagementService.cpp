@@ -942,8 +942,12 @@ void EngagementService::runTurn(std::uint64_t groupId)
     hooks.request = [this, &contract, &schemas](const std::vector<ChatMessage> &turnHistory)
     { return mainAgent(contract, turnHistory, schemas); };
     hooks.requireToolCallsFinishReason = false;
+    // 定案动词：group_say、send_voice（用语音说，2026-11-16）、leave_topic
     hooks.stopsBeforeExecution = [](const ResponseToolCall &call)
-    { return call.name == "group_say" || call.name == "leave_topic"; };
+    {
+        return call.name == "group_say" || call.name == KleinSendVoiceToolName ||
+               call.name == KleinLeaveTopicToolName;
+    };
     hooks.localToolNames = {"recall_context"};
     hooks.runLocalTool = [this, groupId, startTs, &shownSeqs, &bot](const ResponseToolCall &call)
     {
@@ -1184,7 +1188,23 @@ void EngagementService::runTurn(std::uint64_t groupId)
         // 关联键 = execution_id；无记录器时也要一个键，自消息 message_id 回填靠它
         const std::string correlationId =
             executionId.empty() ? utils::uniqueId("dlv") : executionId;
-        emitOutbound(groupId, TextMessage{utils::trim(turn.text)}, correlationId);
+        const std::string spoken = utils::trim(turn.text);
+        // 用语音说（send_voice）：交给与对话路径同一个 send_voice 工具合成与送达——合成失败时
+        // 它给的出站就是原话文字。工具此刻不可用（语音被关、服务不可达）时按文字发出
+        Tool *voiceTool = (turn.voice && tools != nullptr) ? tools->find(KleinSendVoiceToolName)
+                                                           : nullptr;
+        if (voiceTool != nullptr && voiceTool->available())
+        {
+            const ToolResult spokenResult = voiceTool->execute(
+                nlohmann::json{{"text", spoken}}.dump(), ToolContext{0, 0, std::string(), groupId});
+            for (std::size_t index = 0; index < spokenResult.outbound_messages.size(); ++index)
+                emitOutbound(groupId, spokenResult.outbound_messages[index],
+                             index == 0 ? correlationId : std::string());
+        }
+        else
+        {
+            emitOutbound(groupId, TextMessage{spoken}, correlationId);
+        }
     }
 
     // 情绪基调更新（worker 调用在锁外；每 N 个发言轮一次，失败保留旧基调）——

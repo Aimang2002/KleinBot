@@ -69,7 +69,6 @@ Person UserSessionService::createDefaultPerson(const uint64_t user_id, const Bot
     if (person.system_prompt.empty())
         person.system_prompt = this->loadSoulFallback(bot);
     // 模型不在这里复制：current_model 留空 = 跟随默认模型，见 resolveModelName
-    person.isOpenVoiceMode = false;
 
     return person;
 }
@@ -213,23 +212,6 @@ void UserSessionService::switchModel(const uint64_t user_id, const std::string &
     std::lock_guard<std::mutex> lock(this->mutex_message);
     this->ensureUserExistsUnlock(user_id, *bot);
     this->user_messages->find(user_id)->second.current_model = newModel;
-}
-
-void UserSessionService::voiceSwitch(const uint64_t user_id, const bool tag)
-{
-    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
-    std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id, *bot);
-    auto user = this->user_messages->find(user_id);
-    user->second.isOpenVoiceMode = tag;
-}
-
-bool UserSessionService::isVoiceMode(const uint64_t user_id)
-{
-    const Live<BotIdentity>::Snapshot bot = this->botIdentity.get();
-    std::lock_guard<std::mutex> lock(this->mutex_message);
-    this->ensureUserExistsUnlock(user_id, *bot);
-    return this->user_messages->find(user_id)->second.isOpenVoiceMode;
 }
 
 std::string UserSessionService::removePreviousContext(const uint64_t user_id)

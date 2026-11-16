@@ -12,7 +12,7 @@
  *     2. inspect_image / send_image / generate_image（三者共用一段，去重后出现一次）
  *     3. recall_conversation
  *     4. get_current_model
- *     5. set_voice_mode
+ *     5. send_voice（2026-11-16 起取代 set_voice_mode；只在语音可用时开放）
  *     6. admin_control
  *     7. 固定非工具句："不要把重置对话、重置上下文、设置人格或还原人格转换为工具调用。"
  *     8. klein_web_search（含运行时本地日期锚点）

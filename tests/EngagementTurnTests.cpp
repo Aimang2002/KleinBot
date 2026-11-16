@@ -158,3 +158,17 @@ TEST(EngagementTurnTest, GroupSayWinsOverContent)
     EXPECT_EQ(turn.unspokenChars, 0U);
 }
 } // namespace
+
+// 用语音说（2026-11-16）：send_voice 与 group_say 同为发言，只是用语音送达
+TEST(EngagementTurnTest, SendVoiceIsSpeechByVoice)
+{
+    const EngagementTurn voice =
+        parseEngagementTurn(withToolCalls({{"c1", "send_voice", R"({"text":"晚上好"})"}}));
+    EXPECT_EQ(voice.kind, EngagementTurn::Kind::Speak);
+    EXPECT_TRUE(voice.voice);
+    EXPECT_EQ(voice.text, "晚上好");
+
+    const EngagementTurn say =
+        parseEngagementTurn(withToolCalls({{"c1", "group_say", R"({"text":"晚上好"})"}}));
+    EXPECT_FALSE(say.voice);
+}

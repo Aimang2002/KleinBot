@@ -18,7 +18,6 @@
 #include "../utils/LocalDate.h"
 #include "Message.h"
 #include "../Application/NonTextLabels.h"
-#include "../Application/SpokenForm.h"
 #include <algorithm>
 #include <iomanip>
 #include <thread>
@@ -28,18 +27,17 @@ std::mt19937 mt_rand(1000);
 
 Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                  MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
-                 CommandRegistry &registry, Voice &voice, const Live<MessageOptions> &options,
-                 EndpointProvider visionModel, const Live<bool> &globalVoice,
-                 const Live<AffectOptions> &affectOptions,
+                 CommandRegistry &registry, const Live<MessageOptions> &options,
+                 EndpointProvider visionModel, const Live<AffectOptions> &affectOptions,
                  TypingIndicator *typingIndicator, PerceptionChannel *perception,
                  GroupContextService *groupContext,
                  affect::DecisionRecorder *decisionRecorder,
                  ImageAssetStore *sharedAssets,
                  affect::DecisionPolicy *decisionPolicy)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
-      imageAssetStore(imageAssetStore), registry(registry), voice(voice),
+      imageAssetStore(imageAssetStore), registry(registry),
       options(options), visionModel(std::move(visionModel)),
-      global_Voice(globalVoice), typingIndicator(typingIndicator), perception(perception),
+      typingIndicator(typingIndicator), perception(perception),
       groupContext(groupContext), decisionRecorder(decisionRecorder), sharedAssets(sharedAssets),
       decisionPolicy(decisionPolicy), affectOptions(affectOptions)
 {
@@ -312,19 +310,9 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 				return;
 			}
 
-			// 送达形式（Application/SpokenForm）：语音模式下先试语音，合成失败就发原文——
-			// 内容只有一份，失败不顶替内容
-			const bool wantVoice =
-				*this->global_Voice.get() && this->userSession.isVoiceMode(current_data.user_id);
-			const SpokenForm form = chooseSpokenForm(llm_text, wantVoice,
-				[this](const std::string &text) { return this->textToVoice(text); });
-			if (form.voiceFailed)
-				LOG_WARNING("语音合成失败，本条回复改发文字");
-			if (form.voice)
-				dispatch(current_data, VoiceMessage{form.audioPath}, replyContextPending,
-						 correlationPending);
-			else
-				dispatchText(current_data, llm_text, replyContextPending, correlationPending);
+			// 文字回复。要用语音时她会调用 send_voice：语音是工具出站消息，已在上面随
+			// outbound_messages 发出（合成失败时那条出站就是原话文字），这里不再有语音分支
+			dispatchText(current_data, llm_text, replyContextPending, correlationPending);
 		};
 
 		if (shadowPolicy)
@@ -577,28 +565,6 @@ std::string Message::provideImageRecognition(const uint64_t user_id, const std::
 	}
 
 	return {};
-}
-
-// 专供 textToVoice 函数的回调函数
-size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
-{
-	size_t realsize = size * nmemb;
-	std::ofstream *file = static_cast<std::ofstream *>(userp);
-	if (file)
-	{
-		file->write(static_cast<const char *>(contents), realsize);
-	}
-	return realsize;
-}
-std::string Message::textToVoice(const std::string &text)
-{
-	std::string audioPath = this->voice.toAudio(text);
-	if (audioPath.find(".wav") == std::string::npos)
-	{
-		LOG_ERROR("TTS 失败：" + audioPath);
-		return {};
-	}
-	return audioPath;
 }
 
 Message::~Message()

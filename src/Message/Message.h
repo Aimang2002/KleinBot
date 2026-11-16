@@ -2,7 +2,6 @@
 #define MESSAGE_H
 
 #include "../ModelApiCaller/Dock.hpp"
-#include "../ModelApiCaller/Voice/Voice.h"
 #include "../ComputerStatus/ComputerStatus.h"
 #include "../Command/CommandRegistry.h"
 #include "../UserSession/UserSessionService.h"
@@ -36,14 +35,14 @@ public:
     // perception 可空：注入时白名单群被 @ 的回复带上话题背景注记（T7），关闭时内部 no-op
     // groupContext 可空：注入时白名单群启用内容级上下文装配与收敛契约（T7b）
     // visionModel：视觉端点来源，每次调用时取一次（models.vision 可只填注册名）
-    // options / globalVoice / affectOptions 都是组合根的活值（ADR-023，只读）：
-    // 群聊开关在每次过滤时取，语音总开关在每次投递回复时取，affect（策略选择与 enforce）
-    // 在每次决策时取一次；decisionPolicy 是组合根的策略外壳，每条消息按快照 resolve 一次
+    // options / affectOptions 都是组合根的活值（ADR-023，只读）：
+    // 群聊开关在每次过滤时取，affect（策略选择与 enforce）在每次决策时取一次；
+    // decisionPolicy 是组合根的策略外壳，每条消息按快照 resolve 一次。
+    // 语音不在这里决定（2026-11-16）：她要用语音时调用 send_voice 工具，语音作为工具出站消息送达
     explicit Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                      MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
-                     CommandRegistry &registry, Voice &voice, const Live<MessageOptions> &options,
-                     EndpointProvider visionModel, const Live<bool> &globalVoice,
-                     const Live<AffectOptions> &affectOptions,
+                     CommandRegistry &registry, const Live<MessageOptions> &options,
+                     EndpointProvider visionModel, const Live<AffectOptions> &affectOptions,
                      class TypingIndicator *typingIndicator = nullptr,
                      class PerceptionChannel *perception = nullptr,
                      class GroupContextService *groupContext = nullptr,
@@ -119,10 +118,6 @@ private:
 	 */
 	std::string encodeToURL(const std::string &input);
 
-	// 文本 → 语音：成功返回本地 wav 路径，失败返回空字符串
-	// 协议封装（变成 VoiceMessage）由调用方完成，本函数只做 TTS
-	std::string textToVoice(const std::string &text);
-
 	// 把 OutboundMessage 按 message_type 路由到 send_private / send_group。
 	// withReplyContext=false 时不带引用+@（同一轮的第一条出站之后）。
 	// correlationId 非空时该投递要回执（R0.2）。observeOutbound=false 时不把这条出站记为
@@ -142,15 +137,12 @@ private:
 private:
 	std::string help_message;
 
-	const Live<bool> &global_Voice; // 语音总开关，true 为开启
-
 	Dock &dock;
 	UserSessionService &userSession;
 	ChatService &chatService;
 	MessageSenderPort &sender;
 	ImageAssetStore &imageAssetStore;
 	CommandRegistry &registry;
-    Voice &voice;
     const Live<MessageOptions> &options;
     EndpointProvider visionModel;
     class TypingIndicator *typingIndicator = nullptr; // 可空：未注入则无输入状态提示

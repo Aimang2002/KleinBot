@@ -19,13 +19,15 @@ EngagementTurn parseEngagementTurn(const ChatResponse &response)
     EngagementTurn turn;
     for (const auto &call : response.tool_calls)
     {
-        if (call.name != "group_say" && call.name != KleinLeaveTopicToolName)
+        if (call.name != "group_say" && call.name != KleinSendVoiceToolName &&
+            call.name != KleinLeaveTopicToolName)
             continue;
         const nlohmann::json arguments = parseToolArguments(call.arguments);
-        if (call.name == "group_say")
+        if (call.name == "group_say" || call.name == KleinSendVoiceToolName)
         {
             turn.kind = EngagementTurn::Kind::Speak;
             turn.text = jsonArg(arguments, "text");
+            turn.voice = call.name == KleinSendVoiceToolName;
             turn.reason.clear();
             return turn;
         }

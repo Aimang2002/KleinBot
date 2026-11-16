@@ -37,6 +37,9 @@ struct MusicMessage
 struct VoiceMessage
 {
     std::string audio_path;
+    // 这段语音说的原话（内容与送达分离）：她的语音入群缓冲时存这段文字，
+    // 不存音频；协议编码只用 audio_path
+    std::string transcript;
 };
 
 // 命令 / LLM 编排侧返回的统一类型，保持独立于 OneBot、Milky、Satori 等协议

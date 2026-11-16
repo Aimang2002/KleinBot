@@ -140,8 +140,9 @@ void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMe
                 record.text = formatImagePlaceholder(asset->asset_id, asset->source);
         }
     }
-    else if (std::holds_alternative<VoiceMessage>(outbound))
-        record.text = "[语音]";
+    else if (const auto *voice = std::get_if<VoiceMessage>(&outbound))
+        // 存她说的原话，不存音频（没有消息类型字段可打标签）；没有原话时退回占位
+        record.text = !voice->transcript.empty() ? voice->transcript : std::string("[语音]");
     else if (std::holds_alternative<MusicMessage>(outbound))
         record.text = "[音乐]";
     record.timestamp = std::time(nullptr);

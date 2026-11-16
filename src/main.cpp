@@ -60,9 +60,9 @@
 #include "Tool/ToolRegistry.h"
 #include "Tool/GetTimeTool.h"
 #include "Tool/LeaveTopicTool.h"
+#include "Tool/SendVoiceTool.h"
 #include "Tool/ActionTool.h"
 #include "Action/GetCurrentModelAction.h"
-#include "Action/VoiceModeAction.h"
 #include "Action/AdminControlAction.h"
 #include "Command/AdminCommand.h"
 #include "Command/FeedbackCommand.h"
@@ -77,7 +77,6 @@
 #include "Command/SearchSongsCommand.h"
 #include "Command/SetSoulCommand.h"
 #include "Command/SwitchModelCommand.h"
-#include "Command/VoiceSwitchCommand.h"
 #include "Tool/RecallConversationTool.h"
 #include "Action/WebSearchAction.h"
 #include "Action/WebFetchAction.h"
@@ -430,14 +429,15 @@ int main(int argc, char **argv)
 	userSession.setImageAssetStore(&imageAssetStore);
 	if (settings.bot.managerId != 0)
 		userSession.ensureUserExists(settings.bot.managerId);
+	// 语音合成先于注册表构造、后于它析构：send_voice 工具持它的引用
+	Voice voice(liveSettings.voice, &running);
 	ToolRegistry tools;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
 		{ return userSession.getModelName(userId); });
 	// 语音总开关是活值 liveSettings.globalVoice（决定 10）：启动时取 voice.enabled；
 	// AdminControlAction（#激活语音/#冻结语音）与配置重载（voice.enabled 变化时）都会改它，
-	// 后写者生效。VoiceModeAction 与 Message 只读
-	VoiceModeAction voiceModeAction(userSession, liveSettings.globalVoice);
+	// 后写者生效。send_voice 只读（2026-11-16 起没有每人语音模式，用不用语音由她决定）
 	AdminControlAction adminControlAction(adminComputerStatus,
 		liveSettings.globalVoice, [&configReloader]()
 		{
@@ -495,7 +495,11 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<InspectImageTool>(dock, imageAssetStore, visionEndpoint,
 														  &groupImageAssets));
 	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore, &groupImageAssets));
-	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
+	// 用语音说（2026-11-16）：总开关开着且语音服务可用时才开放；对话路径是工具，
+	// 话题会话轮是定案动词（下方 setTools 名单），两边都由它合成与送达
+	tools.registerTool(std::make_unique<SendVoiceTool>(
+		liveSettings.globalVoice, [&voice](const std::string &text) { return voice.toAudio(text); },
+		[&voice]() { return voice.reachable(); }));
 	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
 	// 离场（ADR-024）：群里被 @ 时她也能结束跟进、被请走时暂时退开。注册表持有，
 	// 跟进服务构造后在下方 bind；未接线时不可用（工具表不出现），只在群聊开放
@@ -594,7 +598,6 @@ int main(int argc, char **argv)
 	CapabilityBroker capabilityBroker(activeApiChannel);
 	// 私聊"正在输入"（T5）：仅聊天路径，能力位门控
 	TypingIndicator typingIndicator(capabilityBroker, activeApiChannel);
-	Voice voice(liveSettings.voice, &running);
 	CommandRegistry commandRegistry(settings.bot.managerId);
 	commandRegistry.registryCommand(std::make_unique<HelpCommand>());
 	commandRegistry.registryCommand(std::make_unique<ModelListCommand>(models));
@@ -605,7 +608,6 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<ResetContextCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<SetSoulCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<SwitchModelCommand>(userSession, models));
-	commandRegistry.registryCommand(std::make_unique<VoiceSwitchCommand>(voiceModeAction));
 	commandRegistry.registryCommand(std::make_unique<RemoveContextCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
 	// 人工反馈 #好/#坏（R0.3，所有人可用）：affect.enabled 当前为假时命令回"未启用"
@@ -702,7 +704,7 @@ int main(int argc, char **argv)
 	// 可经 klein_web_search/klein_web_fetch 查（2026-10-31：先看懂再开口）；联网工具始终注册，
 	// 关着时那一轮不开放（Tool::available）。管理员工具由 setTools 过滤
 	engagementService.setTools(&tools, {KleinInspectImageToolName, KleinGenerateImageToolName, KleinSendImageToolName,
-		KleinWebSearchToolName, KleinWebFetchToolName});
+		KleinWebSearchToolName, KleinWebFetchToolName, KleinSendVoiceToolName});
 	// 工具出站图入群缓冲：占位符与 @ 路径（Message::dispatch）一致
 	engagementService.setOutboundRecorder(
 		[&groupContextService](std::uint64_t groupId, const OutboundMessage &message,
@@ -719,8 +721,8 @@ int main(int argc, char **argv)
 	// 群聊开关、语音总开关、affect.enforce 都持活值（ADR-023）；MessageOptions 里的 bot
 	// 身份保持运行值（决定 9）
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
-		commandRegistry, voice, liveSettings.message, visionEndpoint,
-		liveSettings.globalVoice, liveSettings.affect, &typingIndicator, &perceptionChannel,
+		commandRegistry, liveSettings.message, visionEndpoint,
+		liveSettings.affect, &typingIndicator, &perceptionChannel,
 		&groupContextService, &decisionRecorder, &groupImageAssets, &decisionPolicy);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证

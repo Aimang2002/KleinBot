@@ -169,14 +169,13 @@ All built-in commands start with "#". They are primarily used to control various
 | `#模型列表` | Lists all registered models | `#模型列表` |
 | `#搜歌` | Searches NetEase Cloud Music and returns a music card | `#搜歌:rubia` |
 | `#图片生成` | Generates and sends an image (`#生成图片` is an alias) | `#图片生成:cyberpunk city` |
-| `#开启语音` / `#关闭语音` | Enables or disables voice replies for the current user | `#开启语音` |
 
 Some public capabilities can also be triggered with natural language, without the `#` prefix. The model interprets the request and calls the corresponding tool:
 
 | Capability | Example |
 | --- | --- |
 | Query the current model | “Which model are you using?” |
-| Enable or disable voice replies | “Please reply with voice” / “Turn voice off” |
+| Speak with voice (needs voice enabled by the admin and a reachable TTS service; without an explicit request she replies in text) | “Answer with voice” / “Say something to me” |
 | Generate an image | “Draw a cyberpunk city for me” |
 | Set, list, or cancel reminders | “Remind me to attend the meeting at 9 tomorrow morning” / “What reminders do I have?” |
 

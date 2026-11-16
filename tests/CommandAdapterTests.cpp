@@ -6,7 +6,6 @@
 #include "Command/HelpCommand.h"
 #include "Command/HelpText.h"
 #include "Command/QueryModelCommand.h"
-#include "Command/VoiceSwitchCommand.h"
 #include "KleinVersion.h"
 #include "Protocol/OneBot/OneBotEventDecoder.h"
 
@@ -71,22 +70,6 @@ TEST(QueryModelCommandTest, MapsExplicitCommandToAction)
     EXPECT_TRUE(action.lastArguments.empty());
     EXPECT_EQ(action.lastContext.user_id, 123U);
     EXPECT_EQ(textContent(result), "action-result");
-}
-
-TEST(VoiceSwitchCommandTest, MapsEnableAndDisableArguments)
-{
-    RecordingAction action;
-    VoiceSwitchCommand command(action);
-    InboundMessage data;
-    auto context = makeContext(data, 321);
-
-    data.plain_text = "#开启语音";
-    command.execute(context);
-    EXPECT_TRUE(action.lastArguments.at("enabled").get<bool>());
-
-    data.plain_text = "#关闭语音";
-    command.execute(context);
-    EXPECT_FALSE(action.lastArguments.at("enabled").get<bool>());
 }
 
 TEST(AdminCommandTest, PreservesAdminRequirementAndMapsOperation)

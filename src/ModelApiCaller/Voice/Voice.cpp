@@ -1,6 +1,7 @@
 #include "Voice.h"
 #include "../../Library/nlohmann/json.hpp"
 #include "../../Network/CurlRequestControl.h"
+#include <ctime>
 #include <filesystem>
 
 Voice::Voice(const Live<VoiceOptions> &config, const std::atomic<bool> *running)
@@ -33,14 +34,14 @@ std::string Voice::toAudio(const std::string &text)
     if (pathError)
     {
         LOG_ERROR("无法定位系统临时目录：" + pathError.message());
-        return "系统提示：无法创建输出文件";
+        return {};
     }
     std::error_code dirError;
     std::filesystem::create_directories(voiceDir, dirError);
     if (dirError)
     {
         LOG_ERROR("无法创建语音输出目录：" + voiceDir.string() + "，" + dirError.message());
-        return "系统提示：无法创建输出文件";
+        return {};
     }
 
     static std::atomic<uint64_t> fileSequence{0};
@@ -57,7 +58,7 @@ std::string Voice::toAudio(const std::string &text)
     if (!audioFile.is_open())
     {
         LOG_ERROR("无法创建输出文件");
-        return "系统提示：无法创建输出文件";
+        return {};
     }
     const auto discardFile = [&audioFile, &filePath]() {
         audioFile.close();
@@ -110,20 +111,79 @@ std::string Voice::toAudio(const std::string &text)
                 discardFile();
                 return {};
             }
-            LOG_ERROR("请求失败: " + std::string(curl_easy_strerror(res)));
+            LOG_ERROR("语音合成请求失败：" + std::string(curl_easy_strerror(res)));
             discardFile();
-            return "系统提示：请求失败。";
+            markUnreachable(targetOf(*options));
+            return {};
         }
-        else
+        long status = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+        curl_easy_cleanup(curl);
+        curl_slist_free_all(headers);
+        if (status != 200)
         {
-            audioFile.close();
-            curl_easy_cleanup(curl);
-            curl_slist_free_all(headers);
-            return filePath.string();
+            // 服务回了错误（如参考音频路径不对）：响应体不是音频，不能当语音发出去
+            LOG_ERROR("语音合成服务返回 HTTP " + std::to_string(status));
+            discardFile();
+            markUnreachable(targetOf(*options));
+            return {};
         }
+        audioFile.close();
+        return filePath.string();
     }
     discardFile();
     return {};
+}
+
+std::string Voice::targetOf(const VoiceOptions &options)
+{
+    return options.host + ":" + options.port;
+}
+
+void Voice::markUnreachable(const std::string &target)
+{
+    std::lock_guard<std::mutex> lock(healthMutex);
+    probedTarget = target;
+    probedAt = static_cast<std::int64_t>(std::time(nullptr));
+    lastReachable = false;
+}
+
+bool Voice::reachable()
+{
+    const Live<VoiceOptions>::Snapshot options = config.get();
+    const std::string target = targetOf(*options);
+    if (options->host.empty() || options->port.empty())
+        return false;
+    const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+    {
+        std::lock_guard<std::mutex> lock(healthMutex);
+        if (target == probedTarget && now - probedAt < kProbeIntervalSeconds)
+            return lastReachable;
+    }
+    // 只建一次 TCP 连接，不发请求、不合成
+    bool ok = false;
+    if (CURL *curl = curl_easy_init())
+    {
+        const std::string url = target + "/";
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 1000L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 1500L);
+        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+        ok = curl_easy_perform(curl) == CURLE_OK;
+        curl_easy_cleanup(curl);
+    }
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(healthMutex);
+        changed = probedAt == 0 || lastReachable != ok || probedTarget != target;
+        probedTarget = target;
+        probedAt = now;
+        lastReachable = ok;
+    }
+    if (changed)
+        LOG_INFO(ok ? "语音合成服务可用：" + target : "语音合成服务不可达：" + target);
+    return ok;
 }
 
 std::string Voice::dataToBase64(const std::string &input)

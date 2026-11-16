@@ -10,7 +10,6 @@
 #include "Memory/MemoryService.h"
 #include "Message/Message.h"
 #include "ModelApiCaller/Dock.hpp"
-#include "ModelApiCaller/Voice/Voice.h"
 #include "Persistence/ConversationStore.h"
 #include "Port/MessageSenderPort.h"
 #include "Tool/ToolRegistry.h"
@@ -305,11 +304,9 @@ struct PrivateMessageFixture
           chat(dock, session, registry, tools, memory, liveChat, 1),
           assets(directory.path() + "/assets.db", directory.path() + "/assets"),
           commands(1),
-          liveVoice(VoiceOptions{}),
-          voice(liveVoice),
           liveMessage(messageOptions()),
-          message(dock, session, chat, sender, assets, commands, voice, liveMessage,
-                  [] { return ModelEndpointOptions{}; }, globalVoice, liveAffect, nullptr, nullptr,
+          message(dock, session, chat, sender, assets, commands, liveMessage,
+                  [] { return ModelEndpointOptions{}; }, liveAffect, nullptr, nullptr,
                   nullptr, recorder, nullptr, policy)
     {
         dock.registerStandard("Fake", std::make_unique<CountingChatPort>(&captured));
@@ -365,9 +362,6 @@ struct PrivateMessageFixture
     RecordingSender sender;
     ImageAssetStore assets;
     CommandRegistry commands;
-    Live<VoiceOptions> liveVoice;
-    Voice voice;
-    Live<bool> globalVoice{false};
     Live<MessageOptions> liveMessage;
     Live<AffectOptions> liveAffect{AffectOptions{}};
     Message message;
@@ -446,29 +440,6 @@ TEST(InboundCoalescerMessageTest, SingleMessageBurstMatchesLegacyRequest)
         EXPECT_EQ(a.history[index].content, b.history[index].content);
     }
     EXPECT_EQ(legacy.sender.texts, coalesced.sender.texts);
-}
-
-// 配置实时生效（L1.c）：Message 每次投递回复时现取语音总开关。用户开着语音模式，
-// 开关关着时回文本；打开开关后下一条就走语音路径（这里的 TTS 地址连不上，合成失败按
-// Application/SpokenForm 退回文字发原话——ADR-024 之前这里发的是“系统提示：语音模块异常。”）
-TEST(MessageLiveConfigTest, GlobalVoiceSwitchIsReadAtEachReply)
-{
-    PrivateMessageFixture fixture;
-    fixture.session.appendMessage(7, "user", "很早以前的话");
-    fixture.session.appendMessage(7, "assistant", "很早以前的回答");
-    fixture.session.voiceSwitch(7, true);
-    VoiceOptions unreachable;
-    unreachable.host = "127.0.0.1";
-    unreachable.port = "1";
-    fixture.liveVoice.set(unreachable);
-
-    fixture.message.handleMessage(privateText(7, "在吗"));
-    ASSERT_EQ(fixture.sender.texts, (std::vector<std::string>{"回复1"})) << "开关关着：回文本";
-
-    fixture.globalVoice.set(true);
-    fixture.message.handleMessage(privateText(7, "还在吗"));
-    EXPECT_EQ(fixture.sender.texts, (std::vector<std::string>{"回复1", "回复2"}))
-        << "开关打开后下一条走语音路径；合成失败发原话，不发系统提示";
 }
 
 // 配置实时生效（L1.f）：群聊开关在每次过滤时取。先放行一条 @ 她的群消息，

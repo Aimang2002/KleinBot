@@ -43,7 +43,6 @@ struct Person
     std::optional<std::string> current_model;
 
     // 其他信息
-    bool isOpenVoiceMode = false; // 是否开启语音模式，默认为否
 };
 
 #endif

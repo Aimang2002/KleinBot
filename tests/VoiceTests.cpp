@@ -99,43 +99,128 @@ TEST(VoiceLiveConfigTest, NextSynthesisUsesReplacedOptions)
     EXPECT_EQ(second.received()[0]["ref_audio_path"], "参考B.wav");
 }
 
-// ===== 送达形式（Application/SpokenForm，ADR-024：内容与送达分离） =====
-#include "Application/SpokenForm.h"
+// ===== 语音由她决定（2026-11-16）：send_voice 工具与语音服务可用性 =====
+#include "Tool/SendVoiceTool.h"
 
-TEST(SpokenFormTest, TextWhenVoiceNotWanted)
+namespace
 {
-    int calls = 0;
-    const SpokenForm form = chooseSpokenForm("你好", false, [&calls](const std::string &)
-                                             {
-                                                 ++calls;
-                                                 return std::string("a.wav");
-                                             });
-    EXPECT_FALSE(form.voice);
-    EXPECT_FALSE(form.voiceFailed);
-    EXPECT_EQ(calls, 0) << "不要语音就不合成";
+// 回 500 的假 TTS 服务：响应体不是音频
+class FailingTtsServer
+{
+public:
+    FailingTtsServer()
+    {
+        server.Post("/tts", [](const httplib::Request &, httplib::Response &response) {
+            response.status = 500;
+            response.set_content(R"({"message":"bad ref audio"})", "application/json");
+        });
+        port = server.bind_to_any_port("127.0.0.1");
+        thread = std::thread([this]() { server.listen_after_bind(); });
+    }
+    ~FailingTtsServer()
+    {
+        server.stop();
+        thread.join();
+    }
+    int port = -1;
+
+private:
+    httplib::Server server;
+    std::thread thread;
+};
+
+ToolContext anyContext()
+{
+    return ToolContext{7, 0, std::string(), 0};
+}
+} // namespace
+
+// 服务回了错误：响应体不是音频，不能当语音发出去；失败一律返回空串、服务记为不可用
+TEST(VoiceServiceTest, ErrorStatusIsAFailureNotAnAudioFile)
+{
+    FailingTtsServer failing;
+    ASSERT_GT(failing.port, 0);
+    Live<VoiceOptions> options(optionsFor(failing.port, "参考"));
+    Voice voice(options);
+    EXPECT_TRUE(voice.toAudio("你好").empty());
+    EXPECT_FALSE(voice.reachable()) << "合成失败后直到下一次探测都按不可用";
 }
 
-TEST(SpokenFormTest, VoiceWhenSynthesisSucceeds)
+TEST(VoiceServiceTest, ReachableProbesTheConfiguredAddress)
 {
-    std::string seen;
-    const SpokenForm form = chooseSpokenForm("你好", true, [&seen](const std::string &text)
-                                             {
-                                                 seen = text;
-                                                 return std::string("/tmp/a.wav");
-                                             });
-    EXPECT_TRUE(form.voice);
-    EXPECT_EQ(form.audioPath, "/tmp/a.wav");
-    EXPECT_EQ(seen, "你好") << "合成的就是她要说的那句";
+    FakeTtsServer server;
+    ASSERT_GT(server.port, 0);
+    Live<VoiceOptions> options(optionsFor(server.port, "参考"));
+    Voice voice(options);
+    EXPECT_TRUE(voice.reachable());
+    EXPECT_TRUE(server.received().empty()) << "探测只连一下，不合成";
+
+    // 换成没人监听的地址：地址变了立即重新探测
+    options.set(optionsFor(1, "参考"));
+    EXPECT_FALSE(voice.reachable());
+    EXPECT_TRUE(voice.toAudio("你好").empty());
 }
 
-// 2026-11-16 真机：语音服务没开，原话被换成"系统提示：语音模块异常。"。现在退回文字发原话
-TEST(SpokenFormTest, FallsBackToTextWhenSynthesisFails)
+// 开放条件：总开关开着且服务可用
+TEST(SendVoiceToolTest, OfferedOnlyWhenSwitchedOnAndServiceReachable)
 {
-    const SpokenForm failed =
-        chooseSpokenForm("好，我退开了", true, [](const std::string &) { return std::string(); });
-    EXPECT_FALSE(failed.voice);
-    EXPECT_TRUE(failed.voiceFailed);
-    const SpokenForm unwired = chooseSpokenForm("好，我退开了", true, SpeechSynthesizer{});
-    EXPECT_FALSE(unwired.voice);
-    EXPECT_TRUE(unwired.voiceFailed);
+    Live<bool> globalVoice{false};
+    bool reachable = true;
+    SendVoiceTool tool(globalVoice, [](const std::string &) { return std::string("a.wav"); },
+                       [&reachable] { return reachable; });
+    EXPECT_FALSE(tool.available()) << "总开关关着";
+    globalVoice.set(true);
+    EXPECT_TRUE(tool.available());
+    reachable = false;
+    EXPECT_FALSE(tool.available()) << "服务不可用";
+    EXPECT_TRUE(tool.offeredIn(ToolVenue::Private));
+    EXPECT_TRUE(tool.offeredIn(ToolVenue::Group));
+    // schema 写清只在明确要求时用
+    EXPECT_NE(tool.description().find("明确要求"), std::string::npos);
+    EXPECT_NE(SendVoiceTool::guidanceText(GuidanceScene::Conversation).find("其余情况都用文字回复"),
+              std::string::npos);
+    EXPECT_NE(SendVoiceTool::guidanceText(GuidanceScene::GroupTurn).find("group_say"),
+              std::string::npos);
+}
+
+// 合成成功：语音出站带原话，终止本轮、不再另发文字，写进历史的是原话
+TEST(SendVoiceToolTest, SpeaksTheTextAsVoiceAndKeepsTheWords)
+{
+    Live<bool> globalVoice{true};
+    std::string synthesized;
+    SendVoiceTool tool(globalVoice, [&synthesized](const std::string &text)
+                       {
+                           synthesized = text;
+                           return std::string("/tmp/kleinbot/a.wav");
+                       },
+                       [] { return true; });
+    const ToolResult result = tool.execute(R"({"text":"  晚上好，博士  "})", anyContext());
+    EXPECT_EQ(synthesized, "晚上好，博士");
+    EXPECT_TRUE(result.terminal);
+    EXPECT_TRUE(result.suppress_text_reply);
+    EXPECT_EQ(result.model_content, "晚上好，博士");
+    ASSERT_EQ(result.outbound_messages.size(), 1U);
+    const auto *voice = std::get_if<VoiceMessage>(&result.outbound_messages.front());
+    ASSERT_NE(voice, nullptr);
+    EXPECT_EQ(voice->audio_path, "/tmp/kleinbot/a.wav");
+    EXPECT_EQ(voice->transcript, "晚上好，博士");
+}
+
+// 合成失败：用文字发出原话，失败不顶替内容（2026-11-16 之前发的是“系统提示：语音模块异常。”）
+TEST(SendVoiceToolTest, FallsBackToTheSameWordsAsText)
+{
+    Live<bool> globalVoice{true};
+    SendVoiceTool tool(globalVoice, [](const std::string &) { return std::string(); },
+                       [] { return true; });
+    const ToolResult result = tool.execute(R"({"text":"好，我退开了"})", anyContext());
+    EXPECT_TRUE(result.terminal);
+    EXPECT_TRUE(result.suppress_text_reply);
+    ASSERT_EQ(result.outbound_messages.size(), 1U);
+    const auto *text = std::get_if<TextMessage>(&result.outbound_messages.front());
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(text->content, "好，我退开了");
+
+    const ToolResult empty = tool.execute(R"({"text":"   "})", anyContext());
+    EXPECT_FALSE(empty.terminal) << "没有可说的话：回灌错误让她改用文字";
+    EXPECT_TRUE(empty.outbound_messages.empty());
 }

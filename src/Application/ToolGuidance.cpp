@@ -28,7 +28,7 @@ const std::vector<GuidanceSection> &layoutFor(GuidanceScene scene)
         {{KleinInspectImageToolName, KleinSendImageToolName, KleinGenerateImageToolName}, "", ""},
         {{KleinRecallConversationToolName}, "", ""},
         {{KleinGetCurrentModelToolName}, "", ""},
-        {{KleinSetVoiceModeToolName}, "", ""},
+        {{KleinSendVoiceToolName}, "", ""},
         {{KleinAdminControlToolName}, "", ""},
         {{}, "不要把重置对话、重置上下文、设置人格或还原人格转换为工具调用。", ""},
         {{KleinWebSearchToolName}, "", ""},

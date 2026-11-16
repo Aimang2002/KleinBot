@@ -15,6 +15,7 @@
 #include "Action/WebToolGuidance.h"
 #include "Tool/ImageToolGuidance.h"
 #include "Tool/LeaveTopicTool.h"
+#include "Tool/SendVoiceTool.h"
 #include "Tool/ToolContext.h"
 #include "Tool/Tool.h"
 #include "Tool/ToolRegistry.h"
@@ -958,6 +959,69 @@ TEST(EngagementPresenceTest, IncidentReplayNoLongerFloodsTheGroup)
     EXPECT_LE(said, 7U) << "25 条 / 4 人：至多约 6 条";
     EXPECT_GE(said, 3U) << "她仍能参与，只是不再刷屏";
     EXPECT_EQ(harness.service->presenceOf(8823).unprompted, static_cast<int>(said));
+}
+
+// ===== 用语音说（2026-11-16）：会话轮的 send_voice 动词 =====
+
+ChatResponse sendVoiceResponse(const std::string &text)
+{
+    ChatResponse response;
+    response.code = 200;
+    response.finish_reason = "tool_calls";
+    response.tool_calls.push_back({"call-1", "send_voice", R"({"text":")" + text + R"("})"});
+    return response;
+}
+
+// 语音可用时 send_voice 出现在会话轮工具表里；她用它说话 = 一次发言（计份额），
+// 由同一个 send_voice 工具合成送达，语音带原话
+TEST(EngagementVoiceTest, SendVoiceSpeaksThroughTheSameTool)
+{
+    Harness harness;
+    Live<bool> globalVoice{true};
+    ToolRegistry registry;
+    registry.registerTool(std::make_unique<SendVoiceTool>(
+        globalVoice, [](const std::string &) { return std::string("/tmp/kleinbot/v.wav"); },
+        [] { return true; }));
+    harness.service->setTools(&registry, {"send_voice"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "克莱茵用语音说句晚安吧", harness.now);
+    harness.turnResponses.push_back(sendVoiceResponse("晚安"));
+    harness.service->runTurn(8823);
+
+    ASSERT_FALSE(harness.agentSchemas.empty());
+    bool offered = false;
+    for (const std::string &schema : harness.agentSchemas.front())
+        offered = offered || schema.find("\"send_voice\"") != std::string::npos;
+    EXPECT_TRUE(offered) << "语音可用时会话轮工具表里有 send_voice";
+
+    ASSERT_EQ(harness.sender->deliveries.size(), 1U);
+    const auto *voice = std::get_if<VoiceMessage>(&harness.sender->deliveries.front().message);
+    ASSERT_NE(voice, nullptr);
+    EXPECT_EQ(voice->transcript, "晚安");
+    EXPECT_EQ(harness.service->sessionOf(8823)->turnCount, 1) << "用语音说也是一次发言";
+    EXPECT_EQ(harness.service->presenceOf(8823).unprompted, 1);
+}
+
+// 语音被关：工具表里没有 send_voice；模型仍调用时按文字发出原话
+TEST(EngagementVoiceTest, VoiceOffMeansNoVoiceVerbAndTextDelivery)
+{
+    Harness harness;
+    Live<bool> globalVoice{false};
+    ToolRegistry registry;
+    registry.registerTool(std::make_unique<SendVoiceTool>(
+        globalVoice, [](const std::string &) { return std::string("/tmp/kleinbot/v.wav"); },
+        [] { return true; }));
+    harness.service->setTools(&registry, {"send_voice"});
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(sendVoiceResponse("晚安"));
+    harness.service->runTurn(8823);
+
+    ASSERT_FALSE(harness.agentSchemas.empty());
+    for (const std::string &schema : harness.agentSchemas.front())
+        EXPECT_EQ(schema.find("\"send_voice\""), std::string::npos);
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(harness.sender->texts.front(), "晚安");
 }
 
 TEST(EngagementContextTest, EstimateTokensHeuristic)
