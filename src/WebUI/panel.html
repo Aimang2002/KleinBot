@@ -33,6 +33,11 @@
       box-sizing: border-box;
     }
 
+    /* hidden 属性一律优先：.btn 等的 display 声明不得把隐藏元素顶出来 */
+    [hidden] {
+      display: none !important;
+    }
+
     html {
       scrollbar-color: rgba(200, 230, 215, .16) transparent;
     }
@@ -1532,13 +1537,13 @@
             <path d="M3 8 H0.9 M0.9 5.4 V10.6 M3 5.2 H10.4 V10.8 H3 Z M10.4 8 H15 M5.2 5.2 V7.4 M7.4 5.2 V7.4" />
           </g>
         </svg>
-        重新加载
+        <span class="btn-text">重新加载</span>
       </button>
       <button id="save" class="btn primary" type="button">
         <svg viewBox="0 0 11 14" aria-hidden="true">
           <path d="M7 1 L2 8 H5.5 L5 13 L10 5.5 H6.5 Z" fill="currentColor" />
         </svg>
-        保存并应用
+        <span class="btn-text">保存并应用</span>
       </button>
     </div>
   </header>
@@ -1654,7 +1659,7 @@
 
     // 字段说明：悬停显示。按“完整路径 → 通用键名”两级查找，传输 Profile 的动态路径靠兜底层覆盖
     const SECTION_HINTS = {
-      bot: "机器人的身份信息：QQ 号、管理员、昵称与别名。",
+      bot: "机器人的身份信息：QQ 号、管理员与昵称。",
       features: "机器人对外行为的开关，保存时写回 bot 分组。",
       chat: "消息处理参数：单条消息 token 上限、工作线程数与消息存活时间。",
       models: "对话模型的默认模型、轻量模型与采样参数，画图/视觉的专用端点（轻量模型未配置时回退默认模型）；模型本体在“模型供应商”页管理。",
@@ -1707,7 +1712,6 @@
       "models.vision.endpoint": "视觉模型的 API 端点地址。",
       "models.vision.api_key": "视觉模型的 API Key；留空表示保持原值（掩码显示）。",
       "models.vision.api_standard": "视觉模型的请求协议标准。",
-      "models.worker.model": "轻量模型名（话题介入判定、上下文压缩等后台任务）；留空回退默认模型。",
       "voice.enabled": "语音功能总开关；之后 #激活语音 / #冻结语音 还能再改，以最后一次为准。",
       "voice.host": "GPT-SoVITS 服务地址。",
       "voice.port": "GPT-SoVITS 服务端口。",
@@ -2288,8 +2292,9 @@
       const avatar = document.createElement("img");
       avatar.className = "botinfo-nav-avatar";
       avatar.alt = "";
+      avatar.referrerPolicy = "no-referrer";
       avatar.src = BOTINFO_AVATAR_FALLBACK;
-      avatar.onerror = () => { avatar.onerror = null; avatar.src = BOTINFO_AVATAR_FALLBACK; };
+      setAvatarFallback(avatar);
       const text = document.createElement("span");
       text.className = "botinfo-nav-text";
       const title = document.createElement("span");
@@ -2330,12 +2335,13 @@
       $("botInfoView").style.display = key === BOTINFO_KEY ? "" : "none";
       // 这两页无配置可保存（改动即落库 / 只读信息）
       $("save").hidden = key === PERCEPTION_KEY || key === BOTINFO_KEY;
-      $("reload").textContent = key === PERCEPTION_KEY ? "刷新状态"
+      // 只改文字 span：直接写按钮的 textContent 会把图标一起清掉
+      $("reload").querySelector(".btn-text").textContent = key === PERCEPTION_KEY ? "刷新状态"
         : key === BOTINFO_KEY ? "刷新" : "重新加载";
       if (key === MODELS_KEY && !modelsLoaded) loadModels();
       if (key === PERCEPTION_KEY) loadPerception();
       if (key === BOTINFO_KEY) loadBotInfo();
-      $("banner").className = "";
+      // 横幅不随切页清空：诊断要留到改好或下一次保存成功
     }
 
     function rowFor(path, labelText, hint) {
@@ -2650,6 +2656,14 @@
       "<text x='48' y='62' font-size='42' text-anchor='middle' fill='#586b60' " +
       "font-family='monospace'>K</text></svg>");
 
+    // 头像加载失败一律回退到内嵌占位图：处理器常驻（不置空），之后再换 src 失败也有兜底；
+    // 占位图自身是 data URI，不会再失败，判等只为防止意外的循环
+    function setAvatarFallback(image) {
+      image.addEventListener("error", () => {
+        if (image.src !== BOTINFO_AVATAR_FALLBACK) image.src = BOTINFO_AVATAR_FALLBACK;
+      });
+    }
+
     function formatUptime(totalSeconds) {
       const days = Math.floor(totalSeconds / 86400);
       const hours = Math.floor((totalSeconds % 86400) / 3600);
@@ -2732,10 +2746,11 @@
       const avatar = document.createElement("img");
       avatar.className = "botinfo-avatar";
       avatar.alt = "机器人头像";
+      avatar.referrerPolicy = "no-referrer";
+      setAvatarFallback(avatar);
       avatar.src = qq !== ""
         ? "https://q1.qlogo.cn/g?b=qq&nk=" + qq + "&s=640"
         : BOTINFO_AVATAR_FALLBACK;
-      avatar.onerror = () => { avatar.onerror = null; avatar.src = BOTINFO_AVATAR_FALLBACK; };
       card.appendChild(avatar);
 
       const identity = document.createElement("div");
@@ -2975,14 +2990,19 @@
         renderPicker(search.value);
       });
       search.addEventListener("input", () => renderPicker(search.value));
-      manualToggle.addEventListener("click", () => { manual.hidden = !manual.hidden; });
+      manualToggle.addEventListener("click", () => {
+        manual.hidden = !manual.hidden;
+        if (!manual.hidden) manualInput.focus();
+      });
       const submitManual = () => {
         const id = manualInput.value.trim();
-        manualInput.value = "";
         if (!/^\d{5,}$/.test(id)) {
-          panelNote.textContent = "群号须为纯数字";
+          // 输错时保留原输入，方便就地改
+          panelNote.textContent = "群号应为 5 位以上的数字。";
+          manualInput.focus();
           return;
         }
+        manualInput.value = "";
         if (monitored.includes(id)) return;
         toggleGroup(id, true);
       };
@@ -3257,11 +3277,6 @@
 
     let dataListSeq = 0;
 
-    function providerIndex(card) {
-      return Array.prototype.indexOf.call(
-        document.querySelectorAll("#providers .provider"), card);
-    }
-
     function addProviderCard(provider, originalIndex) {
       const original = provider || {};
       const card = document.createElement("div");
@@ -3516,8 +3531,9 @@
         const endpoint = endpointInput.value.trim();
         if (!endpoint) { errorLine.textContent = "请先填写 API 端点"; return; }
         const payload = { api_endpoint: endpoint, APIStandard: standardSelect.value };
-        const index = providerIndex(card);
-        if (index >= 0) payload.index = index;
+        // 后端按 index 取已保存的密钥：必须是加载时的原位置，不能用页面上的卡片序号
+        // （删掉上面一张未保存的卡后序号会错位，把别家的 Key 发到这张卡的端点）；新卡不带
+        if (card.dataset.originalIndex !== undefined) payload.index = Number(card.dataset.originalIndex);
         if (keyInput.value !== "") payload.api_key = keyInput.value;
         fetchButton.disabled = true;
         fetchButton.textContent = "拉取中…";
@@ -3562,8 +3578,7 @@
         errorLine.textContent = "";
         noteLine.textContent = "";
         const payloadBase = { api_endpoint: endpoint, APIStandard: standardSelect.value };
-        const index = providerIndex(card);
-        if (index >= 0) payloadBase.index = index;
+        if (card.dataset.originalIndex !== undefined) payloadBase.index = Number(card.dataset.originalIndex);
         if (keyInput.value !== "") payloadBase.api_key = keyInput.value;
         const targets = [...modelNames];
         probeButton.disabled = true;
