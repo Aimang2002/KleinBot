@@ -695,6 +695,10 @@
       color: var(--text-3);
     }
 
+    .summary-marks.has-errors {
+      color: var(--danger);
+    }
+
     .summary-hint {
       font-size: var(--fs-13);
       font-weight: var(--fw-regular);
@@ -870,8 +874,7 @@
 
     input[aria-invalid="true"],
     textarea[aria-invalid="true"],
-    .combo-btn[aria-invalid="true"],
-    .invalid {
+    .combo-btn[aria-invalid="true"] {
       border-color: var(--danger) !important;
     }
 
@@ -1743,36 +1746,11 @@
 
     /* ============ 过渡期：旧版下拉、横幅、通知与登录层的样式（后续改版后删除） ============ */
 
-    #banner {
-      display: none;
-      white-space: pre-wrap;
-      font-size: var(--fs-13);
-      line-height: var(--lh-loose);
-    }
 
-    #banner.ok,
-    #banner.err {
-      display: block;
-    }
 
-    #banner.ok {
-      border-color: var(--accent-line);
-      background: var(--accent-soft);
-    }
 
-    #banner::before {
-      display: block;
-      font-weight: var(--fw-semibold);
-    }
 
-    #banner.ok::before {
-      content: "已保存";
-    }
 
-    #banner.err::before {
-      content: "未保存";
-      color: var(--danger);
-    }
 
     select {
       width: 100%;
@@ -1784,61 +1762,12 @@
       color: var(--text);
     }
 
-    .combo-pop {
-      display: none;
-      position: absolute;
-      top: calc(100% + 4px);
-      left: 0;
-      right: 0;
-      z-index: var(--z-popover);
-      padding: var(--sp-1);
-      background: var(--bg-3);
-      border: var(--bw) solid var(--line-2);
-      border-radius: var(--r-m);
-      box-shadow: var(--shadow-pop);
-    }
 
-    .combo.open .combo-pop {
-      display: block;
-    }
 
-    .combo-opt {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
-      width: 100%;
-      min-height: 32px;
-      padding: 0 var(--sp-2);
-      border: 0;
-      border-radius: var(--r-s);
-      background: transparent;
-      color: var(--text-2);
-      text-align: left;
-      cursor: pointer;
-    }
 
-    .combo-opt:hover,
-    .combo-opt:focus-visible {
-      background: var(--accent-soft);
-      color: var(--text);
-    }
 
-    .combo-opt .icon {
-      visibility: hidden;
-      color: var(--accent);
-    }
 
-    .combo-opt.selected .icon {
-      visibility: visible;
-    }
 
-    .combo-btn>span:first-child {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
 
     button.pick-opt {
       width: 100%;
@@ -1997,7 +1926,7 @@
     </nav>
     <main id="main" class="content" tabindex="-1">
       <div class="content-inner">
-        <div id="banner"></div>
+        <div id="banner" role="alert" hidden></div>
         <div id="panes" aria-busy="true">
           <div class="card empty">
             <p>正在读取配置……</p>
@@ -2083,6 +2012,16 @@
       </button>
     </div>
   </div>
+  <dialog id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+    <form method="dialog">
+      <h2 class="dialog-title" id="confirmTitle"></h2>
+      <p class="dialog-body" id="confirmBody"></p>
+      <div class="dialog-actions">
+        <button id="confirmCancel" class="btn btn-secondary" value="cancel">取消</button>
+        <button id="confirmOk" class="btn btn-danger" value="confirm"><span class="btn-text">确定</span></button>
+      </div>
+    </form>
+  </dialog>
   <div id="toasts" aria-live="polite"></div>
   <script>
     "use strict";
@@ -2649,6 +2588,8 @@
 
     function switchTransportType(type) {
       if (!TRANSPORT_FIELD_SETS[type] || !communicationDraft) return;
+      // 先把当前档案里已经输入的值记进草稿，切回来时还在
+      writeCommunicationInputs(communicationFields, communicationDraft, { mark: false });
       const transports = communicationDraft.transports;
       let key = Object.keys(transports).find(
         (candidate) => isPlainObject(transports[candidate]) && transports[candidate].type === type);
@@ -2661,8 +2602,10 @@
       }
       communicationDraft.active_transport = key;
       renderCommunicationFields();
+      snapshotInitial(communicationFields);
       const pane = communicationFields.closest(".pane");
       if (pane) updateEffectSummary(pane);
+      scheduleDirtyCheck();
     }
 
     // 通信面板入口：结构可识别时接管渲染，返回 false 则退回通用渲染
@@ -2682,26 +2625,33 @@
       return true;
     }
 
-    function collectCommunicationPane(pane) {
+    // 把通信页输入框的值按 data-target 写进 target（草稿或其副本）
+    function writeCommunicationInputs(pane, target, options) {
       for (const input of pane.querySelectorAll("[data-target]")) {
         let keys;
         try { keys = JSON.parse(input.dataset.target); } catch { continue; }
-        let node = communicationDraft;
+        let node = target;
         for (let index = 0; index < keys.length - 1; index++) {
           if (!isPlainObject(node[keys[index]])) node[keys[index]] = {};
           node = node[keys[index]];
         }
-        node[keys[keys.length - 1]] = valueFromInput(input);
+        node[keys[keys.length - 1]] = valueFromInput(input, options);
       }
+    }
+
+    // 收集在草稿的副本上进行，不改草稿本身：未保存改动的比较可以反复调用
+    function collectCommunicationPane(pane, options) {
+      const result = JSON.parse(JSON.stringify(communicationDraft));
+      writeCommunicationInputs(pane, result, options);
       // 切换类型时自动创建、最终又未被选中的原型档案不落盘
       for (const key of communicationAutoCreated) {
-        if (key === communicationDraft.active_transport) continue;
-        const profile = communicationDraft.transports[key];
+        if (key === result.active_transport) continue;
+        const profile = result.transports[key];
         if (isPlainObject(profile) &&
           JSON.stringify(profile) === JSON.stringify(defaultTransportProfile(profile.type)))
-          delete communicationDraft.transports[key];
+          delete result.transports[key];
       }
-      return communicationDraft;
+      return result;
     }
 
     function label(key, isSection) {
@@ -2717,12 +2667,6 @@
       const response = await fetch(path, Object.assign({}, options, { headers }));
       if (response.status === 401) { $("login").style.display = "flex"; throw new Error("unauthorized"); }
       return response;
-    }
-
-    function showBanner(text, isError) {
-      const banner = $("banner");
-      banner.textContent = text;
-      banner.className = isError ? "err" : "ok";
     }
 
     // 非模态通知：右下角淡入，标题+摘要一眼可读，到时自动消失，可手动关闭，最多同时 4 条。
@@ -2771,13 +2715,6 @@
 
     function diagnosticsText(items) {
       return (items || []).map((d) => d.severity + " " + d.path + " - " + d.message).join("\n");
-    }
-
-    function clearMarks() {
-      for (const input of document.querySelectorAll(".invalid")) {
-        input.classList.remove("invalid");
-        input.title = "";
-      }
     }
 
     /* ---------- 主配置：侧边导航 + 面板 ---------- */
@@ -2910,7 +2847,7 @@
       $("botInfoView").hidden = key !== BOTINFO_KEY;
       // 基础信息只读、群聊设置即时写入：这两页没有保存栏
       $("saveBar").hidden = key === PERCEPTION_KEY || key === BOTINFO_KEY;
-      setButtonText($("save"), key === MODELS_KEY ? "保存模型注册表" : "保存配置");
+      if (!saving) setButtonText($("save"), key === MODELS_KEY ? "保存模型注册表" : "保存配置");
       $("navToggleLabel").textContent = currentLabel ? "分区：" + currentLabel : "分区";
       updateSaveStatus();
       if (key === MODELS_KEY && !modelsLoaded) loadModels();
@@ -2956,10 +2893,6 @@
     function timeStamp() {
       const now = new Date();
       return String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
-    }
-
-    function updateSaveStatus() {
-      $("saveStatus").textContent = activePane === MODELS_KEY ? lastSaveNote.registry : lastSaveNote.config;
     }
 
     // 页内的读取中 / 读取失败：一句陈述；失败时附技术细节（次要文字）与“重试”
@@ -3258,7 +3191,7 @@
     }
 
     // 输入控件 → JSON 值：通用渲染与通信专用视图共用同一套转换
-    function valueFromInput(input) {
+    function valueFromInput(input, options) {
       const kind = input.dataset.kind;
       if (kind === "bool") return input.checked;
       if (kind === "secret") return input.value === "" ? input.dataset.original : input.value;
@@ -3269,11 +3202,11 @@
         return Number.isNaN(number) ? Number(input.dataset.original) : number;
       }
       if (kind === "json") {
-        // 解析失败只标红并回传渲染时的原值，绝不产出 null；saveConfig 见 .invalid 即拦截
+        // 解析失败回传渲染时的原值，绝不产出 null；{mark:true}（保存时）记下错误，保存被拦在前端
         try { return JSON.parse(input.value || "[]"); }
         catch {
-          input.classList.add("invalid");
-          input.title = "JSON 解析失败";
+          if (options && options.errors)
+            options.errors.push({ target: input, message: "不是有效的 JSON 数组，例如 [123456789]。" });
           return JSON.parse(input.dataset.original || "[]");
         }
       }
@@ -3281,39 +3214,56 @@
       return input.value === "" && original === "null" ? null : input.value;
     }
 
-    function collectFrom(container) {
+    // options：{mark:false} 只取值、不记错误（未保存改动的比较）；保存时传 {mark:true, errors:[]}
+    function collectFrom(container, options) {
       const result = {};
       for (const child of container.children) {
         if (child.classList.contains("section")) {
-          result[child.dataset.key] = collectFrom(child.querySelector(".fields"));
+          result[child.dataset.key] = collectFrom(child.querySelector(".fields"), options);
           continue;
         }
         // .combo 是自绘下拉（无 input 元素），暴露同名 .value，收集逻辑与输入框一致
         const input = child.querySelector("input, textarea, select, .combo");
         if (!input || !input.dataset.path) continue;
-        result[input.dataset.path.split(".").pop()] = valueFromInput(input);
+        result[input.dataset.path.split(".").pop()] = valueFromInput(input, options);
       }
       return result;
     }
 
-    function collectConfig() {
+    // 一个展示分区收集到的值（collectConfig 与未保存改动的比较共用）
+    function paneValue(pane, options) {
+      if (pane.dataset.custom === "communication" && communicationDraft)
+        return collectCommunicationPane(pane, options);
+      if (pane.dataset.custom === "models") {
+        const chatFields = pane.querySelector('[data-group="chat"]');
+        const modelFields = pane.querySelector('[data-group="models"]');
+        return {
+          chat: chatFields ? collectFrom(chatFields, options) : null,
+          models: modelFields ? collectFrom(modelFields, options) : {}
+        };
+      }
+      return collectFrom(pane.querySelector(".fields"), options);
+    }
+
+    function collectConfig(options) {
+      const opts = options || { mark: true, errors: [] };
       const result = {};
       if (loadedSchemaVersion !== undefined)
         result.schema_version = loadedSchemaVersion;
       for (const key of Object.keys(passthroughSections))
         result[key] = passthroughSections[key];
-      for (const pane of $("panes").children) {
+      for (const pane of $("panes").querySelectorAll(":scope > .pane")) {
         if (pane.dataset.custom === "communication" && communicationDraft) {
-          result[pane.dataset.key] = collectCommunicationPane(pane);
+          result[pane.dataset.key] = paneValue(pane, opts);
           continue;
         }
         if (pane.dataset.custom === "models") {
           // “模型设置”模块的双分组收集：对话模型区写回 chat，画图/视觉区写回 models；
           // 轻量模型行显示在对话模型区，但归位到 models.worker（注册表形态：只写模型名）
-          const chatFields = pane.querySelector('[data-group="chat"]');
+          const value = paneValue(pane, opts);
           let workerModelValue = "";
-          if (chatFields) {
-            const inner = collectFrom(chatFields);
+          if (value.chat) {
+            const inner = value.chat;
             if (Object.prototype.hasOwnProperty.call(inner, "model")) {
               workerModelValue = inner.model;
               delete inner.model;
@@ -3321,14 +3271,13 @@
             const target = result.chat || (result.chat = {});
             Object.assign(target, inner);
           }
-          const modelFields = pane.querySelector('[data-group="models"]');
-          result[pane.dataset.key] = modelFields ? collectFrom(modelFields) : {};
+          result[pane.dataset.key] = value.models;
           result.models.worker = {
             model: workerModelValue === null ? "" : workerModelValue
           };
           continue;
         }
-        const inner = collectFrom(pane.querySelector(".fields"));
+        const inner = paneValue(pane, opts);
         if (pane.dataset.mergeInto) {
           // 展示在独立模块、但属于原分组的字段（功能开关 → bot）
           const target = result[pane.dataset.mergeInto] || (result[pane.dataset.mergeInto] = {});
@@ -3346,13 +3295,6 @@
         result[section][path.slice(dot + 1)] = passthroughFields[path];
       }
       return result;
-    }
-
-    function markFields(diagnostics) {
-      for (const diagnostic of diagnostics) {
-        const input = document.querySelector('[data-path="' + diagnostic.path + '"]');
-        if (input) { input.classList.add("invalid"); input.title = diagnostic.message; }
-      }
     }
 
     function saveResultParts(body) {
@@ -3586,6 +3528,7 @@
 
     async function loadPerception() {
       const body = $("perceptionBody");
+      clearDiagnostics("perception");
       viewState(body, "正在读取……", { busy: true });
       let data;
       try {
@@ -3795,11 +3738,16 @@
       const submitManual = () => {
         const id = manualInput.value.trim();
         if (!/^\d{5,}$/.test(id)) {
-          // 输错时保留原输入，方便就地改
-          panelNote.textContent = "群号应为 5 位以上的数字。";
+          // 输错时保留原输入，方便就地改；与保存校验同一套展示（字段内错误 + 横幅 + 导航计数）
+          clearDiagnostics("perception");
+          addDiagnostic({ scope: "perception", pane: PERCEPTION_KEY, path: "", label: "手动输入群号",
+            message: "群号应为 5 位以上的数字。", target: manualInput });
+          renderBanner();
+          updateDirtyUI();
           manualInput.focus();
           return;
         }
+        clearDiagnostics("perception");
         manualInput.value = "";
         if (monitored.includes(id)) return;
         toggleGroup(id, true);
@@ -3920,12 +3868,15 @@
           nav.appendChild(foot);
         }
         panes.removeAttribute("aria-busy");
+        diagnosticsList = diagnosticsList.filter((item) => item.scope !== "config");
+        snapshotConfigBaseline();
         // 导航里基础信息的连接状态异步刷新，不阻塞配置面板渲染
         refreshBotInfoNav();
         const known = activePane === MODELS_KEY || activePane === PERCEPTION_KEY ||
           activePane === BOTINFO_KEY || viewFor(activePane || "-") !== null;
         selectPane(known && activePane ? activePane : (firstKey || MODELS_KEY));
-        $("banner").className = "";
+        renderBanner();
+        refreshDirtyState();
       } catch (error) {
         if (error.message !== "unauthorized") showConfigLoadError(CONNECTION_ERROR_TEXT, error.message);
       }
@@ -3935,7 +3886,7 @@
     function showConfigLoadError(text, detail) {
       const panes = $("panes");
       if (panes.querySelector(".pane")) {
-        showBanner(text + (detail ? "\n" + detail : ""), true);
+        setBannerNotice(text, detail);
         return;
       }
       viewState(panes, text, { detail: detail, retry: loadConfig });
@@ -3949,36 +3900,43 @@
     }
 
     async function saveConfig() {
-      clearMarks();
-      const candidate = collectConfig();
-      // 收集时标红的字段（JSON 解析失败等）一律拦在前端，不发请求
-      const invalidInputs = document.querySelectorAll(".invalid");
-      if (invalidInputs.length > 0) {
-        const lines = Array.from(invalidInputs).map((input) =>
-          (input.dataset.path || "?") + " - " + (input.title || "格式无效"));
-        showBanner("保存被拒绝（" + invalidInputs.length + " 个字段格式无效）：\n" +
-          lines.join("\n"), true);
+      if (saving) return;
+      clearDiagnostics("config");
+      setBannerNotice(null);
+      const errors = [];
+      const candidate = collectConfig({ mark: true, errors: errors });
+      // JSON 无效等前端能判断的错误：与 422 同一套展示，不发请求
+      if (errors.length > 0) {
+        for (const error of errors)
+          addDiagnostic({ scope: "config", pane: error.target.closest(".pane").dataset.key,
+            path: error.target.dataset.path || "", label: rowLabelText(error.target),
+            message: error.message, target: error.target });
+        renderBanner();
+        updateDirtyUI();
         return;
       }
+      setSaving(true);
       try {
         const response = await request("/api/config", { method: "POST", body: JSON.stringify(candidate) });
-        const body = await response.json();
+        const body = await response.json().catch(() => ({}));
         if (response.status === 422) {
-          markFields(body.diagnostics || []);
-          showBanner("保存被拒绝（" + (body.diagnostics || []).length + " 条诊断）：\n" +
-            diagnosticsText(body.diagnostics), true);
+          markConfigDiagnostics(body.diagnostics || []);
           return;
         }
-        if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
-        // 先刷新面板再弹通知：loadConfig 末尾的 selectPane 会清空横幅，
-        // 顺序反了通知会被自己冲掉；保存结果走右下角非模态通知
+        if (!response.ok) {
+          setBannerNotice("保存失败（HTTP " + response.status + "）。可稍后重试。",
+            Array.isArray(body.diagnostics) ? diagnosticsText(body.diagnostics) : (body.error || ""));
+          return;
+        }
         await loadConfig();
         const parts = saveResultParts(body);
         lastSaveNote.config = timeStamp() + " " + parts.title + (parts.body ? "：" + parts.body : "");
         updateSaveStatus();
         showToast(parts.title, parts.body, parts.isError, 6000);
       } catch (error) {
-        if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
+        if (error.message !== "unauthorized") setBannerNotice(CONNECTION_ERROR_TEXT, error.message);
+      } finally {
+        setSaving(false);
       }
     }
 
@@ -3992,93 +3950,166 @@
       return row;
     }
 
-    // 自绘下拉：原生 select 的展开列表由系统绘制，无法适配终端主题
-    function createComboSelect(options, value) {
+    // 下拉：button role=combobox + ul role=listbox。焦点始终留在按钮上，
+    // 当前项用 aria-activedescendant 指示；选项可以是字符串或 {value, label}。
+    // 用户选定新值后在外层派发 change 事件（未保存改动的比较据此重算），并调用 settings.onChange
+    let comboSeq = 0;
+
+    function createComboSelect(options, value, settings) {
+      const opts = settings || {};
+      const id = "combo-" + (++comboSeq);
       const root = document.createElement("div");
       root.className = "combo";
       const button = document.createElement("button");
       button.type = "button";
       button.className = "combo-btn";
+      button.setAttribute("role", "combobox");
       button.setAttribute("aria-haspopup", "listbox");
       button.setAttribute("aria-expanded", "false");
-      const label = document.createElement("span");
-      button.append(label, icon("chevron-down"));
-      const pop = document.createElement("div");
-      pop.className = "combo-pop";
-      pop.setAttribute("role", "listbox");
+      button.setAttribute("aria-controls", id + "-list");
+      const valueText = document.createElement("span");
+      valueText.className = "combo-value";
+      button.append(valueText, icon("chevron-down"));
+      const list = document.createElement("ul");
+      list.className = "combo-list";
+      list.id = id + "-list";
+      list.setAttribute("role", "listbox");
+      list.hidden = true;
 
-      let current = options.includes(value) ? value : options[0];
-      const optionButtons = options.map((option) => {
-        const element = document.createElement("button");
-        element.type = "button";
-        element.className = "combo-opt";
-        element.setAttribute("role", "option");
-        const tick = document.createElement("span");
-        tick.className = "tick";
-        tick.appendChild(icon("check"));
-        const text = document.createElement("span");
-        text.textContent = option;
-        element.append(tick, text);
-        element.addEventListener("click", () => {
-          current = option;
-          render();
-          close();
-          button.focus();
+      let items = [];
+      let current = "";
+      let activeIndex = -1;
+      let typed = "";
+      let typedTimer = 0;
+      const display = (item) => item.label === "" ? "（留空）" : item.label;
+
+      function build(next) {
+        items = next.map((option) => option !== null && typeof option === "object"
+          ? { value: String(option.value), label: String(option.label) }
+          : { value: String(option), label: String(option) });
+        list.textContent = "";
+        items.forEach((item, index) => {
+          const option = document.createElement("li");
+          option.className = "combo-option";
+          option.id = id + "-opt-" + index;
+          option.setAttribute("role", "option");
+          const text = document.createElement("span");
+          text.className = "option-text";
+          text.textContent = display(item);
+          option.append(text, icon("check"));
+          // 按下时不让按钮失焦，点击再选定
+          option.addEventListener("pointerdown", (event) => event.preventDefault());
+          option.addEventListener("click", () => { choose(index); close(true); });
+          option.addEventListener("pointermove", () => setActive(index));
+          list.appendChild(option);
         });
-        pop.appendChild(element);
-        return element;
-      });
+      }
 
       function render() {
-        label.textContent = current;
-        optionButtons.forEach((element, index) => {
-          const selected = options[index] === current;
-          element.classList.toggle("selected", selected);
-          element.setAttribute("aria-selected", selected ? "true" : "false");
-        });
+        const item = items.find((candidate) => candidate.value === current);
+        valueText.textContent = item ? display(item) : (current === "" ? "（留空）" : current);
+        valueText.classList.toggle("is-empty", current === "");
+        Array.from(list.children).forEach((option, index) =>
+          option.setAttribute("aria-selected", items[index].value === current ? "true" : "false"));
       }
 
-      function close() {
-        root.classList.remove("open");
-        button.setAttribute("aria-expanded", "false");
-        document.removeEventListener("pointerdown", onOutside, true);
+      function setActive(index) {
+        activeIndex = index;
+        Array.from(list.children).forEach((option, i) => option.classList.toggle("is-active", i === index));
+        if (index >= 0) {
+          button.setAttribute("aria-activedescendant", id + "-opt-" + index);
+          list.children[index].scrollIntoView({ block: "nearest" });
+        } else {
+          button.removeAttribute("aria-activedescendant");
+        }
       }
+
+      const isOpen = () => !list.hidden;
 
       function open() {
-        root.classList.add("open");
+        if (isOpen() || items.length === 0) return;
+        list.hidden = false;
         button.setAttribute("aria-expanded", "true");
+        setActive(Math.max(0, items.findIndex((item) => item.value === current)));
         document.addEventListener("pointerdown", onOutside, true);
-        const active = optionButtons.find((element) => element.classList.contains("selected"));
-        (active || optionButtons[0]).focus();
+      }
+
+      function close(focusButton) {
+        if (!isOpen()) return;
+        list.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+        setActive(-1);
+        document.removeEventListener("pointerdown", onOutside, true);
+        if (focusButton) button.focus();
+      }
+
+      function choose(index) {
+        if (index < 0 || index >= items.length || items[index].value === current) return;
+        current = items[index].value;
+        render();
+        root.dispatchEvent(new Event("change", { bubbles: true }));
+        if (opts.onChange) opts.onChange(current);
       }
 
       function onOutside(event) {
-        if (!root.contains(event.target)) close();
+        if (!root.contains(event.target)) close(false);
       }
 
-      button.addEventListener("click", () => root.classList.contains("open") ? close() : open());
-      root.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && root.classList.contains("open")) {
-          close();
-          button.focus();
+      // 首字母跳转：短时间内连按的字母拼成前缀
+      function jumpTo(character) {
+        clearTimeout(typedTimer);
+        typed += character.toLowerCase();
+        typedTimer = setTimeout(() => { typed = ""; }, 600);
+        const start = typed.length === 1 ? activeIndex + 1 : Math.max(activeIndex, 0);
+        for (let step = 0; step < items.length; step++) {
+          const index = (start + step) % items.length;
+          if (display(items[index]).toLowerCase().startsWith(typed)) { setActive(index); return; }
+        }
+      }
+
+      button.addEventListener("click", () => isOpen() ? close(true) : open());
+      button.addEventListener("keydown", (event) => {
+        const key = event.key;
+        const printable = key.length === 1 && /\S/.test(key) && !event.ctrlKey && !event.metaKey && !event.altKey;
+        if (!isOpen()) {
+          if (key === "ArrowDown" || key === "ArrowUp" || key === "Enter" || key === " ") {
+            event.preventDefault();
+            open();
+          } else if (printable) {
+            event.preventDefault();
+            open();
+            jumpTo(key);
+          }
           return;
         }
-        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-        event.preventDefault();
-        if (!root.classList.contains("open")) { open(); return; }
-        const count = optionButtons.length;
-        const index = optionButtons.indexOf(document.activeElement);
-        const next = index === -1
-          ? (event.key === "ArrowDown" ? 0 : count - 1)
-          : (event.key === "ArrowDown" ? (index + 1) % count : (index - 1 + count) % count);
-        optionButtons[next].focus();
+        if (key === "ArrowDown") { event.preventDefault(); setActive(Math.min(items.length - 1, activeIndex + 1)); }
+        else if (key === "ArrowUp") { event.preventDefault(); setActive(Math.max(0, activeIndex - 1)); }
+        else if (key === "Home") { event.preventDefault(); setActive(0); }
+        else if (key === "End") { event.preventDefault(); setActive(items.length - 1); }
+        else if (key === "Enter" || key === " ") { event.preventDefault(); choose(activeIndex); close(true); }
+        else if (key === "Escape") { event.preventDefault(); event.stopPropagation(); close(true); }
+        else if (key === "Tab") close(false);
+        else if (printable) { event.preventDefault(); jumpTo(key); }
       });
 
       Object.defineProperty(root, "value", {
         get() { return current; },
-        set(next) { current = options.includes(next) ? next : options[0]; render(); },
+        set(next) {
+          const text = String(next);
+          current = items.some((item) => item.value === text) ? text : (items.length ? items[0].value : "");
+          render();
+        },
       });
-      root.append(button, pop);
+      // 换一组选项（注册表更新后），当前值仍在其中时保持不变
+      root.setOptions = (next) => {
+        build(next);
+        if (!items.some((item) => item.value === current) && items.length) current = items[0].value;
+        render();
+      };
+      build(options);
+      const initial = String(value);
+      current = items.some((item) => item.value === initial) ? initial : (items.length ? items[0].value : "");
+      root.append(button, list);
       render();
       return root;
     }
@@ -4091,6 +4122,8 @@
       const card = document.createElement("div");
       card.className = "provider";
       const cardId = "provider-" + (++providerSeq);
+      card.dataset.cardId = cardId;
+      let ready = false;   // 首次渲染完成前不派发变更事件
       card.dataset.original = JSON.stringify(original);
       // 保存时随请求带回，后端按位恢复掩码密钥（勾选模型会让身份匹配失配）
       if (Number.isInteger(originalIndex))
@@ -4124,7 +4157,11 @@
       remove.appendChild(icon("close"));
       remove.title = "删除该供应商";
       remove.setAttribute("aria-label", "删除该供应商");
-      remove.addEventListener("click", () => card.remove());
+      remove.addEventListener("click", () => {
+        card.remove();
+        if ($("providers").querySelector(".provider") === null) showProvidersEmpty();
+        scheduleDirtyCheck();
+      });
       meta.append(count, remove);
       head.append(title, meta);
       card.appendChild(head);
@@ -4243,6 +4280,7 @@
             renderChips();
           });
           const text = document.createElement("span");
+          text.className = "chip-text mono";
           text.textContent = name;
           const removeChip = document.createElement("button");
           removeChip.type = "button";
@@ -4259,6 +4297,8 @@
         card.dataset.visionList = JSON.stringify(
           modelNames.filter((name) => visionByName.get(name) === true));
         syncHead();
+        // 模型 chips 不是输入框：手动派发 input，让未保存改动与错误状态跟着更新
+        if (ready) modelZone.dispatchEvent(new Event("input", { bubbles: true }));
       }
 
       function addModel(name) {
@@ -4441,13 +4481,33 @@
       const empty = $("providers").querySelector(".empty");
       if (empty !== null) empty.remove();
       $("providers").appendChild(card);
+      if (Number.isInteger(originalIndex)) card.dataset.initial = JSON.stringify(providerState(card));
+      ready = true;
       return card;
+    }
+
+    // 参与保存的卡片（顺序即提交顺序，也是 422 诊断里 Models[i] 的 i）
+    function activeProviderCards() {
+      return Array.from(document.querySelectorAll("#providers .provider"))
+        .filter((card) => card.dataset.removed !== "1");
+    }
+
+    // 注册表卡片的可比较状态：密钥只记“这次有没有输入”，不记内容
+    function providerState(card) {
+      return {
+        describe: card.querySelector('[data-field="describe"]').value.trim(),
+        endpoint: card.querySelector('[data-field="endpoint"]').value.trim(),
+        apiKey: card.querySelector('[data-field="apiKey"]').value !== "",
+        standard: card.querySelector('[data-field="standard"]').value,
+        models: JSON.stringify([Array.from(card.querySelectorAll(".model-chips .chip-text"),
+          (element) => element.textContent), card.dataset.visionList || "[]"])
+      };
     }
 
     function collectModels() {
       const Models = [];
       const originIndexes = [];
-      for (const card of document.querySelectorAll("#providers .provider")) {
+      for (const card of activeProviderCards()) {
         let base = {};
         try { base = JSON.parse(card.dataset.original || "{}"); } catch { base = {}; }
         const provider = (base !== null && typeof base === "object" && !Array.isArray(base))
@@ -4505,7 +4565,7 @@
     async function loadModels() {
       try {
         const response = await request("/api/models", { method: "GET" });
-        if (!response.ok) { showBanner("读取模型注册表失败：HTTP " + response.status, true); return; }
+        if (!response.ok) { setBannerNotice("读取模型注册表失败（HTTP " + response.status + "）。可稍后重试。"); return; }
         const body = await response.json();
         const info = $("registryInfo");
         $("registryMeta").textContent = "模型注册表 / " + body.registry_path;
@@ -4514,12 +4574,14 @@
         const providers = $("providers");
         providers.textContent = "";
         const list = (body.models && body.models.Models) || [];
+        clearDiagnostics("registry");
         list.forEach((provider, index) => addProviderCard(provider, index));
         if (!list.length) showProvidersEmpty();
+        registryOriginalCount = list.length;
         modelsLoaded = true;
-        $("banner").className = "";
+        refreshDirtyState();
       } catch (error) {
-        if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
+        if (error.message !== "unauthorized") setBannerNotice(CONNECTION_ERROR_TEXT, error.message);
       }
     }
 
@@ -4545,47 +4607,549 @@
     }
 
     async function saveModels() {
-      clearMarks();
+      if (saving) return;
+      clearDiagnostics("registry");
+      setBannerNotice(null);
       const candidate = collectModels();
+      setSaving(true);
       try {
         const response = await request("/api/models", { method: "POST", body: JSON.stringify(candidate) });
-        const body = await response.json();
+        const body = await response.json().catch(() => ({}));
         if (response.status === 422) {
-          showBanner("保存被拒绝（" + (body.diagnostics || []).length + " 条诊断）：\n" +
-            diagnosticsText(body.diagnostics), true);
+          markRegistryDiagnostics(body.diagnostics || []);
           return;
         }
-        if (!response.ok) { showBanner("保存失败：HTTP " + response.status, true); return; }
-        // 先刷新视图（loadModels/loadConfig 末尾都会清空横幅）再弹通知，
-        // 否则"已保存并即时生效"的提示会被自己冲掉；结果走右下角非模态通知
+        if (!response.ok) {
+          setBannerNotice("保存失败（HTTP " + response.status + "）。可稍后重试。", body.error || "");
+          return;
+        }
         await loadModels();
-        // 注册表已更新：重渲染配置面板，让模型下拉框拿到新名单
-        await loadConfig();
+        // 注册表已更新，模型下拉要拿到新名单：配置页没有未保存改动时整页重读；
+        // 有改动时只原地更新下拉选项，保留页面上的修改
+        let kept = "";
+        if (configDirtyTotal() === 0) {
+          await loadConfig();
+        } else {
+          await refreshRegistryNames();
+          refreshModelCombos();
+          kept = "配置页的未保存改动已保留。";
+        }
         const hotReloaded = body.hotReloaded === true;
         lastSaveNote.registry = timeStamp() + (hotReloaded ? " 已保存，模型注册表已换用新表。"
           : " 已写入文件，但进程内仍在用旧表。");
         updateSaveStatus();
         showToast(hotReloaded ? "保存成功" : "已写盘，热重载失败",
-                  hotReloaded ? "模型注册表已即时生效，无需重启"
-                              : "需重启机器人后生效，进程内暂用旧表继续服务",
+                  (hotReloaded ? "模型注册表已即时生效，无需重启"
+                               : "需重启机器人后生效，进程内暂用旧表继续服务") + (kept ? "\n" + kept : ""),
                   !hotReloaded, 6200);
       } catch (error) {
-        if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
+        if (error.message !== "unauthorized") setBannerNotice(CONNECTION_ERROR_TEXT, error.message);
+      } finally {
+        setSaving(false);
       }
+    }
+
+    // 模型名下拉换成注册表的新名单；当前值不在新名单里时仍保留为一个选项
+    function refreshModelCombos() {
+      for (const combo of document.querySelectorAll("#panes .combo[data-path]")) {
+        if (!MODEL_SELECT_PATHS.has(combo.dataset.path)) continue;
+        const current = combo.value;
+        combo.setOptions(registryModelNames.includes(current)
+          ? registryModelNames.slice() : registryModelNames.concat([current]));
+      }
+    }
+
+    /* ---------- 未保存改动 ---------- */
+
+    let configBaseline = {};            // 展示分区 key → 渲染完成时的收集结果（JSON）
+    let communicationInitialActive = null;
+    let registryOriginalCount = 0;
+    let configDirty = new Map();        // 展示分区 key → 改动处数
+    let registryDirty = 0;
+    let dirtyTimer = 0;
+
+    // 控件的可比较值：密钥只看有没有输入，JSON 按解析后的值，其余按收集结果
+    function controlKey(element) {
+      if (element.dataset.kind === "secret") return element.value === "" ? "" : "changed";
+      if (element.dataset.kind === "json") {
+        try { return JSON.stringify(JSON.parse(element.value || "[]")); }
+        catch { return "invalid"; }
+      }
+      return JSON.stringify(valueFromInput(element, { mark: false }));
+    }
+
+    function snapshotInitial(container) {
+      for (const element of container.querySelectorAll("[data-path]"))
+        element.dataset.initial = controlKey(element);
+    }
+
+    // 渲染完成后记基线：与保存走同一个收集函数，自动新建又没选中的档案等规则天然一致
+    function snapshotConfigBaseline() {
+      snapshotInitial($("panes"));
+      configBaseline = {};
+      for (const pane of $("panes").querySelectorAll(":scope > .pane"))
+        configBaseline[pane.dataset.key] = JSON.stringify(paneValue(pane, { mark: false }));
+      communicationInitialActive = communicationDraft ? communicationDraft.active_transport : null;
+    }
+
+    function configDirtyTotal() {
+      let total = 0;
+      for (const count of configDirty.values()) total += count;
+      return total;
+    }
+
+    function scheduleDirtyCheck() {
+      clearTimeout(dirtyTimer);
+      dirtyTimer = setTimeout(refreshDirtyState, 150);
+    }
+
+    function refreshDirtyState() {
+      clearTimeout(dirtyTimer);
+      const counts = new Map();
+      for (const pane of $("panes").querySelectorAll(":scope > .pane")) {
+        let count = 0;
+        for (const element of pane.querySelectorAll("[data-path]")) {
+          if (element.dataset.initial === undefined) continue;
+          const dirty = controlKey(element) !== element.dataset.initial;
+          const row = element.closest(".row");
+          if (row) row.classList.toggle("is-dirty", dirty);
+          if (dirty) count++;
+        }
+        // 通信页切换连接方式算 1 处
+        if (pane.dataset.custom === "communication" && communicationDraft &&
+            communicationInitialActive !== null && communicationDraft.active_transport !== communicationInitialActive)
+          count++;
+        // 兜底：逐行没比出来、但分区整体与基线不同，也至少记 1 处
+        if (count === 0 && configBaseline[pane.dataset.key] !== undefined &&
+            configBaseline[pane.dataset.key] !== JSON.stringify(paneValue(pane, { mark: false })))
+          count = 1;
+        if (count > 0) counts.set(pane.dataset.key, count);
+      }
+      configDirty = counts;
+      registryDirty = computeRegistryDirty();
+      updateDirtyUI();
+    }
+
+    function computeRegistryDirty() {
+      if (!modelsLoaded) return 0;
+      let total = 0;
+      let originals = 0;
+      for (const card of document.querySelectorAll("#providers .provider")) {
+        const isOriginal = card.dataset.originalIndex !== undefined;
+        if (isOriginal) originals++;
+        if (card.dataset.removed === "1") { if (isOriginal) total++; continue; }
+        if (!isOriginal) { total++; continue; }
+        const now = providerState(card);
+        let base = {};
+        try { base = JSON.parse(card.dataset.initial || "{}"); } catch { base = {}; }
+        for (const field of Object.keys(now)) {
+          const dirty = now[field] !== base[field];
+          const row = card.querySelector('.row[data-field="' + fieldId(card.dataset.cardId + "." + field) + '"]');
+          if (row) row.classList.toggle("is-dirty", dirty);
+          if (dirty) total++;
+        }
+      }
+      // 加载时有、现在已从页面上移除的卡片，各算 1 处
+      return total + Math.max(0, registryOriginalCount - originals);
+    }
+
+    function navLabel(key) {
+      const item = document.querySelector('#sideNav .nav-item[data-key="' + CSS.escape(key) + '"] .nav-name');
+      return item ? item.textContent : key;
+    }
+
+    function updateDirtyUI() {
+      const errorCounts = new Map();
+      for (const item of diagnosticsList)
+        if (item.pane) errorCounts.set(item.pane, (errorCounts.get(item.pane) || 0) + 1);
+      for (const item of document.querySelectorAll("#sideNav .nav-item")) {
+        const key = item.dataset.key;
+        const dirty = key === MODELS_KEY ? registryDirty : (configDirty.get(key) || 0);
+        const errors = errorCounts.get(key) || 0;
+        const marks = item.querySelector(".nav-marks");
+        if (!marks) continue;
+        marks.textContent = "";
+        if (dirty > 0) {
+          const dot = document.createElement("span");
+          dot.className = "dirty-dot";
+          dot.setAttribute("aria-hidden", "true");
+          const text = document.createElement("span");
+          text.className = "sr-only";
+          text.textContent = "有未保存的改动";
+          marks.append(dot, text);
+        }
+        if (errors > 0) {
+          const badge = document.createElement("span");
+          badge.className = "count-badge";
+          badge.setAttribute("aria-hidden", "true");
+          badge.textContent = String(errors);
+          const text = document.createElement("span");
+          text.className = "sr-only";
+          text.textContent = errors + " 处错误";
+          marks.append(badge, text);
+        }
+      }
+      // 折叠小节的摘要：改动与错误数
+      for (const section of document.querySelectorAll("details.section")) {
+        const marks = section.querySelector(":scope > summary .summary-marks");
+        if (!marks) continue;
+        const dirty = section.querySelectorAll(".row.is-dirty").length;
+        const errors = section.querySelectorAll(".row.is-invalid").length;
+        const parts = [];
+        if (dirty) parts.push("已修改 " + dirty);
+        if (errors) parts.push(errors + " 处错误");
+        marks.textContent = parts.join(" · ");
+        marks.classList.toggle("has-errors", errors > 0);
+      }
+      const total = configDirtyTotal() + registryDirty;
+      $("navToggleCount").textContent = total > 0 ? total + " 处未保存" : "";
+      updateSaveStatus();
+    }
+
+    function updateSaveStatus() {
+      const status = $("saveStatus");
+      if (activePane === MODELS_KEY) {
+        status.textContent = registryDirty > 0 ? registryDirty + " 处未保存的改动"
+          : (lastSaveNote.registry || "没有未保存的改动");
+        status.classList.toggle("is-dirty", registryDirty > 0);
+        return;
+      }
+      const total = configDirtyTotal();
+      if (total > 0) {
+        const parts = Array.from(configDirty.entries(), ([key, count]) => navLabel(key) + " " + count);
+        status.textContent = total + " 处未保存的改动：" + parts.join("，");
+      } else {
+        status.textContent = lastSaveNote.config || "没有未保存的改动";
+      }
+      status.classList.toggle("is-dirty", total > 0);
+    }
+
+    /* ---------- 校验与定位 ---------- */
+
+    // 每条：{scope: "config" | "registry" | "perception", pane, path, label, message, target, cardLevel}
+    let diagnosticsList = [];
+    // 与字段无关的失败（HTTP 错误、连不上）：{text, detail}
+    let bannerNotice = null;
+
+    function setBannerNotice(text, detail) {
+      bannerNotice = text ? { text: text, detail: detail || "" } : null;
+      renderBanner();
+    }
+
+    function rowLabelText(element) {
+      const row = element && element.closest(".row");
+      const name = row && row.querySelector(".row-label label > span:last-child, .row-label .label > span:last-child");
+      return name ? name.textContent : "";
+    }
+
+    function isFormControl(element) {
+      return element.matches("input, textarea, select, button");
+    }
+
+    function showFieldError(target, message) {
+      for (let details = target.closest("details"); details; details = details.parentElement.closest("details"))
+        details.open = true;
+      if (isFormControl(target)) target.setAttribute("aria-invalid", "true");
+      const row = target.closest(".row");
+      if (!row) return;
+      row.classList.add("is-invalid");
+      let line = row.querySelector(":scope > .row-control > .row-error");
+      if (!line) {
+        line = document.createElement("p");
+        line.className = "row-error";
+        line.id = "err-" + row.dataset.field;
+        line.append(icon("alert"), document.createElement("span"));
+        row.querySelector(".row-control").appendChild(line);
+        if (isFormControl(target)) {
+          const described = target.getAttribute("aria-describedby");
+          target.setAttribute("aria-describedby", (described ? described + " " : "") + line.id);
+        }
+      }
+      const text = line.querySelector("span");
+      text.textContent = text.textContent ? text.textContent + "；" + message : message;
+    }
+
+    function clearFieldError(target) {
+      target.removeAttribute("aria-invalid");
+      const row = target.closest(".row");
+      if (!row) return;
+      row.classList.remove("is-invalid");
+      const line = row.querySelector(":scope > .row-control > .row-error");
+      if (!line) return;
+      if (isFormControl(target)) {
+        const rest = (target.getAttribute("aria-describedby") || "").split(" ")
+          .filter((id) => id && id !== line.id);
+        if (rest.length) target.setAttribute("aria-describedby", rest.join(" "));
+        else target.removeAttribute("aria-describedby");
+      }
+      line.remove();
+    }
+
+    // 整张卡的错误（诊断路径只有 Models[i]）：卡片描红，错误写在卡头下方
+    function showCardError(card, message) {
+      card.classList.add("is-invalid");
+      let line = card.querySelector(":scope > .row-error");
+      if (!line) {
+        line = document.createElement("p");
+        line.className = "row-error";
+        line.append(icon("alert"), document.createElement("span"));
+        card.querySelector(".provider-head").after(line);
+      }
+      const text = line.querySelector("span");
+      text.textContent = text.textContent ? text.textContent + "；" + message : message;
+    }
+
+    function clearCardError(card) {
+      card.classList.remove("is-invalid");
+      const line = card.querySelector(":scope > .row-error");
+      if (line) line.remove();
+    }
+
+    function addDiagnostic(item) {
+      diagnosticsList.push(item);
+      if (!item.target) return;
+      if (item.cardLevel) showCardError(item.target, item.message);
+      else showFieldError(item.target, item.message);
+    }
+
+    function clearDiagnostics(scope) {
+      const keep = [];
+      for (const item of diagnosticsList) {
+        if (item.scope !== scope) { keep.push(item); continue; }
+        if (item.target && item.target.isConnected) {
+          if (item.cardLevel) clearCardError(item.target); else clearFieldError(item.target);
+        }
+      }
+      diagnosticsList = keep;
+      renderBanner();
+      updateDirtyUI();
+    }
+
+    // 用户改了某个字段：清掉该字段（或所在卡片）的错误
+    function resolveDiagnosticsAt(element) {
+      const row = element.closest(".row");
+      const card = element.closest(".provider");
+      const keep = [];
+      let changed = false;
+      for (const item of diagnosticsList) {
+        const hit = item.target && (item.cardLevel ? card === item.target
+          : row !== null && item.target.closest(".row") === row);
+        if (!hit) { keep.push(item); continue; }
+        changed = true;
+        if (item.target.isConnected) {
+          if (item.cardLevel) clearCardError(item.target); else clearFieldError(item.target);
+        }
+      }
+      if (!changed) return;
+      diagnosticsList = keep;
+      renderBanner();
+      updateDirtyUI();
+    }
+
+    // 诊断路径 → 展示分区：先看页面上有没有这个字段，再按路径归类
+    function paneForPath(path) {
+      if (/^Models(\[|$)/.test(path)) return MODELS_KEY;
+      const element = document.querySelector('#panes [data-path="' + CSS.escape(path) + '"]');
+      if (element) return element.closest(".pane").dataset.key;
+      if (path === "bot.group_chat_enabled") return "features";
+      const parts = path.split(".");
+      if (parts[0] === "chat" && CHAT_MODEL_FIELDS.includes(parts[1])) return "models";
+      if (parts[0] === "models") return "models";
+      return viewFor(parts[0]) ? parts[0] : null;
+    }
+
+    function markConfigDiagnostics(diagnostics) {
+      for (const diagnostic of diagnostics) {
+        const path = String(diagnostic.path || "");
+        const found = path ? document.querySelector('#panes [data-path="' + CSS.escape(path) + '"]') : null;
+        const target = found && found.classList.contains("combo") ? found.querySelector(".combo-btn") : found;
+        addDiagnostic({
+          scope: "config", pane: paneForPath(path), path: path,
+          label: target ? rowLabelText(target) : "", message: String(diagnostic.message || ""), target: target
+        });
+      }
+      renderBanner();
+      updateDirtyUI();
+    }
+
+    // 注册表的诊断路径形如 Models[i] 或 Models[i].字段；i 是提交时的卡片顺序（不含已移除的）
+    const REGISTRY_FIELD_TARGETS = {
+      describe: ["describe", "供应商名称"], ModelName: ["models", "模型"], api_endpoint: ["endpoint", "API 端点"],
+      api_key: ["apiKey", "API Key"], APIStandard: ["standard", "API 标准"]
+    };
+
+    function markRegistryDiagnostics(diagnostics) {
+      const cards = activeProviderCards();
+      for (const diagnostic of diagnostics) {
+        const path = String(diagnostic.path || "");
+        const match = /^Models\[(\d+)\](?:\.(\w+))?/.exec(path);
+        const card = match ? cards[Number(match[1])] : null;
+        const item = { scope: "registry", pane: MODELS_KEY, path: path, label: "",
+          message: String(diagnostic.message || ""), target: null };
+        if (card) {
+          const name = card.querySelector(".provider-title").textContent;
+          const field = match[2] ? REGISTRY_FIELD_TARGETS[match[2]] : null;
+          if (field) {
+            const holder = field[0] === "models" ? card.querySelector(".model-zone")
+              : card.querySelector('[data-field="' + field[0] + '"]');
+            item.target = holder && holder.classList.contains("combo") ? holder.querySelector(".combo-btn") : holder;
+            item.label = "“" + name + "” · " + field[1];
+          } else {
+            item.target = card;
+            item.cardLevel = true;
+            item.label = "“" + name + "”";
+          }
+        }
+        addDiagnostic(item);
+      }
+      renderBanner();
+      updateDirtyUI();
+    }
+
+    function renderBanner() {
+      const banner = $("banner");
+      if (diagnosticsList.length === 0 && bannerNotice === null) {
+        banner.hidden = true;
+        banner.textContent = "";
+        return;
+      }
+      const title = document.createElement("div");
+      title.className = "banner-title";
+      const titleText = document.createElement("span");
+      titleText.textContent = diagnosticsList.length
+        ? "未保存：有 " + diagnosticsList.length + " 处需要修改。" : bannerNotice.text;
+      title.append(icon("alert"), titleText);
+      banner.replaceChildren(title);
+      if (diagnosticsList.length) {
+        const list = document.createElement("ul");
+        list.className = "banner-list";
+        for (const item of diagnosticsList) {
+          const line = document.createElement("li");
+          const text = document.createElement("span");
+          if (item.label) text.append(item.label + "（");
+          if (item.path) {
+            const code = document.createElement("code");
+            code.className = "path";
+            code.textContent = item.path;
+            text.appendChild(code);
+          }
+          text.append((item.label ? "）" : "") + "：" + item.message);
+          line.appendChild(text);
+          if (item.target || item.pane) {
+            const go = document.createElement("button");
+            go.type = "button";
+            go.className = "btn btn-link";
+            go.textContent = "前往";
+            go.addEventListener("click", () => goToDiagnostic(item));
+            line.appendChild(go);
+          }
+          list.appendChild(line);
+        }
+        banner.appendChild(list);
+        if (bannerNotice) {
+          const notice = document.createElement("p");
+          notice.className = "banner-detail";
+          notice.textContent = bannerNotice.text;
+          banner.appendChild(notice);
+        }
+      }
+      if (bannerNotice && bannerNotice.detail) {
+        const detail = document.createElement("p");
+        detail.className = "banner-detail";
+        detail.textContent = bannerNotice.detail;
+        banner.appendChild(detail);
+      }
+      banner.hidden = false;
+    }
+
+    function goToDiagnostic(item) {
+      if (item.pane && item.pane !== activePane) selectPane(item.pane);
+      const target = item.target;
+      if (!target || !target.isConnected) return;
+      for (let details = target.closest("details"); details; details = details.parentElement.closest("details"))
+        details.open = true;
+      target.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+      const focusable = isFormControl(target) ? target
+        : target.querySelector("input:not([type=hidden]), textarea, button, select");
+      if (focusable) focusable.focus({ preventScroll: true });
+    }
+
+    /* ---------- 保存中、确认框 ---------- */
+
+    let saving = false;
+
+    function setSaving(on) {
+      saving = on;
+      const button = $("save");
+      button.disabled = on;
+      if (on) button.setAttribute("aria-busy", "true"); else button.removeAttribute("aria-busy");
+      setButtonText(button, on ? "正在保存……" : (activePane === MODELS_KEY ? "保存模型注册表" : "保存配置"));
+    }
+
+    // 通用确认框：返回 Promise<boolean>；默认焦点在“取消”上
+    function confirmDialog(options) {
+      const dialog = $("confirmDialog");
+      $("confirmTitle").textContent = options.title;
+      $("confirmBody").textContent = options.body || "";
+      $("confirmBody").hidden = !options.body;
+      const ok = $("confirmOk");
+      setButtonText(ok, options.confirmText || "确定");
+      ok.className = "btn " + (options.danger ? "btn-danger" : "btn-primary");
+      return new Promise((resolve) => {
+        dialog.returnValue = "";
+        dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+        dialog.showModal();
+        $("confirmCancel").focus();
+      });
     }
 
     /* ---------- 入口 ---------- */
 
     $("save").addEventListener("click", () => activePane === MODELS_KEY ? saveModels() : saveConfig());
-    $("reload").addEventListener("click", () => activePane === MODELS_KEY ? loadModels() : loadConfig());
+    $("reload").addEventListener("click", async () => {
+      const registry = activePane === MODELS_KEY;
+      refreshDirtyState();
+      const count = registry ? registryDirty : configDirtyTotal();
+      if (count > 0 && !await confirmDialog({
+        title: "放弃 " + count + " 处未保存的改动并重新读取？",
+        body: registry ? "重新读取会用文件里的模型注册表替换这一页上的修改。"
+          : "重新读取会用 .config.json 的内容替换各配置分区里的修改。",
+        confirmText: "放弃并重新读取", danger: true
+      })) return;
+      if (registry) loadModels(); else loadConfig();
+    });
     $("botInfoRefresh").addEventListener("click", () => loadBotInfo());
     $("perceptionRefresh").addEventListener("click", () => loadPerception());
     $("addProvider").addEventListener("click", addProviderAndFocus);
-    $("logout").addEventListener("click", () => {
+    $("logout").addEventListener("click", async () => {
+      refreshDirtyState();
+      const count = configDirtyTotal() + registryDirty;
+      if (count > 0 && !await confirmDialog({
+        title: "清除本地令牌？",
+        body: "还有 " + count + " 处未保存的改动。清除后需要重新输入令牌，页面上的改动不会保留。",
+        confirmText: "清除令牌", danger: true
+      })) return;
       try { localStorage.removeItem(TOKEN_STORAGE); } catch (error) { /* 读写不了本地存储时无事可清 */ }
       $("login").style.display = "flex";
     });
     $("navToggle").addEventListener("click", () => setNavOpen(!navIsOpen(), false));
+    // 编辑即重算：清掉该字段的错误，防抖后重新比较未保存改动
+    function onEdit(event) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest("#panes, #providers, #perceptionBody")) return;
+      if (target.closest(".model-pick")) return;   // 勾选浮层里的搜索框不是字段
+      resolveDiagnosticsAt(target);
+      scheduleDirtyCheck();
+    }
+    document.addEventListener("input", onEdit, true);
+    document.addEventListener("change", onEdit, true);
+    window.addEventListener("beforeunload", (event) => {
+      refreshDirtyState();
+      if (configDirtyTotal() + registryDirty === 0) return;
+      event.preventDefault();
+      event.returnValue = "";
+    });
     $("sideNav").addEventListener("keydown", (event) => {
       if (event.key === "Escape" && navIsOpen()) {
         event.preventDefault();
