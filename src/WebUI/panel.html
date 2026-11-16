@@ -1821,8 +1821,12 @@
       font-weight: var(--fw-semibold);
     }
 
+    .page-effects {
+      margin-bottom: var(--sp-6);
+    }
+
     .pane-hint {
-      margin: var(--sp-2) 0 var(--sp-6);
+      margin: var(--sp-2) 0 0;
       font-size: var(--fs-13);
       line-height: var(--lh-loose);
       color: var(--text-2);
@@ -1866,82 +1870,6 @@
       padding: 0;
     }
 
-    .row>label {
-      display: flex;
-      flex-direction: column;
-      gap: var(--sp-1);
-      padding-top: 7px;
-      font-weight: var(--fw-medium);
-    }
-
-    .row>label .path {
-      font-weight: var(--fw-regular);
-    }
-
-    [data-hint] {
-      position: relative;
-    }
-
-    .row label[data-hint] {
-      cursor: help;
-    }
-
-    [data-hint]::after {
-      content: attr(data-hint);
-      position: absolute;
-      left: 0;
-      top: calc(100% + 6px);
-      z-index: var(--z-popover);
-      width: max-content;
-      max-width: 320px;
-      padding: var(--sp-2) var(--sp-3);
-      border: var(--bw) solid var(--line-2);
-      border-radius: var(--r-s);
-      background: var(--bg-3);
-      box-shadow: var(--shadow-pop);
-      color: var(--text-2);
-      font-size: var(--fs-13);
-      font-weight: var(--fw-regular);
-      line-height: var(--lh-loose);
-      white-space: normal;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity var(--dur-fast) var(--ease);
-    }
-
-    [data-hint]:hover::after {
-      opacity: 1;
-    }
-
-    details.section>summary::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-right: 1.5px solid var(--text-2);
-      border-bottom: 1.5px solid var(--text-2);
-      transform: rotate(-45deg);
-    }
-
-    details.section[open]>summary::before {
-      transform: rotate(45deg);
-    }
-
-    .row>input[type=checkbox] {
-      width: 18px;
-      height: 18px;
-      margin: 9px 0;
-      accent-color: var(--accent);
-    }
-
-    .row>input,
-    .row>textarea,
-    .row>select,
-    .row>.combo,
-    .row>.row-control,
-    .row>.model-zone {
-      max-width: 440px;
-    }
-
     select {
       width: 100%;
       height: var(--control-h);
@@ -1950,18 +1878,6 @@
       border-radius: var(--r-s);
       background: var(--field);
       color: var(--text);
-    }
-
-    .group-label {
-      padding: var(--sp-4) 0 var(--sp-1);
-      font-weight: var(--fw-semibold);
-      border-top: var(--bw) solid var(--line);
-    }
-
-    .hint {
-      margin-top: 6px;
-      font-size: var(--fs-13);
-      color: var(--text-2);
     }
 
     .combo-pop {
@@ -2105,10 +2021,6 @@
 
     #perceptionBody>.row {
       border-top: 0;
-    }
-
-    #perceptionBody>.row>input[type=checkbox] {
-      margin: 9px 0;
     }
 
     .toast-head {
@@ -2388,8 +2300,8 @@
       bind: "本机监听地址；127.0.0.1 仅本机可连，0.0.0.0 会暴露给局域网/公网。",
       port: "端口号，1~65535。",
       path: "URL 路径，需以 / 开头。",
-      access_token: "Bearer 访问令牌；留空表示保持原值（掩码显示）。",
-      secret: "HMAC-SHA1 签名密钥；留空表示保持原值（掩码显示）。",
+      access_token: "Bearer 访问令牌。",
+      secret: "HMAC-SHA1 签名密钥。",
       base_url: "OneBot HTTP API 的基础地址。",
       api: "Klein 主动调用 OneBot HTTP API 的配置。",
       events: "Klein 监听 OneBot 端事件上报的配置。",
@@ -2399,7 +2311,7 @@
       enabled: "功能开关。",
       model: "模型名称。",
       endpoint: "API 端点地址。",
-      api_key: "API 密钥；留空表示保持原值（掩码显示）。",
+      api_key: "API 密钥。",
       api_standard: "请求协议标准：OpenAI 或 Anthropic。"
     };
     const FIELD_HINTS = {
@@ -2416,11 +2328,11 @@
       "chat.message_survival_seconds": "消息在处理队列中的最长存活秒数。",
       "models.drawing.model": "画图模型名（配合 #画图 命令与画图工具）。",
       "models.drawing.endpoint": "画图模型的 API 端点地址。",
-      "models.drawing.api_key": "画图模型的 API Key；留空表示保持原值（掩码显示）。",
+      "models.drawing.api_key": "画图模型的 API Key。",
       "models.drawing.api_standard": "画图模型的请求协议标准。",
       "models.vision.model": "视觉识别模型名，收到图片时调用。",
       "models.vision.endpoint": "视觉模型的 API 端点地址。",
-      "models.vision.api_key": "视觉模型的 API Key；留空表示保持原值（掩码显示）。",
+      "models.vision.api_key": "视觉模型的 API Key。",
       "models.vision.api_standard": "视觉模型的请求协议标准。",
       "voice.enabled": "语音功能总开关；之后 #激活语音 / #冻结语音 还能再改，以最后一次为准。",
       "voice.host": "GPT-SoVITS 服务地址。",
@@ -2436,7 +2348,7 @@
       "web_search.enabled": "联网搜索工具开关；开启需配置 Tavily API Key。",
       "web_search.provider": "搜索服务商，当前仅支持 tavily。",
       "web_search.endpoint": "搜索 API 地址，默认官方端点。",
-      "web_search.api_key": "Tavily API Key；缺失时搜索功能自动关闭；留空表示保持原值。",
+      "web_search.api_key": "Tavily API Key；缺失时搜索功能自动关闭。",
       "web_search.search_depth": "搜索深度：basic 快速 / advanced 更全面。",
       "web_search.max_results": "单次搜索返回的最大结果数，1~10。",
       "web_search.max_content_chars": "每条搜索结果注入上下文的正文字符上限。",
@@ -2461,7 +2373,7 @@
       "webui.enabled": "Web 配置面板开关。",
       "webui.bind": "面板监听地址：127.0.0.1 仅本机可访问；改为 0.0.0.0 会暴露给局域网/公网并产生安全警告。",
       "webui.port": "面板端口，默认 55346（KLEIN 的九宫格键盘映射）。",
-      "webui.access_token": "面板访问令牌；留空表示保持原值（掩码显示），支持环境变量引用。"
+      "webui.access_token": "面板访问令牌，支持环境变量引用。"
     };
 
     // 模块与字段的固定展示顺序：配置文件里的键序因人而异，面板按此整理，
@@ -2528,22 +2440,26 @@
     // 字段说明末尾的“保存后立即生效 / 需重启生效”只由它推出——上面几张说明表里不写生效方式
     // （ConfigPanelServerTests 机检），规则表改了这里跟着变。取不到时不写，不猜
     let configEffects = {};
+    let effectsLoaded = false;
     const EFFECT_TEXT = { applies: "保存后立即生效。", restart: "需重启生效。" };
-    const SECTION_EFFECT_TEXT = { applies: "本组改动保存后立即生效。", restart: "本组改动需重启生效。" };
     // 面板字段路径与规则表路径不同的几处：参考音频在配置文件里叫 reference_audio
     const EFFECT_PATH_ALIASES = { "voice.reference_audio": "voice.reference_audio_path" };
-    // 展示上独立成区、但键属于别的分组的模块
-    const SECTION_EFFECT_PATHS = { features: ["bot.group_chat_enabled"] };
 
     async function refreshConfigEffects() {
       try {
         const response = await request("/api/config/effects", { method: "GET" });
-        if (!response.ok) return;
-        const body = await response.json();
-        if (isPlainObject(body.effects)) configEffects = body.effects;
+        const body = response.ok ? await response.json() : null;
+        if (body && isPlainObject(body.effects)) {
+          configEffects = body.effects;
+          effectsLoaded = true;
+          return;
+        }
       } catch (error) {
-        // 取不到时保留旧值（首次为空）：字段说明不带生效方式
+        // 落到下面：读不到就不标
       }
+      // 读不到时清空：徽标全部不出，页头写“未能读取生效方式”，不沿用旧值、不猜
+      configEffects = {};
+      effectsLoaded = false;
     }
 
     function withEffect(hint, rulePath) {
@@ -2556,16 +2472,39 @@
       return withEffect(FIELD_HINTS[path] || KEY_HINTS[key] || "", EFFECT_PATH_ALIASES[path] || path);
     }
 
-    // 分区说明：分区里的键生效方式一致时补一句，混合时各看字段说明
-    function sectionHint(key) {
-      const base = SECTION_HINTS[key] || "";
-      const paths = SECTION_EFFECT_PATHS[key] ||
-        Object.keys(configEffects).filter((path) => path.startsWith(key + "."));
-      const kinds = new Set(paths.map((path) => configEffects[path]));
-      if (paths.length === 0 || kinds.size !== 1) return base;
-      const effect = SECTION_EFFECT_TEXT[[...kinds][0]] || "";
-      if (!effect) return base;
-      return base ? base + effect : effect;
+    // 徽标与统计里的措辞：EFFECT_TEXT 去掉句号
+    function effectWord(kind) {
+      return (EFFECT_TEXT[kind] || "").replace(/。$/, "");
+    }
+
+    // 字段旁的生效徽标：规则表里查不到这条路径（或 effects 没读到）时返回 null，不出徽标
+    function effectBadge(rulePath) {
+      const kind = configEffects[rulePath];
+      if (!rulePath || !Object.prototype.hasOwnProperty.call(EFFECT_TEXT, kind)) return null;
+      const badge = document.createElement("span");
+      badge.className = "badge " + kind;
+      badge.textContent = effectWord(kind);
+      return badge;
+    }
+
+    // 页头的生效统计，例如“5 项 · 保存后立即生效 3 · 需重启生效 2”
+    function effectSummary(rulePaths) {
+      const head = rulePaths.length + " 项";
+      if (!effectsLoaded) return head + " · 未能读取生效方式";
+      const parts = [head];
+      for (const kind of Object.keys(EFFECT_TEXT)) {
+        const count = rulePaths.filter((path) => configEffects[path] === kind).length;
+        if (count > 0) parts.push(effectWord(kind) + " " + count);
+      }
+      return parts.join(" · ");
+    }
+
+    // 按分区里实际渲染的字段行统计（通信页随连接方式重算）
+    function updateEffectSummary(pane) {
+      const line = pane.querySelector(".page-effects");
+      if (!line) return;
+      const paths = Array.from(pane.querySelectorAll(".row[data-rule]"), (row) => row.dataset.rule);
+      line.textContent = effectSummary(paths);
     }
 
     const $ = (id) => document.getElementById(id);
@@ -2716,46 +2655,40 @@
       };
     }
 
+    const PROFILE_RULE_ALIASES = { bind: "host" };
+
     function transportInputFor(field, value) {
-      let input;
-      if (field.kind === "secret") {
-        input = document.createElement("input");
-        input.type = "password";
-        input.placeholder = "留空保持原值（已掩码）";
-        input.dataset.kind = "secret";
-        input.dataset.original = typeof value === "string" ? value : SENTINEL;
-        input.autocomplete = "new-password";
-      } else if (field.kind === "int") {
-        input = document.createElement("input");
-        input.type = "number";
-        input.step = "1";
-        input.value = Number.isFinite(value) ? value : "";
-        input.dataset.kind = "number";
-        input.dataset.int = "1";
-        input.dataset.original = Number.isFinite(value) ? String(value) : "0";
-      } else {
-        input = document.createElement("input");
-        input.type = "text";
-        input.value = value === undefined || value === null ? "" : String(value);
-        input.dataset.kind = "null";
-        input.dataset.original = value === null ? "null" : String(value === undefined ? "" : value);
-      }
+      if (field.kind === "secret")
+        return secretControl(typeof value === "string" ? value : SENTINEL);
+      if (field.kind === "int")
+        return numberControl(Number.isFinite(value) ? value : null, true);
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = value === undefined || value === null ? "" : String(value);
+      input.dataset.kind = "null";
+      input.dataset.original = value === null ? "null" : String(value === undefined ? "" : value);
+      if (MONO_KEYS.has(field.key)) input.classList.add("mono");
       return input;
     }
 
     // target 是相对 communication 根的键数组（JSON 序列化挂在 dataset 上），
     // 避免档案名里出现“.”时按路径字符串拆分写错位置；path 仅用于展示与后端诊断定位
     function transportFieldRow(field, value, path, target) {
-      // 传输档案的字段在规则表里按“当前启用的档案”记：transports.<档案>.x → active_profile.x
+      // 传输档案的字段在规则表里按“当前启用的档案”记：transports.<档案>.x → active_profile.x；
+      // 客户端模式的 bind 在加载器里读进 host，规则表也记作 active_profile.host
+      const profileKeys = target.slice(2);
+      if (profileKeys.length === 1 && PROFILE_RULE_ALIASES[profileKeys[0]])
+        profileKeys[0] = PROFILE_RULE_ALIASES[profileKeys[0]];
       const rulePath = target[0] === "transports"
-        ? "communication.active_profile." + target.slice(2).join(".")
+        ? "communication.active_profile." + profileKeys.join(".")
         : "communication." + target.join(".");
       const row = rowFor(path, field.label,
-        withEffect(field.hint || FIELD_HINTS[path] || KEY_HINTS[field.key] || "", rulePath));
-      const input = transportInputFor(field, value);
+        field.hint || FIELD_HINTS[path] || KEY_HINTS[field.key] || "", rulePath);
+      const control = transportInputFor(field, value);
+      const input = controlTarget(control);
       input.dataset.path = path;
       input.dataset.target = JSON.stringify(target);
-      row.appendChild(input);
+      attachControl(row, control);
       return row;
     }
 
@@ -2773,21 +2706,10 @@
         source[field.key] !== undefined && source[field.key] !== null
           ? source[field.key] : fallbackSource[field.key];
 
-      const card = document.createElement("div");
-      card.className = "transport-card";
-
-      const modeRow = document.createElement("div");
-      modeRow.className = "row";
-      const modeLabel = document.createElement("label");
-      modeLabel.innerHTML = '连接方式<span class="path"></span>';
-      const modePath = modeLabel.querySelector(".path");
-      modePath.textContent = "communication.active_transport";
-      modePath.title = "communication.active_transport";
-      modeLabel.dataset.hint = withEffect(
+      // 连接方式：选中的类型决定下方显示哪些字段
+      const modeRow = rowFor("communication.active_transport", "连接方式",
         "选择与协议端的连接形态，下方仅显示该形态的字段；切换会启用对应档案（不存在时按默认值新建）。",
         "communication.active_transport");
-      const control = document.createElement("div");
-      control.className = "row-control";
       const select = document.createElement("select");
       select.dataset.path = "communication.active_transport";
       for (const key of Object.keys(TRANSPORT_FIELD_SETS)) {
@@ -2798,49 +2720,50 @@
         select.appendChild(option);
       }
       select.addEventListener("change", () => switchTransportType(select.value));
-      // 详细说明放下拉下方两行提示里，选项本身保持短标签
-      const detailHint = document.createElement("div");
-      detailHint.className = "hint";
-      detailHint.textContent = fieldSet.modeLabel + "：" + fieldSet.modeDetail;
-      const activeHint = document.createElement("div");
-      activeHint.className = "hint";
-      activeHint.textContent = "当前档案：" + activeKey + "；未显示的其他档案仍保留在配置文件中。";
-      control.appendChild(select);
-      control.appendChild(detailHint);
-      control.appendChild(activeHint);
-      modeRow.appendChild(modeLabel);
-      modeRow.appendChild(control);
-      card.appendChild(modeRow);
+      attachControl(modeRow, select);
+      // 详细说明放在下拉下方，选项本身保持短标签
+      const detailHint = document.createElement("p");
+      detailHint.className = "row-hint";
+      detailHint.textContent = fieldSet.modeLabel + "：" + fieldSet.modeDetail + "。";
+      const activeHint = document.createElement("p");
+      activeHint.className = "row-hint";
+      activeHint.textContent = "当前档案：" + activeKey + "。未显示的其他档案仍保留在配置文件中。";
+      modeRow.querySelector(".row-control").append(detailHint, activeHint);
+      container.appendChild(modeRow);
 
       if (fieldSet.fields) {
         for (const field of fieldSet.fields)
-          card.appendChild(transportFieldRow(field, valueFor(profile, defaults, field),
+          container.appendChild(transportFieldRow(field, valueFor(profile, defaults, field),
             profilePath + "." + field.key, ["transports", activeKey, field.key]));
       } else {
         for (const group of fieldSet.groups) {
-          const label = document.createElement("div");
-          label.className = "group-label";
-          label.textContent = group.title;
-          card.appendChild(label);
+          const section = document.createElement("div");
+          section.className = "section";
+          const title = document.createElement("h3");
+          title.className = "section-title";
+          title.textContent = group.title;
+          const groupFields = document.createElement("div");
+          groupFields.className = "fields";
+          section.append(title, groupFields);
           const source = isPlainObject(profile[group.sub]) ? profile[group.sub] : {};
           const fallback = defaults[group.sub];
           for (const field of group.fields)
-            card.appendChild(transportFieldRow(field, valueFor(source, fallback, field),
+            groupFields.appendChild(transportFieldRow(field, valueFor(source, fallback, field),
               profilePath + "." + group.sub + "." + field.key,
               ["transports", activeKey, group.sub, field.key]));
+          container.appendChild(section);
         }
       }
-      container.appendChild(card);
 
       const advanced = document.createElement("details");
       advanced.className = "section";
-      const summary = document.createElement("summary");
-      summary.textContent = "高级参数";
-      summary.dataset.hint = "通信超时与事件体积上限，一般无需调整。";
-      advanced.appendChild(summary);
+      advanced.appendChild(sectionHeading(true, "高级参数"));
+      const advancedNote = document.createElement("p");
+      advancedNote.className = "section-sub";
+      advancedNote.textContent = "通信超时与事件体积上限，一般无需调整。";
       const advancedFields = document.createElement("div");
       advancedFields.className = "fields";
-      advanced.appendChild(advancedFields);
+      advanced.append(advancedNote, advancedFields);
       const defaultValues = isPlainObject(draft.defaults) ? draft.defaults : {};
       for (const spec of TRANSPORT_DEFAULTS_KEYS)
         advancedFields.appendChild(transportFieldRow(
@@ -2865,6 +2788,8 @@
       }
       communicationDraft.active_transport = key;
       renderCommunicationFields();
+      const pane = communicationFields.closest(".pane");
+      if (pane) updateEffectSummary(pane);
     }
 
     // 通信面板入口：结构可识别时接管渲染，返回 false 则退回通用渲染
@@ -3071,29 +2996,201 @@
       // 横幅不随切页清空：诊断要留到改好或下一次保存成功
     }
 
-    function rowFor(path, labelText, hint) {
+    // 等宽显示的键：端点、主机、路径、模型名等 ASCII 机器串
+    const MONO_KEYS = new Set(["endpoint", "host", "bind", "path", "base_url", "proxy", "model",
+      "conversation_database", "image_assets", "reference_audio"]);
+    // 可折叠的嵌套小节（模型设置里的画图、视觉模型）；其余嵌套对象是带标题的小节
+    const COLLAPSIBLE_SECTIONS = new Set(["models.drawing", "models.vision"]);
+    const SECRET_NOTE = "面板不读取密钥原文，也无法显示是否已填写。留空保存会保持文件中的原值。";
+
+    // 控件 id 的唯一来源：标签的 for、说明与错误的 aria-describedby 都由它推出
+    function fieldId(path) {
+      return "f-" + path.replace(/[^\w-]/g, "_");
+    }
+
+    // 控件外层可能包了一层（开关、密钥、下拉）：取真正接收焦点的元素
+    function controlTarget(element) {
+      if (element.matches("input, textarea, select, .combo-btn")) return element;
+      return element.querySelector(".combo-btn, input, textarea, select");
+    }
+
+    // 字段行：左列名称、键名与生效徽标，右列控件与常驻说明（出错时再加错误文字）。
+    // rulePath 是规则表路径（徽标与页头统计用）；options.showPath=false 不显示键名，
+    // options.group=true 表示右侧是一组控件（chips 等），名称不做 label for
+    function rowFor(path, labelText, hint, rulePath, options) {
+      const opts = options || {};
+      const id = fieldId(path);
       const row = document.createElement("div");
       row.className = "row";
-      const labelElement = document.createElement("label");
-      labelElement.innerHTML = labelText.replace(/</g, "&lt;") + '<span class="path"></span>';
-      const pathSpan = labelElement.querySelector(".path");
-      pathSpan.textContent = path;
-      pathSpan.title = path;   // 截断显示时悬停看完整路径
-      if (hint) labelElement.dataset.hint = hint;
-      row.appendChild(labelElement);
+      row.dataset.field = id;
+      if (rulePath) row.dataset.rule = rulePath;
+      const head = document.createElement("div");
+      head.className = "row-label";
+      const labelElement = document.createElement(opts.group ? "span" : "label");
+      if (opts.group) labelElement.className = "label"; else labelElement.htmlFor = id;
+      labelElement.id = "label-" + id;
+      const dot = document.createElement("span");
+      dot.className = "dirty-dot";
+      dot.setAttribute("aria-hidden", "true");
+      const text = document.createElement("span");
+      text.textContent = labelText;
+      labelElement.append(dot, text);
+      // data-hint 保留含生效方式的完整说明（屏幕上由常驻说明与徽标分别呈现）
+      const fullHint = rulePath ? withEffect(hint, rulePath) : hint;
+      if (fullHint) labelElement.dataset.hint = fullHint;
+      head.appendChild(labelElement);
+      if (opts.showPath !== false) {
+        const pathCode = document.createElement("code");
+        pathCode.className = "path";
+        pathCode.textContent = path;
+        head.appendChild(pathCode);
+      }
+      const badge = rulePath ? effectBadge(rulePath) : null;
+      if (badge) {
+        badge.id = "effect-" + id;
+        head.appendChild(badge);
+      }
+      const control = document.createElement("div");
+      control.className = "row-control";
+      if (hint) {
+        const hintLine = document.createElement("p");
+        hintLine.className = "row-hint";
+        hintLine.id = "hint-" + id;
+        hintLine.textContent = hint;
+        control.appendChild(hintLine);
+      }
+      row.append(head, control);
       return row;
     }
 
+    // 把控件放进字段行：设 id 与 aria-describedby，密钥补常驻说明，数字框挂“留空”提示
+    function attachControl(row, element, options) {
+      const opts = options || {};
+      const holder = row.querySelector(".row-control");
+      holder.insertBefore(element, holder.firstChild);
+      const id = row.dataset.field;
+      if (opts.group) {
+        element.setAttribute("role", "group");
+        element.setAttribute("aria-labelledby", "label-" + id);
+        return element;
+      }
+      const target = controlTarget(element);
+      if (!target) return element;
+      target.id = id;
+      if (target.dataset.kind === "secret") {
+        const note = document.createElement("p");
+        note.className = "row-hint";
+        note.id = "secret-" + id;
+        note.textContent = SECRET_NOTE;
+        holder.appendChild(note);
+      }
+      if (target.dataset.kind === "number") {
+        const note = document.createElement("p");
+        note.className = "row-note";
+        note.id = "note-" + id;
+        note.hidden = true;
+        holder.appendChild(note);
+        target.addEventListener("input", () => {
+          note.hidden = target.value !== "";
+          note.textContent = "留空将保持原值 " + target.dataset.original + "。";
+        });
+      }
+      if (target.classList.contains("combo-btn"))
+        target.setAttribute("aria-labelledby", "label-" + id);
+      const described = Array.from(row.querySelectorAll(".row-hint[id], .row-note[id], .badge[id]"),
+        (node) => node.id);
+      if (described.length) target.setAttribute("aria-describedby", described.join(" "));
+      return element;
+    }
+
+    function numberControl(value, forceInt) {
+      const input = document.createElement("input");
+      input.type = "number";
+      const isInt = forceInt || Number.isInteger(value);
+      input.step = isInt ? "1" : "any";
+      if (!isInt) input.inputMode = "decimal";
+      input.value = Number.isFinite(value) ? value : "";
+      input.dataset.kind = "number";
+      input.dataset.int = isInt ? "1" : "";
+      input.dataset.original = Number.isFinite(value) ? String(value) : "0";
+      return input;
+    }
+
+    // 密钥：密码框 + 显示 / 隐藏切换（只对这次新输入的文字有意义，面板拿不到原文）
+    function secretControl(original) {
+      const wrap = document.createElement("div");
+      wrap.className = "secret-wrap";
+      const input = document.createElement("input");
+      input.type = "password";
+      input.placeholder = "留空保持原值";
+      input.dataset.kind = "secret";
+      input.dataset.original = original;
+      input.autocomplete = "new-password";
+      input.spellcheck = false;
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "btn btn-quiet btn-icon";
+      toggle.setAttribute("aria-pressed", "false");
+      toggle.setAttribute("aria-label", "显示输入的内容");
+      toggle.title = "显示 / 隐藏输入的内容";
+      toggle.appendChild(icon("eye"));
+      toggle.addEventListener("click", () => {
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        toggle.setAttribute("aria-pressed", show ? "true" : "false");
+        toggle.replaceChildren(icon(show ? "eye-off" : "eye"));
+      });
+      wrap.append(input, toggle);
+      return wrap;
+    }
+
+    function syncSwitchText(input) {
+      const text = input.parentElement && input.parentElement.querySelector(".switch-text");
+      if (text) text.textContent = input.checked ? "已开启" : "已关闭";
+    }
+
+    // 开关：保留原生复选框（role=switch），右侧写当前状态
+    function switchControl(checked) {
+      const wrap = document.createElement("span");
+      wrap.className = "switch-wrap";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.setAttribute("role", "switch");
+      input.checked = checked;
+      input.dataset.kind = "bool";
+      const text = document.createElement("span");
+      text.className = "switch-text";
+      text.setAttribute("aria-hidden", "true");
+      wrap.append(input, text);
+      input.addEventListener("change", () => syncSwitchText(input));
+      syncSwitchText(input);
+      return wrap;
+    }
+
+    function sectionHeading(collapsible, text) {
+      if (!collapsible) {
+        const title = document.createElement("h3");
+        title.className = "section-title";
+        title.textContent = text;
+        return title;
+      }
+      const summary = document.createElement("summary");
+      const name = document.createElement("span");
+      name.textContent = text;
+      const marks = document.createElement("span");
+      marks.className = "summary-marks";
+      summary.append(icon("chevron-down"), name, marks);
+      return summary;
+    }
+
     function renderValue(parent, key, value, path, isSection) {
-      if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-        const section = document.createElement("details");
+      if (isPlainObject(value)) {
+        const collapsible = COLLAPSIBLE_SECTIONS.has(path);
+        const section = document.createElement(collapsible ? "details" : "div");
         section.className = "section";
         section.dataset.key = key;
-        if (isSection) section.open = true;
-        const summary = document.createElement("summary");
-        summary.textContent = label(key, true);
-        if (SECTION_HINTS[key]) summary.dataset.hint = SECTION_HINTS[key];
-        section.appendChild(summary);
+        if (isSection && collapsible) section.open = true;
+        section.appendChild(sectionHeading(collapsible, label(key, true)));
         const fields = document.createElement("div");
         fields.className = "fields";
         section.appendChild(fields);
@@ -3103,11 +3200,12 @@
         return;
       }
 
-      const row = rowFor(path, label(key, false), hintFor(path, key));
-      let input;
+      const rulePath = EFFECT_PATH_ALIASES[path] || path;
+      const row = rowFor(path, label(key, false), FIELD_HINTS[path] || KEY_HINTS[key] || "", rulePath);
+      let control;
       if (path === "communication.active_transport") {
         // 字段特例：传输形态是"从 transports 集合中选一个"，下拉避免拼写错误
-        input = document.createElement("select");
+        control = document.createElement("select");
         const current = value === null || value === undefined ? "" : String(value);
         for (const option of transportSelectOptions(current)) {
           const element = document.createElement("option");
@@ -3115,14 +3213,14 @@
           element.textContent = option.label;
           if (option.value === current)
             element.selected = true;
-          input.appendChild(element);
+          control.appendChild(element);
         }
       } else if (key === "api_standard" && API_STANDARDS.includes(value)) {
         // 字段特例：合法值只有 OpenAI/Anthropic（与模型供应商页一致用自绘下拉）；
         // 留空或非法值仍走文本框，保留原样可编辑，不做静默改写
-        input = createComboSelect(API_STANDARDS, value);
-        input.dataset.kind = "null";
-        input.dataset.original = String(value);
+        control = createComboSelect(API_STANDARDS, value);
+        control.dataset.kind = "null";
+        control.dataset.original = String(value);
       } else if (MODEL_SELECT_PATHS.has(path)) {
         // 字段特例（2026-09-19）：模型名一律从模型注册表下拉选择，不再自定义输入。
         // 当前值不在注册表（含留空跟随默认模型）时保留为独立选项，避免保存时被静默改写；
@@ -3131,46 +3229,36 @@
         const options = registryModelNames.includes(currentValue)
           ? registryModelNames.slice()
           : registryModelNames.concat([currentValue]);
-        input = createComboSelect(options, currentValue);
-        input.dataset.kind = "null";
-        input.dataset.original = value === null ? "null" : currentValue;
+        control = createComboSelect(options, currentValue);
+        control.classList.add("mono");
+        control.dataset.kind = "null";
+        control.dataset.original = value === null ? "null" : currentValue;
       } else if (Array.isArray(value) ||
         (ARRAY_PATHS.has(path) && (value === null || value === undefined))) {
         // 已被写坏成 null 的数组键也按数组渲染，用户可在此直接修复
         const arrayValue = Array.isArray(value) ? value : [];
-        input = document.createElement("textarea");
-        input.value = JSON.stringify(arrayValue, null, 2);
-        input.dataset.kind = "json";
-        input.dataset.original = JSON.stringify(arrayValue);
+        control = document.createElement("textarea");
+        control.value = JSON.stringify(arrayValue, null, 2);
+        control.spellcheck = false;
+        control.dataset.kind = "json";
+        control.dataset.original = JSON.stringify(arrayValue);
       } else if (typeof value === "boolean") {
-        input = document.createElement("input");
-        input.type = "checkbox";
-        input.checked = value;
-        input.dataset.kind = "bool";
+        control = switchControl(value);
       } else if (typeof value === "number") {
-        input = document.createElement("input");
-        input.type = "number";
-        input.step = "any";
-        input.value = value;
-        input.dataset.kind = "number";
-        input.dataset.int = Number.isInteger(value) ? "1" : "";
-        input.dataset.original = String(value);
+        control = numberControl(value, false);
       } else if (SECRET_KEYS.has(key)) {
-        input = document.createElement("input");
-        input.type = "password";
-        input.placeholder = "留空保持原值（已掩码）";
-        input.dataset.kind = "secret";
-        input.dataset.original = typeof value === "string" ? value : SENTINEL;
-        input.autocomplete = "new-password";
+        control = secretControl(typeof value === "string" ? value : SENTINEL);
       } else {
-        input = document.createElement("input");
-        input.type = "text";
-        input.value = value === null ? "" : value;
-        input.dataset.kind = "null";
-        input.dataset.original = value === null ? "null" : String(value);
+        control = document.createElement("input");
+        control.type = "text";
+        control.value = value === null ? "" : value;
+        control.dataset.kind = "null";
+        control.dataset.original = value === null ? "null" : String(value);
+        if (MONO_KEYS.has(key)) control.classList.add("mono");
       }
-      input.dataset.path = path;
-      row.appendChild(input);
+      // 下拉的值挂在外层 .combo 上，其余挂在真正的输入元素上（collectFrom 按 data-path 取）
+      (control.classList.contains("combo") ? control : controlTarget(control)).dataset.path = path;
+      attachControl(row, control);
       parent.appendChild(row);
     }
 
@@ -3312,21 +3400,23 @@
       pane.appendChild(heading);
       const hint = document.createElement("p");
       hint.className = "pane-hint";
-      hint.textContent = sectionHint("features");
+      hint.textContent = SECTION_HINTS.features || "";
       pane.appendChild(hint);
+      const effects = document.createElement("p");
+      effects.className = "page-effects";
+      pane.appendChild(effects);
       const fields = document.createElement("div");
       fields.className = "fields";
       pane.appendChild(fields);
       const path = "bot.group_chat_enabled";
-      const row = rowFor(path, KEY_LABELS.group_chat_enabled || "启用群聊", hintFor(path, "group_chat_enabled"));
-      const input = document.createElement("input");
-      input.type = "checkbox";
+      const row = rowFor(path, KEY_LABELS.group_chat_enabled || "启用群聊",
+        FIELD_HINTS[path] || KEY_HINTS.group_chat_enabled || "", path);
       // 键缺失视为开启（与 ConfigLoader 默认一致），保存时会显式落盘
-      input.checked = bot.group_chat_enabled !== false;
-      input.dataset.kind = "bool";
-      input.dataset.path = path;
-      row.appendChild(input);
+      const control = switchControl(bot.group_chat_enabled !== false);
+      controlTarget(control).dataset.path = path;
+      attachControl(row, control);
       fields.appendChild(row);
+      updateEffectSummary(pane);
       return pane;
     }
 
@@ -3338,13 +3428,9 @@
       const fields = pane.querySelector(".fields");
       if (isPlainObject(chat) &&
           CHAT_MODEL_FIELDS.some((key) => Object.prototype.hasOwnProperty.call(chat, key))) {
-        const chatSection = document.createElement("details");
+        const chatSection = document.createElement("div");
         chatSection.className = "section";
-        chatSection.open = true;
-        const summary = document.createElement("summary");
-        summary.textContent = "对话模型";
-        summary.dataset.hint = "默认对话模型、轻量模型与采样参数；模型本体在“模型供应商”页管理。";
-        chatSection.appendChild(summary);
+        chatSection.appendChild(sectionHeading(false, "对话模型"));
         const chatFields = document.createElement("div");
         chatFields.className = "fields";
         chatFields.dataset.group = "chat";
@@ -3541,16 +3627,12 @@
       statusLine.className = "note";
 
       // 总开关：切换即落库生效
-      const switchRow = document.createElement("div");
-      switchRow.className = "row";
-      const switchLabel = document.createElement("label");
-      switchLabel.textContent = "启用群聊观察";
-      switchLabel.dataset.hint = "关闭时所有观察入口立即停用（群列表与下方勾选保留）；开启后按勾选的群观察。";
-      const switchInput = document.createElement("input");
-      switchInput.type = "checkbox";
-      switchInput.checked = enabled;
-      switchRow.appendChild(switchLabel);
-      switchRow.appendChild(switchInput);
+      const switchRow = rowFor("perception.enabled", "启用群聊观察",
+        "关闭时所有观察入口立即停用（群列表与下方勾选保留）；开启后按勾选的群观察。", null,
+        { showPath: false });
+      const switchWrap = switchControl(enabled);
+      const switchInput = controlTarget(switchWrap);
+      attachControl(switchRow, switchWrap);
       body.appendChild(switchRow);
 
       // 群勾选区（chips + 浮层选择，交互与模型供应商页一致）
@@ -3740,6 +3822,7 @@
       switchInput.addEventListener("change", async () => {
         if (!await post("/api/perception/enabled", { enabled: switchInput.checked })) {
           switchInput.checked = !switchInput.checked;   // 落库失败回滚界面
+          syncSwitchText(switchInput);
           return;
         }
         enabled = switchInput.checked;
@@ -3799,8 +3882,11 @@
           pane.appendChild(heading);
           const hint = document.createElement("p");
           hint.className = "pane-hint";
-          hint.textContent = sectionHint(key);
+          hint.textContent = SECTION_HINTS[key] || "";
           pane.appendChild(hint);
+          const effects = document.createElement("p");
+          effects.className = "page-effects";
+          pane.appendChild(effects);
           const fields = document.createElement("div");
           fields.className = "fields";
           pane.appendChild(fields);
@@ -3828,6 +3914,7 @@
             pane.dataset.scalar = "1";
             renderValue(fields, key, value, key, false);
           }
+          updateEffectSummary(pane);
           panes.appendChild(pane);
           if (key === "bot" && isPlainObject(value)) {
             nav.appendChild(navItem("features", SECTION_LABELS.features));
@@ -3897,14 +3984,11 @@
 
     /* ---------- 模型供应商视图 ---------- */
 
-    function providerRow(labelText, hint, input) {
-      const row = document.createElement("div");
-      row.className = "row";
-      const labelElement = document.createElement("label");
-      labelElement.textContent = labelText;
-      if (hint) labelElement.dataset.hint = hint;
-      row.appendChild(labelElement);
-      row.appendChild(input);
+    // 注册表卡片的字段行：与配置字段同一套结构，不显示键名、不挂生效徽标
+    function providerRow(cardId, field, labelText, hint, control, options) {
+      const row = rowFor(cardId + "." + field, labelText, hint, null,
+        Object.assign({ showPath: false }, options || {}));
+      attachControl(row, control, options);
       return row;
     }
 
@@ -4000,11 +4084,13 @@
     }
 
     let dataListSeq = 0;
+    let providerSeq = 0;
 
     function addProviderCard(provider, originalIndex) {
       const original = provider || {};
       const card = document.createElement("div");
       card.className = "provider";
+      const cardId = "provider-" + (++providerSeq);
       card.dataset.original = JSON.stringify(original);
       // 保存时随请求带回，后端按位恢复掩码密钥（勾选模型会让身份匹配失配）
       if (Number.isInteger(originalIndex))
@@ -4062,27 +4148,26 @@
         }
       };
       describeInput.addEventListener("input", syncHead);
-      card.appendChild(providerRow("供应商名称", "仅作展示，写入注册表 describe 字段。", describeInput));
+      card.appendChild(providerRow(cardId, "describe", "供应商名称", "仅作展示，写入注册表 describe 字段。", describeInput));
 
       const endpointInput = document.createElement("input");
       endpointInput.type = "text";
       endpointInput.dataset.field = "endpoint";
       endpointInput.value = original.api_endpoint || "";
       endpointInput.placeholder = "https://api.example.com/v1/chat/completions";
-      card.appendChild(providerRow("API 端点", "完整的对话接口地址，如 https://api.deepseek.com/v1/chat/completions；模型列表从同一 base 段拉取。", endpointInput));
+      endpointInput.classList.add("mono");
+      card.appendChild(providerRow(cardId, "endpoint", "API 端点", "完整的对话接口地址，如 https://api.deepseek.com/v1/chat/completions；模型列表从同一 base 段拉取。", endpointInput));
 
-      const keyInput = document.createElement("input");
-      keyInput.type = "password";
+      const keyControl = secretControl(SENTINEL);
+      const keyInput = controlTarget(keyControl);
       keyInput.dataset.field = "apiKey";
-      keyInput.placeholder = "留空保持原值（已掩码）";
-      keyInput.autocomplete = "new-password";
-      card.appendChild(providerRow("API Key", "组内所有模型共享的密钥；留空表示保持原值（掩码显示）。", keyInput));
+      card.appendChild(providerRow(cardId, "apiKey", "API Key", "组内所有模型共享的密钥。", keyControl));
 
       const standardSelect = createComboSelect(
         ["OpenAI", "Anthropic"],
         original.APIStandard === "Anthropic" ? "Anthropic" : "OpenAI");
       standardSelect.dataset.field = "standard";
-      card.appendChild(providerRow("API 标准", "请求协议：OpenAI 兼容接口或 Anthropic 原生接口。", standardSelect));
+      card.appendChild(providerRow(cardId, "standard", "API 标准", "请求协议：OpenAI 兼容接口或 Anthropic 原生接口。", standardSelect));
 
       /* 模型：chips + 端点拉取勾选 + 手动输入兜底 */
       const modelZone = document.createElement("div");
@@ -4139,7 +4224,7 @@
       picker.append(search, pickList);
 
       modelZone.append(chips, actions, manual, picker, dataList);
-      card.appendChild(providerRow("模型", "优先从端点拉取实际可用的模型勾选；个别端点不提供列表接口时用“手动输入”兜底。chip 上的眼睛标记表示该模型支持图片输入，可点击切换，或用“检测视觉”自动探测。", modelZone));
+      card.appendChild(providerRow(cardId, "models", "模型", "优先从端点拉取实际可用的模型勾选；个别端点不提供列表接口时用“手动输入”兜底。chip 上的眼睛标记表示该模型支持图片输入，可点击切换，或用“检测视觉”自动探测。", modelZone, { group: true }));
 
       function renderChips() {
         chips.textContent = "";
