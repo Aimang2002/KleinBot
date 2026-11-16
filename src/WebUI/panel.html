@@ -5,9 +5,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#141a17">
+  <meta name="application-name" content="Klein">
   <link rel="icon"
     href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 36'%3E%3Cpath d='M15 9 25.5 15 25.5 26 15 32 4.5 26 4.5 15Z' fill='none' stroke='%234ed9a0' stroke-width='2.4' stroke-linejoin='round'/%3E%3Cpath d='M11.8 16.5V25M18.6 16.5 12.6 20.8 18.6 25' fill='none' stroke='%234ed9a0' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E">
-  <title>KLEIN · 实验室配置终端</title>
+  <title>克莱茵 · 配置面板</title>
   <style>
     /* ============ 克莱茵 · 配置面板 ============
        一本整理好的实验记录：深色底、薄荷绿只标当前位置、焦点与状态；
@@ -1930,23 +1931,23 @@
     const KEY_LABELS = {
       enabled: "启用", id: "QQ 号", manager_id: "管理员 QQ",
       name: "名称", group_chat_enabled: "启用群聊", default_model: "默认模型",
-      temperature: "温度 temperature", frequency_penalty: "频率惩罚",
+      temperature: "温度", frequency_penalty: "频率惩罚",
       presence_penalty: "存在惩罚", max_message_tokens: "单条消息最大 token",
       worker_threads: "工作线程数", message_survival_seconds: "消息存活（秒）",
       drawing: "画图模型", vision: "视觉模型", worker: "轻量模型",
       model: "模型", endpoint: "端点", api_key: "API Key", api_standard: "API 标准",
       host: "主机", port: "端口", bind: "绑定地址", path: "路径", access_token: "访问令牌",
       reference_audio: "参考音频", reference_text: "参考文本",
-      batch_turns: "批处理轮数", idle_minutes: "空闲触发（分）",
+      batch_turns: "批处理轮数", idle_minutes: "空闲触发（分钟）",
       recall_limit: "召回上限",
-      provider: "搜索 Provider", search_depth: "搜索深度",
+      provider: "搜索服务商", search_depth: "搜索深度",
       max_results: "最大结果数", max_content_chars: "正文最大字符数",
-      max_response_bytes: "响应最大字节数", connect_timeout_ms: "连接超时（ms）",
-      request_timeout_ms: "请求超时（ms）", cache_ttl_seconds: "缓存 TTL（秒）",
+      max_response_bytes: "响应最大字节数", connect_timeout_ms: "连接超时（毫秒）",
+      request_timeout_ms: "请求超时（毫秒）", cache_ttl_seconds: "缓存时长（秒）",
       cache_max_entries: "缓存最大条目数", conversation_database: "会话数据库",
       image_assets: "图片资产目录", proxy: "代理服务器", protocol: "协议",
       active_transport: "连接方式", transports: "传输配置", defaults: "高级参数",
-      api: "API 调用", events: "事件接收", secret: "签名密钥", base_url: "Base URL",
+      api: "API 调用", events: "事件接收", secret: "签名密钥", base_url: "基础地址",
       type: "类型", options: "选项", literal: "字面值", from_env: "环境变量名",
       allowed_groups: "允许的群", allowed_users: "允许的用户", max_per_hour: "每小时上限"
     };
@@ -2005,7 +2006,7 @@
       "chat.frequency_penalty": "频率惩罚 -2~2：正值降低字词重复倾向。",
       "chat.presence_penalty": "存在惩罚 -2~2：正值鼓励引入新话题。",
       "chat.max_message_tokens": "单条消息的 token 上限，超出会提示用户精简。",
-      "chat.worker_threads": "消息处理线程数；留空 = 按 CPU 核心数自动。",
+      "chat.worker_threads": "消息处理线程数，1~256。",
       "chat.message_survival_seconds": "消息在处理队列中的最长存活秒数。",
       "models.drawing.model": "画图模型名（配合 #画图 命令与画图工具）。",
       "models.drawing.endpoint": "画图模型的 API 端点地址。",
@@ -2053,7 +2054,7 @@
       "communication.defaults.max_event_body_bytes": "事件上报请求体的大小上限（字节）。",
       "webui.enabled": "Web 配置面板开关。",
       "webui.bind": "面板监听地址：127.0.0.1 仅本机可访问；改为 0.0.0.0 会暴露给局域网/公网并产生安全警告。",
-      "webui.port": "面板端口，默认 55346（KLEIN 的九宫格键盘映射）。",
+      "webui.port": "面板端口，默认 55346（Klein 的九宫格键盘映射）。",
       "webui.access_token": "面板访问令牌，支持环境变量引用。",
       "push.enabled": "推送接口开关。开启时还需要访问令牌，以及至少一个允许的群或用户，否则加载时会自动关闭。",
       "push.bind": "推送接口的监听地址；不是 127.0.0.1、localhost 或 ::1 时，加载会给出安全警告。",
@@ -2323,8 +2324,8 @@
       }
     };
     const TRANSPORT_DEFAULTS_KEYS = [
-      { key: "connect_timeout_ms", label: "连接超时（ms）", fallback: 5000 },
-      { key: "request_timeout_ms", label: "请求超时（ms）", fallback: 15000 },
+      { key: "connect_timeout_ms", label: "连接超时（毫秒）", fallback: 5000 },
+      { key: "request_timeout_ms", label: "请求超时（毫秒）", fallback: 15000 },
       { key: "max_event_body_bytes", label: "事件体积上限（字节）", fallback: 1048576 }
     ];
 
@@ -3213,23 +3214,19 @@
 
       if (body.reloadSuccess === false)
         return {
-          title: "已写盘，重载失败",
-          body: "本次变更尚未生效：可用 #刷新配置文件 重试，或重启机器人",
+          title: "已写入文件，但重新载入失败",
+          body: "这次的改动还没有起作用。可以用 #刷新配置文件 再试，或重启机器人后再看。",
           isError: true
         };
       if (total === 0)
-        return { title: "保存成功", body: "配置内容没有变化", isError: false };
+        return { title: "已保存", body: "配置内容没有变化。", isError: false };
 
       const effective = counts.dynamic || 0;
       const delayed = counts.restart || 0;
-      let headline = "";
-      if (effective > 0)
-        headline += effective + " 项已生效";
-      if (effective > 0 && delayed > 0)
-        headline += "，";
-      if (delayed > 0)
-        headline += delayed + " 项需重启后生效";
-      return { title: "保存成功", body: headline, isError: false };
+      const parts = [];
+      if (effective > 0) parts.push(effective + " 项已生效");
+      if (delayed > 0) parts.push(delayed + " 项需重启后生效");
+      return { title: "已保存", body: parts.join("；") + "。", isError: false };
     }
 
     // “功能开关”模块：展示上独立成区，保存时经 mergeInto 写回 bot 分组，
@@ -3526,13 +3523,13 @@
           const response = await request(path, { method: "POST", body: JSON.stringify(payload) });
           if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            panelNote.textContent = "操作失败：" + (detail.error || ("HTTP " + response.status));
+            panelNote.textContent = "没有写入（HTTP " + response.status + "）" + (detail.error ? "：" + detail.error : "。");
             return false;
           }
           panelNote.textContent = "";
           return true;
         } catch (error) {
-          panelNote.textContent = "操作失败：" + error.message;
+          if (error.message !== "unauthorized") panelNote.textContent = CONNECTION_ERROR_TEXT;
           return false;
         }
       }
@@ -3569,8 +3566,8 @@
       function syncStatus() {
         statusLine.textContent = monitored.length
           ? (enabled ? "正在观察 " + monitored.length + " 个群。"
-                     : "已勾选 " + monitored.length + " 个群，但总开关关闭——开启后才会观察。")
-          : "尚未选择任何群：群聊观察不会处理任何消息。";
+                     : "已选择 " + monitored.length + " 个群，但总开关已关闭，开启后才会观察。")
+          : "还没有选择任何群，群聊观察不会处理任何消息。";
         panelNote.textContent = "";
       }
 
@@ -3583,7 +3580,7 @@
         if (!monitored.length) {
           const empty = document.createElement("span");
           empty.className = "chip chip-empty";
-          empty.textContent = groups.length ? "尚未选择任何群" : "群列表为空：机器人离线或尚未拉取，可手动输入群号";
+          empty.textContent = groups.length ? "还没有选择任何群。" : "群列表为空（协议端未连接或还没有拉取），可以手动输入群号。";
           chips.appendChild(empty);
         }
         for (const id of monitored) {
@@ -3626,7 +3623,7 @@
         if (!shown.length) {
           const empty = document.createElement("div");
           empty.className = "model-pick-empty";
-          empty.textContent = keyword ? "没有匹配的群" : "群列表为空：机器人离线或尚未拉取";
+          empty.textContent = keyword ? "没有匹配的群。" : "群列表为空（协议端未连接或还没有拉取）。";
           pickList.appendChild(empty);
           return;
         }
@@ -3847,7 +3844,9 @@
         }
         await loadConfig();
         const parts = saveResultParts(body);
-        lastSaveNote.config = timeStamp() + " " + parts.title + (parts.body ? "：" + parts.body : "");
+        // 保存栏：“14:32 已保存：3 项已生效，1 项需重启后生效”
+        lastSaveNote.config = timeStamp() + " " + parts.title + "：" +
+          parts.body.replace(/。$/, "").replace(/；/g, "，");
         updateSaveStatus();
         showToast(parts.title, parts.body, parts.isError);
       } catch (error) {
@@ -4218,7 +4217,8 @@
       manual.hidden = true;
       const manualInput = document.createElement("input");
       manualInput.type = "text";
-      manualInput.placeholder = "输入模型名称，回车添加";
+      manualInput.placeholder = "模型名称，回车添加";
+      manualInput.setAttribute("aria-label", "手动输入模型名称");
       manualInput.setAttribute("list", listId);
       const manualAdd = document.createElement("button");
       manualAdd.type = "button";
@@ -4239,8 +4239,8 @@
       const probeButton = document.createElement("button");
       probeButton.type = "button";
       probeButton.className = "btn btn-secondary btn-s mini-btn";
-      setButtonContent(probeButton, "eye", "检测视觉");
-      probeButton.title = "对已选模型逐一发送极小图片请求，自动标注是否支持视觉输入";
+      setButtonContent(probeButton, "eye", "检测是否支持图片输入");
+      probeButton.title = "对已选的模型逐一发送一张极小的图片，按结果标注是否支持图片输入";
       const noteLine = document.createElement("span");
       noteLine.className = "model-note";
       const errorLine = document.createElement("span");
@@ -4258,8 +4258,11 @@
       pickList.className = "model-pick-list";
       picker.append(search, pickList);
 
-      modelZone.append(chips, actions, manual, picker, dataList);
-      card.appendChild(providerRow(cardId, "models", "模型", "优先从端点拉取实际可用的模型勾选；个别端点不提供列表接口时用“手动输入”兜底。chip 上的眼睛标记表示该模型支持图片输入，可点击切换，或用“检测视觉”自动探测。", modelZone, { group: true }));
+      const legend = document.createElement("p");
+      legend.className = "model-legend";
+      legend.append(icon("eye"), "带绿色眼睛标记的模型支持图片输入。");
+      modelZone.append(chips, legend, actions, manual, picker, dataList);
+      card.appendChild(providerRow(cardId, "models", "模型", "优先从端点拉取实际可用的模型勾选；个别端点不提供列表接口时用“手动输入”兜底。可以点 chip 上的眼睛标记手动切换是否支持图片输入，或用“检测是否支持图片输入”自动标注。", modelZone, { group: true }));
 
       function renderChips() {
         chips.textContent = "";
@@ -4271,8 +4274,9 @@
           visionToggle.type = "button";
           visionToggle.className = "chip-vision" + (hasVision ? " on" : "");
           visionToggle.appendChild(icon(hasVision ? "eye" : "eye-off"));
-          visionToggle.title = hasVision ? "已标注支持视觉输入，点击取消" : "点击标注支持视觉输入";
-          visionToggle.setAttribute("aria-label", name + " 的视觉输入标注");
+          visionToggle.title = hasVision ? "已标注支持图片输入，点击取消" : "点击标注为支持图片输入";
+          visionToggle.setAttribute("aria-label", name + " 支持图片输入");
+          visionToggle.setAttribute("aria-pressed", hasVision ? "true" : "false");
           visionToggle.addEventListener("click", () => {
             visionByName.set(name, !(visionByName.get(name) === true));
             renderChips();
@@ -4322,7 +4326,7 @@
         const empty = document.createElement("div");
         empty.className = "model-pick-empty";
         if (!availableModels || !availableModels.length) {
-          empty.textContent = "尚未获取到模型列表";
+          empty.textContent = "还没有获取模型列表。";
           pickList.appendChild(empty);
           return;
         }
@@ -4330,7 +4334,7 @@
         const shown = availableModels
           .filter((name) => !query || name.toLowerCase().includes(query));
         if (!shown.length) {
-          empty.textContent = "没有匹配的模型";
+          empty.textContent = "没有匹配的模型。";
           pickList.appendChild(empty);
           return;
         }
@@ -4357,7 +4361,7 @@
         errorLine.textContent = "";
         closePicker();
         const endpoint = endpointInput.value.trim();
-        if (!endpoint) { errorLine.textContent = "请先填写 API 端点"; return; }
+        if (!endpoint) { errorLine.textContent = "请先填写 API 端点。"; return; }
         const payload = { api_endpoint: endpoint, APIStandard: standardSelect.value };
         // 后端按 index 取已保存的密钥：必须是加载时的原位置，不能用页面上的卡片序号
         // （删掉上面一张未保存的卡后序号会错位，把别家的 Key 发到这张卡的端点）；新卡不带
@@ -4370,21 +4374,21 @@
             { method: "POST", body: JSON.stringify(payload) });
           const body = await response.json().catch(() => ({}));
           if (!response.ok) {
-            errorLine.textContent = body.error || ("拉取失败：HTTP " + response.status);
+            errorLine.textContent = "拉取失败（HTTP " + response.status + "）" + (body.error ? "：" + body.error : "。") + "可以手动输入。";
             manual.hidden = false;
             return;
           }
           availableModels = body.models || [];
           syncDataList(availableModels);
           if (!availableModels.length) {
-            errorLine.textContent = "端点未返回任何模型，可手动输入";
+            errorLine.textContent = "端点没有返回任何模型，可以手动输入。";
             manual.hidden = false;
             return;
           }
           openPicker();
         } catch (error) {
           if (error.message !== "unauthorized") {
-            errorLine.textContent = "拉取失败：" + error.message;
+            errorLine.textContent = CONNECTION_ERROR_TEXT;
             manual.hidden = false;
           }
         } finally {
@@ -4400,9 +4404,9 @@
 
       // 探测已选模型的视觉能力：逐个发送极小图片请求，结论三态（失败≠不支持）
       probeButton.addEventListener("click", async () => {
-        if (!modelNames.length) { errorLine.textContent = "请先选择要检测的模型"; return; }
+        if (!modelNames.length) { errorLine.textContent = "请先添加要检测的模型。"; return; }
         const endpoint = endpointInput.value.trim();
-        if (!endpoint) { errorLine.textContent = "请先填写 API 端点"; return; }
+        if (!endpoint) { errorLine.textContent = "请先填写 API 端点。"; return; }
         errorLine.textContent = "";
         noteLine.textContent = "";
         const payloadBase = { api_endpoint: endpoint, APIStandard: standardSelect.value };
@@ -4416,12 +4420,12 @@
         try {
           for (let i = 0; i < targets.length; i++) {
             const name = targets[i];
-            noteLine.textContent = "检测中 " + (i + 1) + "/" + targets.length + "：" + name;
+            noteLine.textContent = "正在检测 " + (i + 1) + "/" + targets.length + "：" + name;
             const response = await request("/api/models/check-vision",
               { method: "POST", body: JSON.stringify({ ...payloadBase, model: name }) });
             const body = await response.json().catch(() => ({}));
             if (!response.ok) {
-              errorLine.textContent = "检测失败：" + (body.error || ("HTTP " + response.status));
+              errorLine.textContent = "检测没有完成（HTTP " + response.status + "）" + (body.error ? "：" + body.error : "。");
               noteLine.textContent = "";
               return;
             }
@@ -4430,12 +4434,12 @@
             else unknown.push(name + (body.detail ? "（" + body.detail + "）" : ""));
           }
           noteLine.textContent = "检测完成：支持 " + supported + " · 不支持 " + unsupported +
-            (unknown.length ? " · 无法判定 " + unknown.length : "");
+            (unknown.length ? " · 判断不了 " + unknown.length : "") + "。";
           if (unknown.length)
-            errorLine.textContent = "无法判定：" + unknown.join("；");
+            errorLine.textContent = "判断不了的模型（没有据此改动标注）：" + unknown.join("；");
         } catch (error) {
           if (error.message !== "unauthorized")
-            errorLine.textContent = "检测失败：" + error.message;
+            errorLine.textContent = CONNECTION_ERROR_TEXT;
           noteLine.textContent = "";
         } finally {
           probeButton.disabled = false;
@@ -4617,9 +4621,9 @@
         lastSaveNote.registry = timeStamp() + (hotReloaded ? " 已保存，模型注册表已换用新表。"
           : " 已写入文件，但进程内仍在用旧表。");
         updateSaveStatus();
-        showToast(hotReloaded ? "保存成功" : "已写盘，热重载失败",
-                  (hotReloaded ? "模型注册表已即时生效，无需重启"
-                               : "需重启机器人后生效，进程内暂用旧表继续服务") + (kept ? "\n" + kept : ""),
+        showToast(hotReloaded ? "已保存" : "已写入文件，但进程内仍在用旧表",
+                  (hotReloaded ? "模型注册表已换用新表，不需要重启。"
+                               : "重启机器人后会读取新表。") + (kept ? "\n" + kept : ""),
                   !hotReloaded);
       } catch (error) {
         if (error.message !== "unauthorized") setBannerNotice(CONNECTION_ERROR_TEXT, error.message);
