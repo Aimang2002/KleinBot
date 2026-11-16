@@ -357,6 +357,7 @@
     }
 
     .avatar {
+      display: inline-block;
       width: 28px;
       height: 28px;
       flex: none;
@@ -1744,142 +1745,17 @@
       }
     }
 
-    /* ============ 过渡期：旧版下拉、横幅、通知与登录层的样式（后续改版后删除） ============ */
-
-
-
-
-
-
-
-    select {
-      width: 100%;
-      height: var(--control-h);
-      padding: 0 var(--sp-3);
-      border: var(--bw) solid var(--line-strong);
-      border-radius: var(--r-s);
-      background: var(--field);
-      color: var(--text);
-    }
-
-
-
-
-
-
-
-
-    button.pick-opt {
-      width: 100%;
-      border: 0;
-      background: transparent;
-      text-align: left;
-    }
-
-    .pick-opt .tick {
-      display: inline-flex;
-      visibility: hidden;
-      color: var(--accent);
-    }
-
-    .pick-opt.selected .tick {
-      visibility: visible;
-    }
-
-    .remove {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: var(--control-h-s);
-      height: var(--control-h-s);
-      padding: 0;
-      border: var(--bw) solid var(--danger-line);
-      border-radius: var(--r-s);
-      background: transparent;
-      color: var(--danger);
-      cursor: pointer;
-    }
-
-    .remove:hover {
-      background: var(--danger-soft);
-    }
-
     .provider-meta {
       display: flex;
       align-items: center;
       gap: var(--sp-3);
+      flex: none;
     }
 
-    .toast-head {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
-    }
-
-    .toast-icon {
-      color: var(--accent);
-    }
-
-    .toast.err .toast-icon {
-      color: var(--danger);
-    }
-
-    .toast .toast-close {
-      position: absolute;
-      top: var(--sp-2);
-      right: var(--sp-2);
-      width: var(--control-h-s);
-      height: var(--control-h-s);
-    }
-
-    .toast {
-      display: block;
-      padding-right: var(--sp-10);
-    }
-
-    #login:not(dialog) {
-      position: fixed;
-      inset: 0;
-      z-index: var(--z-dialog);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: var(--sp-4);
-      background: var(--scrim);
-    }
-
-    #login .card {
-      width: min(420px, 100%);
-      padding: var(--sp-6);
-      background: var(--bg-3);
-      border-radius: var(--r-l);
-      box-shadow: var(--shadow-dialog);
-    }
-
-    #login h2 {
-      margin-top: var(--sp-4);
-      font-size: var(--fs-24);
-    }
-
-    #login p {
-      margin-top: var(--sp-2);
+    .provider-removed .btn-link {
       font-size: var(--fs-13);
-      line-height: var(--lh-loose);
-      color: var(--text-2);
     }
 
-    #login input {
-      margin-top: var(--sp-4);
-    }
-
-    #login .btn {
-      width: 100%;
-      margin-top: var(--sp-3);
-    }
-
-    #loginError {
-      color: var(--danger);
-    }
   </style>
 </head>
 
@@ -1999,19 +1875,19 @@
       </div>
     </main>
   </div>
-  <div id="login">
-    <div class="card">
-      <div class="avatar" role="img" aria-label="Klein"></div>
-      <h2>访问鉴权</h2>
-      <p>请输入配置中 webui.access_token 对应的访问令牌。</p>
-      <p class="flavor">「令牌不对的话，梅比乌斯博士会不高兴的。」</p>
-      <input id="token" type="password" placeholder="访问令牌">
+  <dialog id="login" aria-labelledby="loginTitle" aria-describedby="loginHint">
+    <form id="loginForm" novalidate>
+      <span class="avatar" role="img" aria-label="克莱茵的头像"></span>
+      <h2 class="dialog-title" id="loginTitle">访问鉴权</h2>
+      <p class="dialog-body" id="loginHint">填写 webui.access_token 对应的令牌（用 from_env 引用时，是那个环境变量的值）。令牌只保存在这台设备的浏览器里。</p>
+      <label for="token">访问令牌</label>
+      <input id="token" type="password" autocomplete="current-password" spellcheck="false">
       <p id="loginError" class="login-error" role="alert"></p>
-      <button id="tokenOk" class="btn btn-primary" type="button">
-        <span class="btn-text">连接</span>
-      </button>
-    </div>
-  </div>
+      <div class="dialog-actions">
+        <button id="tokenOk" class="btn btn-primary" type="submit"><span class="btn-text">进入</span></button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
     <form method="dialog">
       <h2 class="dialog-title" id="confirmTitle"></h2>
@@ -2022,7 +1898,7 @@
       </div>
     </form>
   </dialog>
-  <div id="toasts" aria-live="polite"></div>
+  <div id="toasts"></div>
   <script>
     "use strict";
     const SENTINEL = "__KLEIN_MASKED__";
@@ -2348,7 +2224,13 @@
       const span = button.querySelector(".btn-text");
       if (span) span.textContent = text; else button.textContent = text;
     }
-    const token = () => localStorage.getItem(TOKEN_STORAGE) || "";
+    // 本地存储不可用（隐私模式等）时，令牌只留在内存里，本页有效
+    let memoryToken = "";
+
+    function token() {
+      try { return localStorage.getItem(TOKEN_STORAGE) || memoryToken; }
+      catch (error) { return memoryToken; }
+    }
 
     function transportLabelFor(type) {
       return TRANSPORT_TYPE_LABELS[type] || (type ? type : "未知类型");
@@ -2522,17 +2404,11 @@
       const modeRow = rowFor("communication.active_transport", "连接方式",
         "选择与协议端的连接形态，下方仅显示该形态的字段；切换会启用对应档案（不存在时按默认值新建）。",
         "communication.active_transport");
-      const select = document.createElement("select");
-      select.dataset.path = "communication.active_transport";
-      for (const key of Object.keys(TRANSPORT_FIELD_SETS)) {
-        const option = document.createElement("option");
-        option.value = key;
-        option.textContent = TRANSPORT_FIELD_SETS[key].modeLabel;
-        if (key === type) option.selected = true;
-        select.appendChild(option);
-      }
-      select.addEventListener("change", () => switchTransportType(select.value));
-      attachControl(modeRow, select);
+      const modeSelect = createComboSelect(
+        Object.keys(TRANSPORT_FIELD_SETS).map((key) => ({ value: key, label: TRANSPORT_FIELD_SETS[key].modeLabel })),
+        type, { onChange: (value) => switchTransportType(value, true) });
+      modeSelect.dataset.path = "communication.active_transport";
+      attachControl(modeRow, modeSelect);
       // 详细说明放在下拉下方，选项本身保持短标签
       const detailHint = document.createElement("p");
       detailHint.className = "row-hint";
@@ -2586,7 +2462,7 @@
       container.appendChild(advanced);
     }
 
-    function switchTransportType(type) {
+    function switchTransportType(type, refocus) {
       if (!TRANSPORT_FIELD_SETS[type] || !communicationDraft) return;
       // 先把当前档案里已经输入的值记进草稿，切回来时还在
       writeCommunicationInputs(communicationFields, communicationDraft, { mark: false });
@@ -2606,6 +2482,11 @@
       const pane = communicationFields.closest(".pane");
       if (pane) updateEffectSummary(pane);
       scheduleDirtyCheck();
+      // 从下拉切换时整块重绘，把焦点交给新的下拉按钮
+      if (refocus) setTimeout(() => {
+        const button = communicationFields.querySelector('[data-path="communication.active_transport"] .combo-btn');
+        if (button) button.focus();
+      }, 0);
     }
 
     // 通信面板入口：结构可识别时接管渲染，返回 false 则退回通用渲染
@@ -2661,56 +2542,90 @@
 
     /* ---------- 通用 ---------- */
 
-    async function request(path, options) {
+    // explicitToken：登录框验证输入的令牌时显式传入，验证通过前不写进本地存储
+    async function request(path, options, explicitToken) {
       const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
-      if (token()) headers["Authorization"] = "Bearer " + token();
+      const value = explicitToken !== undefined ? explicitToken : token();
+      if (value) headers["Authorization"] = "Bearer " + value;
       const response = await fetch(path, Object.assign({}, options, { headers }));
-      if (response.status === 401) { $("login").style.display = "flex"; throw new Error("unauthorized"); }
+      if (response.status === 401) {
+        if (explicitToken === undefined) showLogin();
+        throw new Error("unauthorized");
+      }
       return response;
     }
 
-    // 非模态通知：右下角淡入，标题+摘要一眼可读，到时自动消失，可手动关闭，最多同时 4 条。
-    // 用于保存成功等操作结果；字段清单/诊断等细节走页内横幅，不挤进通知
-    function showToast(title, body, isError, lifetimeMs) {
+    // 登录框：任何 401 都走这里；验证通过之前关不掉
+    let loginRequired = false;
+
+    function showLogin() {
+      loginRequired = true;
+      const dialog = $("login");
+      if (!dialog.open) {
+        $("loginError").textContent = "";
+        dialog.showModal();
+      }
+      $("token").focus();
+    }
+
+    // 非模态通知：右下角（窄屏在保存栏上方）淡入，最多同时 3 条。
+    // 成功通知 TOAST_MS 后消失，鼠标悬停或焦点在上面时暂停计时；错误通知要手动关闭。
+    // options.action = {label, run}：附带一个文字按钮（例如“撤销”）
+    const TOAST_MS = 6000;
+
+    function showToast(title, body, isError, options) {
+      const opts = options !== null && typeof options === "object" ? options : {};
       const host = $("toasts");
-      if (host == null)
-        return;
-      while (host.children.length >= 4)
+      while (host.children.length >= 3)
         host.firstElementChild.remove();
-      const lifetime = lifetimeMs || (isError ? 9000 : 6000);
       const toast = document.createElement("div");
       toast.className = "toast" + (isError ? " err" : "");
-      const head = document.createElement("div");
-      head.className = "toast-head";
-      const mark = icon(isError ? "alert" : "check");
-      mark.classList.add("toast-icon");
-      const titleSpan = document.createElement("span");
-      titleSpan.className = "toast-title";
-      titleSpan.textContent = title;
-      head.append(mark, titleSpan);
-      toast.appendChild(head);
+      toast.setAttribute("role", isError ? "alert" : "status");
+      const main = document.createElement("div");
+      main.className = "toast-main";
+      const titleLine = document.createElement("div");
+      titleLine.className = "toast-title";
+      titleLine.textContent = title;
+      main.appendChild(titleLine);
       if (body) {
-        const bodyDiv = document.createElement("div");
-        bodyDiv.className = "toast-body";
-        bodyDiv.textContent = body;
-        toast.appendChild(bodyDiv);
+        const bodyLine = document.createElement("div");
+        bodyLine.className = "toast-body";
+        bodyLine.textContent = body;
+        main.appendChild(bodyLine);
       }
       const close = document.createElement("button");
       close.type = "button";
       close.className = "btn btn-quiet btn-icon btn-s toast-close";
       close.appendChild(icon("close"));
-      close.setAttribute("aria-label", "关闭提醒");
-      toast.appendChild(close);
-      host.appendChild(toast);
-      let closed = false;
+      close.setAttribute("aria-label", "关闭通知");
+      let timer = 0;
       const dismiss = () => {
-        if (closed)
-            return;
-        closed = true;
+        clearTimeout(timer);
         toast.remove();
       };
+      if (opts.action) {
+        const holder = document.createElement("div");
+        holder.className = "toast-action";
+        const action = document.createElement("button");
+        action.type = "button";
+        action.className = "btn btn-link";
+        action.textContent = opts.action.label;
+        action.addEventListener("click", () => { dismiss(); opts.action.run(); });
+        holder.appendChild(action);
+        main.appendChild(holder);
+      }
+      toast.append(main, close);
       close.addEventListener("click", dismiss);
-      setTimeout(dismiss, lifetime);
+      if (!isError) {
+        const start = () => { clearTimeout(timer); timer = setTimeout(dismiss, TOAST_MS); };
+        const pause = () => clearTimeout(timer);
+        toast.addEventListener("mouseenter", pause);
+        toast.addEventListener("mouseleave", start);
+        toast.addEventListener("focusin", pause);
+        toast.addEventListener("focusout", start);
+        start();
+      }
+      host.appendChild(toast);
     }
 
     function diagnosticsText(items) {
@@ -3133,16 +3048,8 @@
       let control;
       if (path === "communication.active_transport") {
         // 字段特例：传输形态是"从 transports 集合中选一个"，下拉避免拼写错误
-        control = document.createElement("select");
         const current = value === null || value === undefined ? "" : String(value);
-        for (const option of transportSelectOptions(current)) {
-          const element = document.createElement("option");
-          element.value = option.value;
-          element.textContent = option.label;
-          if (option.value === current)
-            element.selected = true;
-          control.appendChild(element);
-        }
+        control = createComboSelect(transportSelectOptions(current), current);
       } else if (key === "api_standard" && API_STANDARDS.includes(value)) {
         // 字段特例：合法值只有 OpenAI/Anthropic（与模型供应商页一致用自绘下拉）；
         // 留空或非法值仍走文本框，保留原样可编辑，不做静默改写
@@ -3589,7 +3496,8 @@
       const manualInput = document.createElement("input");
       manualInput.type = "text";
       manualInput.inputMode = "numeric";
-      manualInput.placeholder = "输入群号（纯数字），回车添加";
+      manualInput.placeholder = "群号，回车添加";
+      manualInput.setAttribute("aria-label", "手动输入群号");
       const manualAdd = document.createElement("button");
       manualAdd.type = "button";
       manualAdd.className = "btn btn-secondary btn-s mini-btn";
@@ -3600,7 +3508,9 @@
       picker.className = "model-pick";
       const search = document.createElement("input");
       search.type = "text";
-      search.placeholder = "搜索群名 / 群号…";
+      search.type = "search";
+      search.placeholder = "搜索群名或群号……";
+      search.setAttribute("aria-label", "搜索群名或群号");
       const pickList = document.createElement("div");
       pickList.className = "model-pick-list";
       picker.append(search, pickList);
@@ -3629,12 +3539,31 @@
 
       async function toggleGroup(groupId, next) {
         if (!await post("/api/perception/monitored", { group_id: Number(groupId), monitored: next }))
-          return;
-        monitored = next ? monitored.concat([String(groupId)])
-                         : monitored.filter((id) => id !== String(groupId));
+          return false;
+        const id = String(groupId);
+        monitored = next ? (monitored.includes(id) ? monitored : monitored.concat([id]))
+                         : monitored.filter((item) => item !== id);
         renderChips();
-        renderPicker(search.value);
+        if (popover.isOpen()) renderPicker(search.value);
         syncStatus();
+        return true;
+      }
+
+      // 移除即写库；通知里给“撤销”，撤销就是再写一次 monitored:true
+      async function stopWatching(id) {
+        const info = groupInfo(id);
+        const name = info && info.group_name ? info.group_name : id;
+        if (!await toggleGroup(id, false)) return;
+        showToast("已停止观察“" + name + "”。", "", false, {
+          action: {
+            label: "撤销",
+            run: async () => {
+              await toggleGroup(id, true);
+              // 期间页面若已重新读取，旧的 chips 已不在页面上，重读一次
+              if (!chips.isConnected && activePane === PERCEPTION_KEY) loadPerception();
+            }
+          }
+        });
       }
 
       function syncStatus() {
@@ -3663,19 +3592,25 @@
           chip.className = "chip";
           const avatar = document.createElement("img");
           avatar.className = "chip-avatar";
-          avatar.src = info ? info.avatar_url : "";
           avatar.alt = "";
           avatar.referrerPolicy = "no-referrer";
+          if (info && info.avatar_url) avatar.src = info.avatar_url; else avatar.hidden = true;
+          avatar.addEventListener("error", () => { avatar.hidden = true; });
           chip.appendChild(avatar);
           const text = document.createElement("span");
-          text.textContent = info && info.group_name ? info.group_name + " (" + id + ")" : id;
+          text.className = "chip-text";
+          text.append(info && info.group_name ? info.group_name + " " : "");
+          const number = document.createElement("span");
+          number.className = "mono";
+          number.textContent = info && info.group_name ? "(" + id + ")" : id;
+          text.appendChild(number);
           chip.appendChild(text);
           const removeChip = document.createElement("button");
           removeChip.type = "button";
           removeChip.className = "chip-x";
           removeChip.appendChild(icon("close"));
-          removeChip.setAttribute("aria-label", "停止观察群 " + id);
-          removeChip.addEventListener("click", () => toggleGroup(id, false));
+          removeChip.setAttribute("aria-label", "停止观察" + (info && info.group_name ? "“" + info.group_name + "”" : "群 " + id));
+          removeChip.addEventListener("click", () => stopWatching(id));
           chip.appendChild(removeChip);
           chips.appendChild(chip);
         }
@@ -3697,38 +3632,20 @@
         }
         for (const info of shown) {
           const id = String(info.group_id);
-          const option = document.createElement("button");
-          option.type = "button";
-          option.className = "pick-opt" + (monitored.includes(id) ? " selected" : "");
-          const tick = document.createElement("span");
-          tick.className = "tick";
-          tick.appendChild(icon("check"));
-          const avatar = document.createElement("img");
-          avatar.className = "pick-avatar";
-          avatar.src = info.avatar_url || "";
-          avatar.alt = "";
-          avatar.referrerPolicy = "no-referrer";
-          const label = document.createElement("span");
-          label.textContent = (info.group_name || "（未命名群）") + " · " + id +
-            " · " + (info.member_count || 0) + "人";
-          option.append(tick, avatar, label);
-          option.addEventListener("click", () => toggleGroup(id, !monitored.includes(id)));
+          const option = checkOption((info.group_name || "（未命名群）") + " · " + id + " · " +
+            (info.member_count || 0) + " 人", monitored.includes(id), async (checked, box) => {
+            // 写库失败时把勾选还原
+            if (!await toggleGroup(id, checked)) box.checked = !checked;
+          }, info.avatar_url || "");
           pickList.appendChild(option);
         }
       }
 
-      function closePicker() {
-        zone.classList.remove("open");
-        document.removeEventListener("pointerdown", onOutsidePick, true);
-      }
-      function onOutsidePick(event) {
-        if (!zone.contains(event.target)) closePicker();
-      }
+      const popover = bindPopover(zone, picker, pickButton, "选择要观察的群");
       pickButton.addEventListener("click", () => {
-        if (zone.classList.contains("open")) return closePicker();
-        zone.classList.add("open");
-        document.addEventListener("pointerdown", onOutsidePick, true);
+        if (popover.isOpen()) { popover.close(true); return; }
         renderPicker(search.value);
+        popover.open();
       });
       search.addEventListener("input", () => renderPicker(search.value));
       manualToggle.addEventListener("click", () => {
@@ -3932,7 +3849,7 @@
         const parts = saveResultParts(body);
         lastSaveNote.config = timeStamp() + " " + parts.title + (parts.body ? "：" + parts.body : "");
         updateSaveStatus();
-        showToast(parts.title, parts.body, parts.isError, 6000);
+        showToast(parts.title, parts.body, parts.isError);
       } catch (error) {
         if (error.message !== "unauthorized") setBannerNotice(CONNECTION_ERROR_TEXT, error.message);
       } finally {
@@ -4114,6 +4031,68 @@
       return root;
     }
 
+    // 勾选浮层（模型、群）：触发按钮带 aria-expanded / aria-controls，打开时焦点进入浮层，
+    // Esc 或点外面关闭，焦点还给触发按钮
+    let popoverSeq = 0;
+
+    function bindPopover(zone, picker, trigger, label) {
+      picker.id = "pick-" + (++popoverSeq);
+      picker.setAttribute("role", "group");
+      picker.setAttribute("aria-label", label);
+      trigger.setAttribute("aria-expanded", "false");
+      trigger.setAttribute("aria-controls", picker.id);
+      const isOpen = () => zone.classList.contains("open");
+      function onOutside(event) {
+        if (!zone.contains(event.target)) close(true);
+      }
+      function open() {
+        if (isOpen()) return;
+        zone.classList.add("open");
+        trigger.setAttribute("aria-expanded", "true");
+        document.addEventListener("pointerdown", onOutside, true);
+        const first = picker.querySelector("input");
+        if (first) first.focus();
+      }
+      function close(returnFocus) {
+        if (!isOpen()) return;
+        zone.classList.remove("open");
+        trigger.setAttribute("aria-expanded", "false");
+        document.removeEventListener("pointerdown", onOutside, true);
+        if (returnFocus) trigger.focus();
+      }
+      picker.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        close(true);
+      });
+      return { open, close, isOpen };
+    }
+
+    // 勾选项：真正的 label + checkbox
+    function checkOption(text, checked, onToggle, avatarUrl) {
+      const option = document.createElement("label");
+      option.className = "pick-opt";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = checked;
+      box.addEventListener("change", () => onToggle(box.checked, box));
+      option.appendChild(box);
+      if (avatarUrl !== undefined) {
+        const avatar = document.createElement("img");
+        avatar.className = "pick-avatar";
+        avatar.alt = "";
+        avatar.referrerPolicy = "no-referrer";
+        if (avatarUrl) avatar.src = avatarUrl; else avatar.hidden = true;
+        avatar.addEventListener("error", () => { avatar.hidden = true; });
+        option.appendChild(avatar);
+      }
+      const label = document.createElement("span");
+      label.textContent = text;
+      option.appendChild(label);
+      return option;
+    }
+
     let dataListSeq = 0;
     let providerSeq = 0;
 
@@ -4152,19 +4131,35 @@
       const count = document.createElement("span");
       count.className = "provider-count";
       const remove = document.createElement("button");
-      remove.className = "remove";
+      remove.className = "btn btn-danger-outline btn-icon btn-s";
       remove.type = "button";
       remove.appendChild(icon("close"));
-      remove.title = "删除该供应商";
-      remove.setAttribute("aria-label", "删除该供应商");
-      remove.addEventListener("click", () => {
-        card.remove();
-        if ($("providers").querySelector(".provider") === null) showProvidersEmpty();
-        scheduleDirtyCheck();
-      });
+      remove.title = "移除这个供应商";
       meta.append(count, remove);
       head.append(title, meta);
       card.appendChild(head);
+      // 移除先只收成一行，保存模型注册表时才从文件里删掉；保存前可以撤销
+      const removedLine = document.createElement("div");
+      removedLine.className = "provider-removed";
+      removedLine.hidden = true;
+      const removedText = document.createElement("span");
+      const undo = document.createElement("button");
+      undo.type = "button";
+      undo.className = "btn btn-link";
+      undo.textContent = "撤销";
+      removedLine.append(removedText, undo);
+      card.appendChild(removedLine);
+      const setRemoved = (removed) => {
+        if (removed) card.dataset.removed = "1"; else delete card.dataset.removed;
+        for (const child of card.children)
+          if (child !== removedLine) child.hidden = removed;
+        removedLine.hidden = !removed;
+        removedText.textContent = "已移除“" + title.textContent + "”。保存模型注册表后才会从文件中删除。";
+        (removed ? undo : remove).focus();
+        scheduleDirtyCheck();
+      };
+      remove.addEventListener("click", () => setRemoved(true));
+      undo.addEventListener("click", () => setRemoved(false));
 
       /* 供应商名称：注册表 describe 字段，仅作展示 */
       const describeInput = document.createElement("input");
@@ -4174,6 +4169,7 @@
       describeInput.placeholder = "如：DeepSeek官方";
       const syncHead = () => {
         title.textContent = describeInput.value.trim() || "未命名供应商";
+        remove.setAttribute("aria-label", "移除供应商“" + title.textContent + "”");
         const total = modelNames.length;
         count.classList.toggle("empty", total === 0);
         if (total === 0) {
@@ -4255,7 +4251,9 @@
       picker.className = "model-pick";
       const search = document.createElement("input");
       search.type = "text";
-      search.placeholder = "搜索模型…";
+      search.type = "search";
+      search.placeholder = "搜索模型……";
+      search.setAttribute("aria-label", "搜索模型");
       const pickList = document.createElement("div");
       pickList.className = "model-pick-list";
       picker.append(search, pickList);
@@ -4337,40 +4335,21 @@
           return;
         }
         for (const name of shown) {
-          const option = document.createElement("button");
-          option.type = "button";
-          option.className = "pick-opt" + (modelNames.includes(name) ? " selected" : "");
-          const tick = document.createElement("span");
-          tick.className = "tick";
-          tick.appendChild(icon("check"));
-          const text = document.createElement("span");
-          text.textContent = name;
-          option.append(tick, text);
-          option.addEventListener("click", () => {
-            if (!addModel(name)) {
+          const option = checkOption(name, modelNames.includes(name), (checked) => {
+            if (checked) addModel(name);
+            else if (modelNames.includes(name)) {
               modelNames.splice(modelNames.indexOf(name), 1);
               renderChips();
             }
-            option.classList.toggle("selected", modelNames.includes(name));
           });
+          option.lastChild.classList.add("mono");
           pickList.appendChild(option);
         }
       }
 
-      function onOutsidePick(event) {
-        if (!modelZone.contains(event.target)) closePicker();
-      }
-
-      function openPicker() {
-        modelZone.classList.add("open");
-        document.addEventListener("pointerdown", onOutsidePick, true);
-        renderPickList();
-      }
-
-      function closePicker() {
-        modelZone.classList.remove("open");
-        document.removeEventListener("pointerdown", onOutsidePick, true);
-      }
+      const picker_ = bindPopover(modelZone, picker, fetchButton, "从端点拉取到的模型");
+      const openPicker = () => { renderPickList(); picker_.open(); };
+      const closePicker = () => picker_.close(false);
 
       search.addEventListener("input", renderPickList);
 
@@ -4641,7 +4620,7 @@
         showToast(hotReloaded ? "保存成功" : "已写盘，热重载失败",
                   (hotReloaded ? "模型注册表已即时生效，无需重启"
                                : "需重启机器人后生效，进程内暂用旧表继续服务") + (kept ? "\n" + kept : ""),
-                  !hotReloaded, 6200);
+                  !hotReloaded);
       } catch (error) {
         if (error.message !== "unauthorized") setBannerNotice(CONNECTION_ERROR_TEXT, error.message);
       } finally {
@@ -5129,8 +5108,10 @@
         body: "还有 " + count + " 处未保存的改动。清除后需要重新输入令牌，页面上的改动不会保留。",
         confirmText: "清除令牌", danger: true
       })) return;
+      // 只删本地保存的令牌，不动其他东西
       try { localStorage.removeItem(TOKEN_STORAGE); } catch (error) { /* 读写不了本地存储时无事可清 */ }
-      $("login").style.display = "flex";
+      memoryToken = "";
+      showLogin();
     });
     $("navToggle").addEventListener("click", () => setNavOpen(!navIsOpen(), false));
     // 编辑即重算：清掉该字段的错误，防抖后重新比较未保存改动
@@ -5161,34 +5142,52 @@
       if (text) $("token").select();
     }
 
-    $("tokenOk").addEventListener("click", async () => {
+    $("loginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
       const value = $("token").value.trim();
       if (!value) {
-        setLoginError("请输入访问令牌。");
+        setLoginError("请填写访问令牌。");
         return;
       }
-      localStorage.setItem(TOKEN_STORAGE, value);
-      $("tokenOk").disabled = true;
+      const button = $("tokenOk");
+      button.disabled = true;
+      setButtonText(button, "正在验证……");
       setLoginError("");
       try {
-        // 先用新令牌验证一次，通过才关闭弹层，输错不再"闪一下又弹回"
-        await request("/api/config", { method: "GET" });
-        $("login").style.display = "none";
+        // 先带着输入的令牌请求一次，通过了才写进本地存储
+        const response = await request("/api/config", { method: "GET" }, value);
+        if (!response.ok) {
+          setLoginError("验证没有完成（HTTP " + response.status + "）。可稍后重试。");
+          return;
+        }
+        try { localStorage.setItem(TOKEN_STORAGE, value); memoryToken = ""; }
+        catch (error) { memoryToken = value; }
+        loginRequired = false;
+        $("token").value = "";
+        $("login").close();
         await loadConfig();
       } catch (error) {
-        if (error.message === "unauthorized")
-          setLoginError("令牌不正确，请重新输入。");
-        else
-          setLoginError("无法连接面板服务：" + error.message);
+        if (error.message === "unauthorized") setLoginError("令牌不正确。");
+        else setLoginError(CONNECTION_ERROR_TEXT);
       } finally {
-        $("tokenOk").disabled = false;
+        button.disabled = false;
+        setButtonText(button, "进入");
       }
     });
-    $("token").addEventListener("keydown", (event) => {
-      if (event.key === "Enter") $("tokenOk").click();
+    // 验证通过前不能用 Esc 关掉；万一被关掉（连按 Esc 等）就重新打开
+    $("login").addEventListener("cancel", (event) => event.preventDefault());
+    $("login").addEventListener("close", () => {
+      if (loginRequired) setTimeout(showLogin, 0);
     });
 
-    loadConfig();
+    // 读不到令牌时直接显示登录框
+    if (token()) {
+      loadConfig();
+    } else {
+      viewState($("panes"), "填写访问令牌后读取配置。");
+      $("sideNav").replaceChildren();
+      showLogin();
+    }
   </script>
 </body>
 
