@@ -1420,13 +1420,18 @@
       position: sticky;
       bottom: 0;
       z-index: var(--z-savebar);
+      background: var(--bg-1);
+      border-top: var(--bw) solid var(--line);
+    }
+
+    /* 内层与内容列同宽，按钮落在卡片右缘下方 */
+    .savebar-inner {
       display: flex;
       align-items: center;
       gap: var(--sp-4);
+      max-width: calc(var(--content-max) + 2 * var(--sp-8));
       min-height: var(--savebar-h);
       padding: var(--sp-2) var(--sp-8);
-      background: var(--bg-1);
-      border-top: var(--bw) solid var(--line);
     }
 
     .savebar-status {
@@ -1654,7 +1659,7 @@
         padding: var(--sp-6) var(--sp-4) var(--sp-8);
       }
 
-      .savebar {
+      .savebar-inner {
         padding: var(--sp-2) var(--sp-4);
       }
     }
@@ -1717,7 +1722,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        padding-bottom: calc(var(--sp-2) + env(safe-area-inset-bottom));
+        padding-bottom: env(safe-area-inset-bottom);
       }
 
       .savebar-status {
@@ -1736,101 +1741,7 @@
       }
     }
 
-    /* ============ 过渡期：旧版结构的样式（导航分组与字段行改版后删除） ============ */
-
-    .topbar .brand-text h1 {
-      font-size: var(--fs-16);
-      font-weight: var(--fw-semibold);
-    }
-
-    .topbar .brand-text .brand-sub {
-      display: block;
-    }
-
-    .actions {
-      display: flex;
-      gap: var(--sp-2);
-      margin-left: auto;
-    }
-
-    .nav-label {
-      padding: var(--sp-3) var(--sp-3) var(--sp-2);
-      font-size: var(--fs-12);
-      color: var(--text-3);
-    }
-
-    .nav-item.active {
-      background: var(--accent-soft);
-      color: var(--text);
-      box-shadow: inset 2px 0 0 var(--accent);
-    }
-
-    .nav-item .code {
-      display: none;
-    }
-
-    .nav-botinfo .botinfo-nav-avatar {
-      width: 28px;
-      height: 28px;
-      border-radius: var(--r-s);
-      object-fit: cover;
-    }
-
-    .nav-botinfo .botinfo-nav-text {
-      display: flex;
-      flex-direction: column;
-      padding: var(--sp-2) 0;
-    }
-
-    .nav-botinfo .botinfo-nav-sub {
-      font-size: var(--fs-12);
-      color: var(--text-3);
-    }
-
-    .nav-sep {
-      height: 1px;
-      margin: var(--sp-3) var(--sp-2);
-      background: var(--line);
-    }
-
-    .nav-version {
-      margin-top: var(--sp-4);
-      padding: 0 var(--sp-3);
-      font-size: var(--fs-12);
-      color: var(--text-3);
-    }
-
-    .content {
-      padding: var(--sp-8) var(--sp-8) var(--sp-12);
-      max-width: calc(var(--content-max) + 2 * var(--sp-8));
-    }
-
-    .pane {
-      display: none;
-    }
-
-    .pane.active {
-      display: block;
-    }
-
-    .pane h2,
-    #modelsView h2,
-    #botInfoView h2,
-    #perceptionView h2 {
-      font-size: var(--fs-20);
-      font-weight: var(--fw-semibold);
-    }
-
-    .page-effects {
-      margin-bottom: var(--sp-6);
-    }
-
-    .pane-hint {
-      margin: var(--sp-2) 0 0;
-      font-size: var(--fs-13);
-      line-height: var(--lh-loose);
-      color: var(--text-2);
-    }
+    /* ============ 过渡期：旧版下拉、横幅、通知与登录层的样式（后续改版后删除） ============ */
 
     #banner {
       display: none;
@@ -1861,13 +1772,6 @@
     #banner.err::before {
       content: "未保存";
       color: var(--danger);
-    }
-
-    .pane>.fields .fields,
-    details.section .fields {
-      background: transparent;
-      border: 0;
-      padding: 0;
     }
 
     select {
@@ -1977,52 +1881,6 @@
       gap: var(--sp-3);
     }
 
-    .mini-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      height: var(--control-h-s);
-      padding: 0 10px;
-      border: var(--bw) solid var(--line-strong);
-      border-radius: var(--r-s);
-      background: transparent;
-      color: var(--text);
-      font-size: var(--fs-13);
-      font-weight: var(--fw-medium);
-      cursor: pointer;
-    }
-
-    .mini-btn:hover:not(:disabled) {
-      background: var(--hover-veil);
-    }
-
-    .mini-btn:disabled {
-      opacity: .5;
-    }
-
-    .botinfo-rows {
-      margin-top: var(--sp-4);
-    }
-
-    .botinfo-row {
-      display: grid;
-      grid-template-columns: 120px minmax(0, 1fr);
-      padding: var(--sp-3) 0;
-      border-top: var(--bw) solid var(--line);
-    }
-
-    .botinfo-row-label {
-      color: var(--text-2);
-    }
-
-    .botinfo-row-value {
-      overflow-wrap: anywhere;
-    }
-
-    #perceptionBody>.row {
-      border-top: 0;
-    }
-
     .toast-head {
       display: flex;
       align-items: center;
@@ -2093,50 +1951,6 @@
     #loginError {
       color: var(--danger);
     }
-
-    footer {
-      margin-top: var(--sp-10);
-      font-size: var(--fs-12);
-      line-height: var(--lh-loose);
-      color: var(--text-3);
-    }
-
-    footer .tagline {
-      display: block;
-      margin-top: var(--sp-2);
-    }
-
-    @media (max-width: 899px) {
-      .shell {
-        display: block;
-      }
-
-      #sideNav {
-        position: static;
-        display: flex;
-        width: auto;
-        height: auto;
-        overflow-x: auto;
-        padding: var(--sp-2);
-        border-right: 0;
-        border-bottom: var(--bw) solid var(--line);
-      }
-
-      #sideNav .nav-item {
-        width: auto;
-        flex: none;
-      }
-
-      .nav-label,
-      .nav-sep,
-      .nav-version {
-        display: none;
-      }
-
-      .content {
-        padding: var(--sp-6) var(--sp-4) var(--sp-10);
-      }
-    }
   </style>
 </head>
 
@@ -2155,55 +1969,105 @@
     <symbol id="i-logout" viewBox="0 0 16 16"><path d="M6 2.5H3.5v11H6" /><path d="M10.5 5l3 3-3 3" /><path d="M13.5 8h-7" /></symbol>
     <symbol id="i-menu" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" /></symbol>
   </svg>
+  <a class="skip-link" href="#main">跳到内容</a>
   <header class="topbar">
     <div class="brand">
-      <div class="avatar" role="img" aria-label="Klein"></div>
-      <div class="brand-text">
-        <h1>KLEIN</h1>
-        <span class="brand-sub">MOBIUS LAB</span>
-      </div>
+      <span class="avatar" role="img" aria-label="克莱茵的头像"></span>
+      <span class="brand-name">克莱茵</span>
+      <span class="brand-sub">配置面板</span>
     </div>
-    <div class="actions">
-      <button id="reload" class="btn btn-secondary" type="button">
-        <svg class="icon" aria-hidden="true"><use href="#i-refresh" /></svg>
-        <span class="btn-text">重新加载</span>
-      </button>
-      <button id="save" class="btn btn-primary" type="button">
-        <svg class="icon" aria-hidden="true"><use href="#i-save" /></svg>
-        <span class="btn-text">保存并应用</span>
+    <div class="topbar-actions">
+      <button id="logout" class="btn btn-secondary" type="button" aria-label="清除本地令牌">
+        <svg class="icon" aria-hidden="true"><use href="#i-logout" /></svg>
+        <span class="btn-text">清除本地令牌</span>
       </button>
     </div>
   </header>
+  <div class="navbar-toggle">
+    <button id="navToggle" class="btn btn-quiet" type="button" aria-expanded="false" aria-controls="sideNav">
+      <svg class="icon" aria-hidden="true"><use href="#i-menu" /></svg>
+      <span class="btn-text" id="navToggleLabel">分区</span>
+      <svg class="icon" aria-hidden="true"><use href="#i-chevron-down" /></svg>
+    </button>
+    <span id="navToggleCount" class="navbar-count"></span>
+  </div>
   <div class="shell">
-    <nav id="sideNav" aria-label="配置导航"></nav>
-    <main class="content">
-      <div id="banner"></div>
-      <div id="panes"></div>
-      <div id="modelsView" style="display:none">
-        <h2>模型供应商</h2>
-        <p class="pane-hint">模型注册表里的每一组供应商：共享密钥的一批模型名、API 端点与协议标准。</p>
-        <div class="models-toolbar">
-          <button id="addProvider" class="btn btn-secondary" type="button">
-            <svg class="icon" aria-hidden="true"><use href="#i-plus" /></svg>
-            <span class="btn-text">添加供应商</span>
-          </button>
+    <nav id="sideNav" aria-label="分区">
+      <p class="nav-busy" aria-busy="true">正在读取配置……</p>
+    </nav>
+    <main id="main" class="content" tabindex="-1">
+      <div class="content-inner">
+        <div id="banner"></div>
+        <div id="panes" aria-busy="true">
+          <div class="card empty">
+            <p>正在读取配置……</p>
+          </div>
         </div>
-        <div class="note" id="registryInfo">正在加载模型注册表……</div>
-        <div id="providers"></div>
+        <section id="modelsView" class="view" hidden>
+          <header class="page-head">
+            <div class="page-head-main">
+              <div class="page-meta" id="registryMeta">模型注册表</div>
+              <h1 class="page-title" tabindex="-1">模型供应商</h1>
+              <p class="page-hint">模型注册表里的每一组供应商：共享密钥的一批模型名、API 端点与协议标准。保存模型注册表后，机器人进程内立即换用新表，不需要重启。</p>
+            </div>
+            <div class="page-head-actions">
+              <button id="addProvider" class="btn btn-secondary" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-plus" /></svg>
+                <span class="btn-text">添加供应商</span>
+              </button>
+            </div>
+          </header>
+          <p class="note" id="registryInfo">正在读取模型注册表……</p>
+          <div id="providers"></div>
+        </section>
+        <section id="botInfoView" class="view" hidden>
+          <header class="page-head">
+            <div class="page-head-main">
+              <div class="page-meta">概况 / 只读</div>
+              <h1 class="page-title" tabindex="-1">基础信息</h1>
+              <p class="page-hint">机器人账号资料与运行概况。头像、昵称与签名来自协议端，协议端未连接时读不到。</p>
+            </div>
+            <div class="page-head-actions">
+              <button id="botInfoRefresh" class="btn btn-secondary" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-refresh" /></svg>
+                <span class="btn-text">刷新</span>
+              </button>
+            </div>
+          </header>
+          <div id="botInfoBody"></div>
+        </section>
+        <section id="perceptionView" class="view" hidden>
+          <header class="page-head">
+            <div class="page-head-main">
+              <div class="page-meta">运行时状态 / 数据库</div>
+              <h1 class="page-title" tabindex="-1">群聊设置</h1>
+              <p class="page-hint">白名单群的只读观察与话题跟进。这里的改动会立即写入数据库，不经过“保存配置”，也不需要重启。私聊与未选择的群不会被观察。</p>
+            </div>
+            <div class="page-head-actions">
+              <button id="perceptionRefresh" class="btn btn-secondary" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-refresh" /></svg>
+                <span class="btn-text">刷新</span>
+              </button>
+            </div>
+          </header>
+          <div id="perceptionBody"></div>
+        </section>
       </div>
-      <div id="botInfoView" style="display:none">
-        <h2>基础信息</h2>
-        <p class="pane-hint">机器人账号资料与 Klein 运行概况。头像与昵称来自协议端，协议端未连接时信息受限。</p>
-        <div id="botInfoBody"></div>
+      <div id="saveBar" class="savebar">
+        <div class="savebar-inner">
+          <p id="saveStatus" class="savebar-status"></p>
+          <div class="savebar-actions">
+          <button id="reload" class="btn btn-secondary" type="button">
+            <svg class="icon" aria-hidden="true"><use href="#i-refresh" /></svg>
+            <span class="btn-text">重新读取</span>
+          </button>
+          <button id="save" class="btn btn-primary" type="button">
+            <svg class="icon" aria-hidden="true"><use href="#i-save" /></svg>
+            <span class="btn-text">保存配置</span>
+          </button>
+          </div>
+        </div>
       </div>
-      <div id="perceptionView" style="display:none">
-        <h2>群聊设置</h2>
-        <p class="pane-hint">白名单群的只读观察与话题跟进。总开关与群选择都是<b>运行时状态</b>，改动写入数据库并<b>立即生效</b>，无需保存配置、无需重启。私聊与非监控群完全不被观察。</p>
-        <div id="perceptionBody"></div>
-      </div>
-      <footer>保存后立即写盘并重载配置：字段说明里写“保存后立即生效”的项马上生效，写“需重启生效”的项在机器人重启后生效。密钥字段留空表示保持原值。
-        <span class="tagline">KLEIN · MOBIUS LAB TERMINAL</span>
-      </footer>
     </main>
   </div>
   <div id="login">
@@ -2246,7 +2110,7 @@
       bot: "机器人身份", features: "功能开关", chat: "消息处理", models: "模型设置", voice: "语音",
       memory: "长期记忆", web_search: "联网搜索", web_fetch: "网页抓取",
       storage: "存储路径", network: "网络代理",
-      communication: "OneBot 通信", webui: "Web 配置面板"
+      communication: "OneBot 通信", webui: "Web 配置面板", push: "推送接口"
     };
     const KEY_LABELS = {
       enabled: "启用", id: "QQ 号", manager_id: "管理员 QQ",
@@ -2268,7 +2132,8 @@
       image_assets: "图片资产目录", proxy: "代理服务器", protocol: "协议",
       active_transport: "连接方式", transports: "传输配置", defaults: "高级参数",
       api: "API 调用", events: "事件接收", secret: "签名密钥", base_url: "Base URL",
-      type: "类型", options: "选项", literal: "字面值", from_env: "环境变量名"
+      type: "类型", options: "选项", literal: "字面值", from_env: "环境变量名",
+      allowed_groups: "允许的群", allowed_users: "允许的用户", max_per_hour: "每小时上限"
     };
     // 传输类型中文名：通信分区结构无法识别时的通用兜底渲染仍走 active_transport 下拉，
     // 选项在加载配置时从 communication.transports 的键提取
@@ -2292,7 +2157,8 @@
       storage: "SQLite 数据库与图片资产的位置。",
       network: "出站请求的公共代理（模型调用、搜索等），留空不使用。",
       communication: "选择与 OneBot 协议端（NapCat / LagRange 等）的连接方式：服务器模式（协议端作服务器）、客户端模式（协议端作客户端）或 HTTP 组合。切换后仅显示所选方式的字段，其余档案保留在配置文件中。",
-      webui: "本配置面板自身的监听配置。"
+      webui: "本配置面板自身的监听配置。",
+      push: "供外部脚本经 HTTP 投递消息、由机器人代为发送的推送接口。当前版本未启用：这里的设置会写入文件，但机器人不会启动这个接口。"
     };
     const KEY_HINTS = {
       type: "传输类型：forward_websocket = 服务器模式（协议端作服务器，Klein 主动连出）；reverse_websocket = 客户端模式（协议端作客户端，主动连入 Klein）；http = API 调用 + 事件上报组合。",
@@ -2373,13 +2239,20 @@
       "webui.enabled": "Web 配置面板开关。",
       "webui.bind": "面板监听地址：127.0.0.1 仅本机可访问；改为 0.0.0.0 会暴露给局域网/公网并产生安全警告。",
       "webui.port": "面板端口，默认 55346（KLEIN 的九宫格键盘映射）。",
-      "webui.access_token": "面板访问令牌，支持环境变量引用。"
+      "webui.access_token": "面板访问令牌，支持环境变量引用。",
+      "push.enabled": "推送接口开关。开启时还需要访问令牌，以及至少一个允许的群或用户，否则加载时会自动关闭。",
+      "push.bind": "推送接口的监听地址；不是 127.0.0.1、localhost 或 ::1 时，加载会给出安全警告。",
+      "push.port": "推送接口的端口，默认 55347。",
+      "push.access_token": "调用推送接口时需要携带的令牌。",
+      "push.allowed_groups": "允许投递的群号，JSON 数组，例如 [123456789]。两个列表都为空时不放行任何目标。",
+      "push.allowed_users": "允许投递的 QQ 号，JSON 数组。",
+      "push.max_per_hour": "每个目标每小时最多投递的条数，1~10000。"
     };
 
     // 模块与字段的固定展示顺序：配置文件里的键序因人而异，面板按此整理，
     // 未列出的键（新版本新增或历史遗留）按文件原序排在最后兜底
     const SECTION_ORDER = ["bot", "chat", "models", "voice", "memory",
-      "web_search", "web_fetch", "storage", "network", "communication", "webui"];
+      "web_search", "web_fetch", "storage", "network", "communication", "webui", "push"];
     // 策略/实验类配置节（用户定规 2026-11-08：后台不做精细化，行为策略只在 .config.json 手改）：
     // 不渲染、不出导航；加载时原样暂存，collectConfig 原样带回——整份文档 POST 时缺失的键会被当作废弃键删掉
     const PASSTHROUGH_SECTIONS = new Set(["affect", "glance"]);
@@ -2909,92 +2782,214 @@
 
     /* ---------- 主配置：侧边导航 + 面板 ---------- */
 
-    function navItem(key, name) {
+    // 导航分组：组名 + 一行说明这组怎么保存
+    function navGroup(id, title, sub) {
+      const group = document.createElement("div");
+      group.className = "nav-group";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-labelledby", "nav-group-" + id);
+      const heading = document.createElement("div");
+      heading.className = "nav-group-title";
+      heading.id = "nav-group-" + id;
+      heading.textContent = title;
+      const note = document.createElement("div");
+      note.className = "nav-group-sub";
+      note.textContent = sub;
+      group.append(heading, note);
+      return group;
+    }
+
+    // 导航项：名称，可选第二行（基础信息的连接状态）与右侧小字标记；
+    // 未保存圆点与错误计数挂在 .nav-marks 里
+    function navItem(options) {
       const item = document.createElement("button");
       item.type = "button";
-      item.className = "nav-item";
-      item.dataset.key = key;
-      const code = document.createElement("span");
-      code.className = "code";
+      item.className = "nav-item" + (options.sub !== undefined ? " has-sub" : "");
+      item.dataset.key = options.key;
       const text = document.createElement("span");
-      text.textContent = name;
-      item.appendChild(code);
+      text.className = "nav-text";
+      const name = document.createElement("span");
+      name.className = "nav-name";
+      name.textContent = options.label;
+      text.appendChild(name);
+      if (options.sub !== undefined) {
+        const sub = document.createElement("span");
+        sub.className = "nav-sub";
+        if (options.status) {
+          const dot = document.createElement("span");
+          dot.className = "status-dot";
+          dot.setAttribute("aria-hidden", "true");
+          sub.appendChild(dot);
+        }
+        const subText = document.createElement("span");
+        subText.className = "nav-sub-text";
+        subText.textContent = options.sub;
+        sub.appendChild(subText);
+        text.appendChild(sub);
+      }
       item.appendChild(text);
-      item.addEventListener("click", () => selectPane(key));
-      return item;
-    }
-
-    function modelsNavItem() {
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "nav-item";
-      item.dataset.key = MODELS_KEY;
-      item.textContent = "模型供应商";
-      item.addEventListener("click", () => selectPane(MODELS_KEY));
-      return item;
-    }
-
-    function botInfoNavItem() {
-      // 置顶资料卡：头像（数据到达后自动填充）+ 标题 + 昵称/状态副行，
-      // 无 M 编号（不带 .code 占位符，不影响 CSS counter）
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "nav-item nav-botinfo";
-      item.dataset.key = BOTINFO_KEY;
-      const avatar = document.createElement("img");
-      avatar.className = "botinfo-nav-avatar";
-      avatar.alt = "";
-      avatar.referrerPolicy = "no-referrer";
-      avatar.src = BOTINFO_AVATAR_FALLBACK;
-      setAvatarFallback(avatar);
-      const text = document.createElement("span");
-      text.className = "botinfo-nav-text";
-      const title = document.createElement("span");
-      title.className = "botinfo-nav-title";
-      title.textContent = "基础信息";
-      const sub = document.createElement("span");
-      sub.className = "botinfo-nav-sub";
-      sub.textContent = "机器人资料与运行状态";
-      text.append(title, sub);
-      item.append(avatar, text);
-      item.addEventListener("click", () => selectPane(BOTINFO_KEY));
+      if (options.tag) {
+        const tag = document.createElement("span");
+        tag.className = "nav-tag";
+        tag.textContent = options.tag;
+        item.appendChild(tag);
+      }
+      const marks = document.createElement("span");
+      marks.className = "nav-marks";
+      item.appendChild(marks);
+      item.addEventListener("click", () => {
+        setNavOpen(false, false);
+        selectPane(options.key, { focus: true });
+      });
       return item;
     }
 
     function perceptionNavItem() {
-      // 与其它编号模块同构：M 编号 + 文字，无图标（编号由 CSS counter 按 DOM 序分配）
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "nav-item";
-      item.dataset.key = PERCEPTION_KEY;
-      const code = document.createElement("span");
-      code.className = "code";
-      const text = document.createElement("span");
-      text.textContent = "群聊设置";
-      item.append(code, text);
-      item.addEventListener("click", () => selectPane(PERCEPTION_KEY));
-      return item;
+      return navItem({ key: PERCEPTION_KEY, label: "群聊设置", tag: "即时写入" });
     }
 
-    function selectPane(key) {
+    // 页头：来源与键名、标题（切页后焦点落在这里）、分区说明、生效统计
+    function pageHead(meta, title, hint, withEffects) {
+      const head = document.createElement("header");
+      head.className = "page-head";
+      const main = document.createElement("div");
+      main.className = "page-head-main";
+      const metaLine = document.createElement("div");
+      metaLine.className = "page-meta";
+      metaLine.textContent = meta;
+      const heading = document.createElement("h1");
+      heading.className = "page-title";
+      heading.tabIndex = -1;
+      heading.textContent = title;
+      main.append(metaLine, heading);
+      if (hint) {
+        const hintLine = document.createElement("p");
+        hintLine.className = "page-hint";
+        hintLine.textContent = hint;
+        main.appendChild(hintLine);
+      }
+      if (withEffects) {
+        const effects = document.createElement("p");
+        effects.className = "page-effects";
+        main.appendChild(effects);
+      }
+      head.appendChild(main);
+      return head;
+    }
+
+    function prefersReducedMotion() {
+      return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+
+    function viewFor(key) {
+      if (key === MODELS_KEY) return $("modelsView");
+      if (key === PERCEPTION_KEY) return $("perceptionView");
+      if (key === BOTINFO_KEY) return $("botInfoView");
+      return document.querySelector('#panes .pane[data-key="' + CSS.escape(key) + '"]');
+    }
+
+    function selectPane(key, options) {
+      const opts = options || {};
       activePane = key;
-      for (const item of document.querySelectorAll(".nav-item"))
-        item.classList.toggle("active", item.dataset.key === key);
-      for (const pane of document.querySelectorAll(".pane"))
-        pane.classList.toggle("active", pane.dataset.key === key);
-      $("modelsView").style.display = key === MODELS_KEY ? "" : "none";
-      $("perceptionView").style.display = key === PERCEPTION_KEY ? "" : "none";
-      $("botInfoView").style.display = key === BOTINFO_KEY ? "" : "none";
-      // 这两页无配置可保存（改动即落库 / 只读信息）
-      $("save").hidden = key === PERCEPTION_KEY || key === BOTINFO_KEY;
-      // 只改文字 span：直接写按钮的 textContent 会把图标一起清掉
-      setButtonText($("reload"), key === PERCEPTION_KEY ? "刷新状态"
-        : key === BOTINFO_KEY ? "刷新" : "重新加载");
+      let currentLabel = "";
+      for (const item of document.querySelectorAll("#sideNav .nav-item")) {
+        if (item.dataset.key === key) {
+          item.setAttribute("aria-current", "page");
+          currentLabel = item.querySelector(".nav-name").textContent;
+        } else {
+          item.removeAttribute("aria-current");
+        }
+      }
+      for (const pane of document.querySelectorAll("#panes .pane")) {
+        const active = pane.dataset.key === key;
+        pane.hidden = !active;
+        pane.classList.toggle("active", active);   // 实验台按 .pane.active 定位当前分区
+      }
+      $("modelsView").hidden = key !== MODELS_KEY;
+      $("perceptionView").hidden = key !== PERCEPTION_KEY;
+      $("botInfoView").hidden = key !== BOTINFO_KEY;
+      // 基础信息只读、群聊设置即时写入：这两页没有保存栏
+      $("saveBar").hidden = key === PERCEPTION_KEY || key === BOTINFO_KEY;
+      setButtonText($("save"), key === MODELS_KEY ? "保存模型注册表" : "保存配置");
+      $("navToggleLabel").textContent = currentLabel ? "分区：" + currentLabel : "分区";
+      updateSaveStatus();
       if (key === MODELS_KEY && !modelsLoaded) loadModels();
       if (key === PERCEPTION_KEY) loadPerception();
       if (key === BOTINFO_KEY) loadBotInfo();
       // 横幅不随切页清空：诊断要留到改好或下一次保存成功
+      if (opts.focus) {
+        window.scrollTo(0, 0);
+        const view = viewFor(key);
+        const title = view && view.querySelector(".page-title");
+        if (title) title.focus({ preventScroll: true });
+      }
     }
+
+    // 窄屏：同一个 #sideNav 作为下拉面板展开；选中、Esc、点外面都会收起
+    function navIsOpen() {
+      return $("sideNav").classList.contains("is-open");
+    }
+
+    function onNavOutside(event) {
+      if (!$("sideNav").contains(event.target) && !$("navToggle").contains(event.target))
+        setNavOpen(false, true);
+    }
+
+    function setNavOpen(open, returnFocus) {
+      const nav = $("sideNav");
+      if (open === navIsOpen()) return;
+      nav.classList.toggle("is-open", open);
+      $("navToggle").setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) {
+        document.addEventListener("pointerdown", onNavOutside, true);
+        const current = nav.querySelector('.nav-item[aria-current="page"]') || nav.querySelector(".nav-item");
+        if (current) current.focus();
+      } else {
+        document.removeEventListener("pointerdown", onNavOutside, true);
+        if (returnFocus) $("navToggle").focus();
+      }
+    }
+
+    // 保存栏左侧的状态文字：本次会话里最近一次保存的结果
+    const lastSaveNote = { config: "", registry: "" };
+
+    function timeStamp() {
+      const now = new Date();
+      return String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+    }
+
+    function updateSaveStatus() {
+      $("saveStatus").textContent = activePane === MODELS_KEY ? lastSaveNote.registry : lastSaveNote.config;
+    }
+
+    // 页内的读取中 / 读取失败：一句陈述；失败时附技术细节（次要文字）与“重试”
+    function viewState(container, text, options) {
+      const opts = options || {};
+      const box = document.createElement("div");
+      box.className = "card empty";
+      const line = document.createElement("p");
+      line.textContent = text;
+      box.appendChild(line);
+      if (opts.detail) {
+        const detail = document.createElement("p");
+        detail.className = "banner-detail";
+        detail.textContent = opts.detail;
+        box.appendChild(detail);
+      }
+      if (opts.retry) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "btn btn-secondary";
+        setButtonContent(retry, "refresh", "重试");
+        retry.addEventListener("click", () => opts.retry());
+        box.appendChild(retry);
+      }
+      container.replaceChildren(box);
+      if (opts.busy) container.setAttribute("aria-busy", "true");
+      else container.removeAttribute("aria-busy");
+    }
+
+    const CONNECTION_ERROR_TEXT = "连不上面板服务，请确认机器人仍在运行。";
 
     // 等宽显示的键：端点、主机、路径、模型名等 ASCII 机器串
     const MONO_KEYS = new Set(["endpoint", "host", "bind", "path", "base_url", "proxy", "model",
@@ -3395,16 +3390,9 @@
       pane.className = "pane";
       pane.dataset.key = "features";
       pane.dataset.mergeInto = "bot";
-      const heading = document.createElement("h2");
-      heading.textContent = SECTION_LABELS.features;
-      pane.appendChild(heading);
-      const hint = document.createElement("p");
-      hint.className = "pane-hint";
-      hint.textContent = SECTION_HINTS.features || "";
-      pane.appendChild(hint);
-      const effects = document.createElement("p");
-      effects.className = "page-effects";
-      pane.appendChild(effects);
+      pane.hidden = true;
+      pane.appendChild(pageHead("配置文件 / bot.group_chat_enabled", SECTION_LABELS.features,
+        SECTION_HINTS.features || "", true));
       const fields = document.createElement("div");
       fields.className = "fields";
       pane.appendChild(fields);
@@ -3463,17 +3451,19 @@
     // 总开关与群监控状态都是运行时状态，改动直接 POST 落库并立即生效，无"保存"语义
     // “基础信息”页（M 编号外）：机器人账号资料 + Klein 运行概况，
     // 数据来自 GET /api/botinfo（协议端登录查询 + 进程内版本/运行时长）
-    const BOTINFO_AVATAR_FALLBACK = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
-      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'>" +
-      "<rect width='96' height='96' fill='#1e2823'/>" +
-      "<text x='48' y='62' font-size='42' text-anchor='middle' fill='#586b60' " +
-      "font-family='monospace'>K</text></svg>");
+    // 页面内嵌的头像（--klein-avatar 里的 data URI），作机器人头像读不到时的兜底
+    function embeddedAvatarUrl() {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue("--klein-avatar");
+      const match = /url\(\s*["']?(data:[^"')\s]+)["']?\s*\)/.exec(raw);
+      return match ? match[1] : "";
+    }
 
-    // 头像加载失败一律回退到内嵌占位图：处理器常驻（不置空），之后再换 src 失败也有兜底；
-    // 占位图自身是 data URI，不会再失败，判等只为防止意外的循环
+    // 头像加载失败一律回退到内嵌头像：处理器常驻（不置空），之后再换 src 失败也有兜底
     function setAvatarFallback(image) {
       image.addEventListener("error", () => {
-        if (image.src !== BOTINFO_AVATAR_FALLBACK) image.src = BOTINFO_AVATAR_FALLBACK;
+        const fallback = embeddedAvatarUrl();
+        if (fallback && image.src !== fallback) image.src = fallback;
+        else image.hidden = true;
       });
     }
 
@@ -3486,145 +3476,141 @@
       return minutes + " 分钟";
     }
 
-    function botInfoRow(labelText, valueText) {
-      const row = document.createElement("div");
-      row.className = "botinfo-row";
-      const label = document.createElement("span");
-      label.className = "botinfo-row-label";
-      label.textContent = labelText;
-      const value = document.createElement("span");
-      value.className = "botinfo-row-value";
-      value.textContent = valueText;
-      row.append(label, value);
-      return row;
-    }
-
-    // 把协议端查询结果同步到侧边栏入口卡：头像换真身、副行显示昵称或离线状态
+    // 导航里“基础信息”的第二行：连接状态圆点 + “已连接 · 昵称”或“未连接协议端”
     function applyBotInfoToNav(data) {
-      const avatar = document.querySelector(".nav-botinfo .botinfo-nav-avatar");
-      if (avatar == null)
+      const item = document.querySelector('#sideNav .nav-item[data-key="' + BOTINFO_KEY + '"]');
+      if (item == null)
         return;
-      const sub = document.querySelector(".nav-botinfo .botinfo-nav-sub");
-      if (data.connected === true && data.user_id) {
-        avatar.src = "https://q1.qlogo.cn/g?b=qq&nk=" + data.user_id + "&s=640";
-        if (sub != null)
-          sub.textContent = data.nickname ? String(data.nickname) : "QQ " + data.user_id;
-      } else {
-        avatar.src = BOTINFO_AVATAR_FALLBACK;
-        if (sub != null)
-          sub.textContent = "未连接协议端";
-      }
+      const connected = data !== null && data.connected === true;
+      const dot = item.querySelector(".status-dot");
+      if (dot != null) dot.classList.toggle("on", connected);
+      const sub = item.querySelector(".nav-sub-text");
+      if (sub == null) return;
+      if (data === null) sub.textContent = "未能读取状态";
+      else if (!connected) sub.textContent = "未连接协议端";
+      else sub.textContent = "已连接" + (data.nickname ? " · " + data.nickname
+        : data.user_id ? " · QQ " + data.user_id : "");
     }
 
     async function refreshBotInfoNav() {
       try {
         const response = await request("/api/botinfo", { method: "GET" });
-        if (!response.ok)
-          return;
-        applyBotInfoToNav(await response.json());
+        applyBotInfoToNav(response.ok ? await response.json() : null);
       } catch (error) {
-        // 静默：导航卡保留占位头像
+        if (error.message !== "unauthorized") applyBotInfoToNav(null);
       }
     }
 
     async function loadBotInfo() {
       const body = $("botInfoBody");
-      body.textContent = "";
-      body.appendChild(Object.assign(document.createElement("div"),
-        { className: "note", textContent: "正在读取基础信息……" }));
+      // /api/botinfo 最长会等协议端约 6 秒
+      viewState(body, "正在读取……", { busy: true });
       let data;
       try {
         const response = await request("/api/botinfo", { method: "GET" });
         if (!response.ok) {
-          body.textContent = "";
-          body.appendChild(Object.assign(document.createElement("div"),
-            { className: "note", textContent: "读取失败：HTTP " + response.status }));
+          viewState(body, "读取失败（HTTP " + response.status + "）。", { retry: loadBotInfo });
           return;
         }
         data = await response.json();
       } catch (error) {
-        body.textContent = "";
-        body.appendChild(Object.assign(document.createElement("div"),
-          { className: "note", textContent: "无法连接面板服务：" + error.message }));
+        if (error.message !== "unauthorized")
+          viewState(body, CONNECTION_ERROR_TEXT, { detail: error.message, retry: loadBotInfo });
         return;
       }
 
       const connected = data.connected === true;
       const qq = connected && data.user_id ? String(data.user_id) : "";
-      const nickname = connected && data.nickname ? data.nickname : "未连接协议端";
-
-      body.textContent = "";
       const card = document.createElement("div");
-      card.className = "botinfo-card";
+      card.className = "card";
+      const profile = document.createElement("div");
+      profile.className = "botinfo-card";
       const avatar = document.createElement("img");
       avatar.className = "botinfo-avatar";
       avatar.alt = "机器人头像";
       avatar.referrerPolicy = "no-referrer";
       setAvatarFallback(avatar);
-      avatar.src = qq !== ""
-        ? "https://q1.qlogo.cn/g?b=qq&nk=" + qq + "&s=640"
-        : BOTINFO_AVATAR_FALLBACK;
-      card.appendChild(avatar);
-
+      avatar.src = qq !== "" ? "https://q1.qlogo.cn/g?b=qq&nk=" + qq + "&s=640" : embeddedAvatarUrl();
       const identity = document.createElement("div");
       const name = document.createElement("div");
       name.className = "botinfo-name";
-      name.textContent = nickname;
-      identity.appendChild(name);
-      const qqLine = document.createElement("div");
-      qqLine.className = "botinfo-qq";
-      qqLine.textContent = qq !== "" ? "QQ " + qq : "协议端未连接，无法获取账号资料";
-      identity.appendChild(qqLine);
-      if (data.signature) {
+      const second = document.createElement("div");
+      second.className = "botinfo-qq";
+      if (connected) {
+        name.textContent = data.nickname ? String(data.nickname) : "（未设置昵称）";
+        second.textContent = "QQ ";
+        const number = document.createElement("span");
+        number.className = "mono";
+        number.textContent = qq || "未知";
+        second.appendChild(number);
+      } else {
+        name.textContent = "未连接";
+        second.textContent = "协议端未连接，账号资料暂不可得。";
+      }
+      identity.append(name, second);
+      if (connected && data.signature) {
         const sign = document.createElement("div");
         sign.className = "botinfo-sign";
         sign.textContent = "「" + data.signature + "」";
         identity.appendChild(sign);
       }
-      card.appendChild(identity);
-      body.appendChild(card);
+      profile.append(avatar, identity);
+      card.appendChild(profile);
 
-      const rows = document.createElement("div");
-      rows.className = "botinfo-rows";
-      rows.appendChild(botInfoRow("Klein 版本",
-        String(data.version || "?") + "（" + String(data.git_hash || "?") + "）"));
-      rows.appendChild(botInfoRow("构建类型", String(data.build_type || "?")));
-      rows.appendChild(botInfoRow("运行时长",
-        formatUptime(Number(data.uptime_seconds || 0))));
-      rows.appendChild(botInfoRow("通信模式", String(data.transport || "?")));
-      rows.appendChild(botInfoRow("协议端", connected ? "已连接" : "未连接"));
-      body.appendChild(rows);
+      const list = document.createElement("dl");
+      list.className = "botinfo-dl";
+      const entries = [
+        ["版本", data.version, true],
+        ["提交", data.git_hash, true],
+        ["构建类型", data.build_type, false],
+        ["运行时长", formatUptime(Number(data.uptime_seconds || 0)), false],
+        ["通信方式", data.transport, true],
+        ["协议端", connected ? "已连接" : "未连接", false]
+      ];
+      for (const [term, value, mono] of entries) {
+        const dt = document.createElement("dt");
+        dt.textContent = term;
+        const dd = document.createElement("dd");
+        dd.textContent = value === undefined || value === null || value === "" ? "未知" : String(value);
+        if (mono) dd.classList.add("mono");
+        list.append(dt, dd);
+      }
+      card.appendChild(list);
+      const note = document.createElement("p");
+      note.className = "note";
+      note.textContent = "文件里没有的配置项不会出现在面板上，需要先在 .config.json 中添加。";
+      body.replaceChildren(card, note);
+      body.removeAttribute("aria-busy");
       applyBotInfoToNav(data);
     }
 
     async function loadPerception() {
       const body = $("perceptionBody");
-      body.textContent = "";
-      body.appendChild(Object.assign(document.createElement("div"),
-        { className: "note", textContent: "正在读取观察状态……" }));
+      viewState(body, "正在读取……", { busy: true });
       let data;
       try {
         const response = await request("/api/groups", { method: "GET" });
         if (!response.ok) {
-          body.textContent = "";
-          body.appendChild(Object.assign(document.createElement("div"),
-            { className: "note", textContent: "读取失败：HTTP " + response.status }));
+          viewState(body, "读取失败（HTTP " + response.status + "）。", { retry: loadPerception });
           return;
         }
         data = await response.json();
       } catch (error) {
-        body.textContent = "";
-        body.appendChild(Object.assign(document.createElement("div"),
-          { className: "note", textContent: "无法连接面板服务：" + error.message }));
+        if (error.message !== "unauthorized")
+          viewState(body, CONNECTION_ERROR_TEXT, { detail: error.message, retry: loadPerception });
         return;
       }
       const groups = Array.isArray(data.groups) ? data.groups : [];
       let enabled = data.enabled === true;
       let monitored = groups.filter((g) => g.monitored).map((g) => String(g.group_id));
       body.textContent = "";
+      body.removeAttribute("aria-busy");
+      const card = document.createElement("div");
+      card.className = "card";
+      body.appendChild(card);
 
-      const statusLine = document.createElement("div");
-      statusLine.className = "note";
+      const statusLine = document.createElement("p");
+      statusLine.className = "row-hint";
 
       // 总开关：切换即落库生效
       const switchRow = rowFor("perception.enabled", "启用群聊观察",
@@ -3633,7 +3619,7 @@
       const switchWrap = switchControl(enabled);
       const switchInput = controlTarget(switchWrap);
       attachControl(switchRow, switchWrap);
-      body.appendChild(switchRow);
+      card.appendChild(switchRow);
 
       // 群勾选区（chips + 浮层选择，交互与模型供应商页一致）
       const zone = document.createElement("div");
@@ -3644,11 +3630,11 @@
       actions.className = "model-actions";
       const pickButton = document.createElement("button");
       pickButton.type = "button";
-      pickButton.className = "mini-btn";
+      pickButton.className = "btn btn-secondary btn-s mini-btn";
       setButtonContent(pickButton, "plus", "选择要观察的群");
       const manualToggle = document.createElement("button");
       manualToggle.type = "button";
-      manualToggle.className = "mini-btn";
+      manualToggle.className = "btn btn-secondary btn-s mini-btn";
       setButtonContent(manualToggle, "plus", "手动输入群号");
       const panelNote = document.createElement("span");
       panelNote.className = "model-note";
@@ -3663,7 +3649,7 @@
       manualInput.placeholder = "输入群号（纯数字），回车添加";
       const manualAdd = document.createElement("button");
       manualAdd.type = "button";
-      manualAdd.className = "mini-btn";
+      manualAdd.className = "btn btn-secondary btn-s mini-btn";
       manualAdd.textContent = "添加";
       manual.append(manualInput, manualAdd);
 
@@ -3676,8 +3662,11 @@
       pickList.className = "model-pick-list";
       picker.append(search, pickList);
       zone.append(chips, actions, manual, picker);
-      body.appendChild(zone);
-      body.appendChild(statusLine);
+      const groupsRow = rowFor("perception.groups", "观察的群",
+        "从机器人所在的群里选择，也可以手动输入群号。", null, { showPath: false, group: true });
+      attachControl(groupsRow, zone, { group: true });
+      groupsRow.querySelector(".row-control").appendChild(statusLine);
+      card.appendChild(groupsRow);
 
       async function post(path, payload) {
         try {
@@ -3838,28 +3827,30 @@
     async function loadConfig() {
       try {
         const response = await request("/api/config", { method: "GET" });
-        if (!response.ok) { showBanner("读取配置失败：HTTP " + response.status, true); return; }
+        if (!response.ok) {
+          const detail = await response.json().catch(() => null);
+          showConfigLoadError("读取配置失败（HTTP " + response.status + "）。可稍后重试。",
+            detail && Array.isArray(detail.diagnostics) ? diagnosticsText(detail.diagnostics) : "");
+          return;
+        }
         const document_ = await response.json();
         extractTransportOptions(document_);
         // 模型名类字段是注册表下拉：渲染配置面板前先刷新注册表模型名缓存
         await refreshRegistryNames();
-        // 字段说明里的生效方式来自服务端规则表：同样先取再渲染
+        // 字段旁的生效徽标来自服务端规则表：同样先取再渲染
         await refreshConfigEffects();
         const nav = $("sideNav");
         nav.textContent = "";
-        // 基础信息固定在最顶层（配置模块上方），无 M 编号
-        nav.appendChild(botInfoNavItem());
-        const navLabel = document.createElement("div");
-        navLabel.className = "nav-label";
-        navLabel.textContent = "配置模块";
-        nav.appendChild(navLabel);
+        const overview = navGroup("overview", "概况", "只读");
+        overview.appendChild(navItem({ key: BOTINFO_KEY, label: "基础信息", sub: "正在读取……", status: true }));
+        const configGroup = navGroup("config", "配置文件", "保存配置后写入 .config.json");
         const panes = $("panes");
         panes.textContent = "";
         let firstKey = "";
-        // 群聊设置（原"观察通道"）固定编为 M05：插在第 4 个配置模块之后
-        // （机器人身份/功能开关/消息处理/模型设置），配置模块不足 4 个时排在末尾
+        // 群聊设置的位置是此前定下的：排在前 3 个配置分区（机器人身份 / 功能开关 / 消息处理）之后，
+        // 配置分区不足 3 个时排在末尾（原实现把置顶的基础信息也计入，数到 4，位置相同）
         let perceptionNavInserted = false;
-        // schema_version 不是可编辑项：不生成分区，只在侧边导航底部展示原值，
+        // schema_version 不是可编辑项：不生成分区，只在导航底部展示原值，
         // 保存时由 collectConfig 写回（改版本号请直接编辑 .config.json）
         loadedSchemaVersion = typeof document_.schema_version === "number"
           ? document_.schema_version : undefined;
@@ -3873,20 +3864,13 @@
           // 策略类配置节：不渲染，原样暂存待保存时带回（PASSTHROUGH_SECTIONS）
           if (PASSTHROUGH_SECTIONS.has(key)) { passthroughSections[key] = value; continue; }
           if (!firstKey) firstKey = key;
-          nav.appendChild(navItem(key, label(key, true)));
+          configGroup.appendChild(navItem({ key: key, label: label(key, true) }));
           const pane = document.createElement("section");
           pane.className = "pane";
           pane.dataset.key = key;
-          const heading = document.createElement("h2");
-          heading.textContent = label(key, true);
-          pane.appendChild(heading);
-          const hint = document.createElement("p");
-          hint.className = "pane-hint";
-          hint.textContent = SECTION_HINTS[key] || "";
-          pane.appendChild(hint);
-          const effects = document.createElement("p");
-          effects.className = "page-effects";
-          pane.appendChild(effects);
+          pane.hidden = true;
+          pane.appendChild(pageHead(key === "models" ? "配置文件 / chat · models" : "配置文件 / " + key,
+            label(key, true), SECTION_HINTS[key] || "", true));
           const fields = document.createElement("div");
           fields.className = "fields";
           pane.appendChild(fields);
@@ -3917,36 +3901,50 @@
           updateEffectSummary(pane);
           panes.appendChild(pane);
           if (key === "bot" && isPlainObject(value)) {
-            nav.appendChild(navItem("features", SECTION_LABELS.features));
+            configGroup.appendChild(navItem({ key: "features", label: SECTION_LABELS.features }));
             panes.appendChild(featureTogglesPane(value));
           }
-          if (!perceptionNavInserted &&
-              nav.querySelectorAll(".nav-item").length >= 4) {
-            nav.appendChild(perceptionNavItem());
+          if (!perceptionNavInserted && configGroup.querySelectorAll(".nav-item").length >= 3) {
+            configGroup.appendChild(perceptionNavItem());
             perceptionNavInserted = true;
           }
         }
-        if (!perceptionNavInserted) nav.appendChild(perceptionNavItem());
-        const sep = document.createElement("div");
-        sep.className = "nav-sep";
-        nav.appendChild(sep);
-        nav.appendChild(modelsNavItem());
-        const versionChip = document.createElement("div");
-        versionChip.className = "nav-version";
-        if (loadedSchemaVersion === undefined)
-          versionChip.hidden = true;
-        else
-          versionChip.textContent = "配置文件版本 v" + loadedSchemaVersion;
-        nav.appendChild(versionChip);
-        // 导航入口卡的头像/昵称异步刷新，不阻塞配置面板渲染
+        if (!perceptionNavInserted) configGroup.appendChild(perceptionNavItem());
+        const registryGroup = navGroup("registry", "模型注册表", "单独保存");
+        registryGroup.appendChild(navItem({ key: MODELS_KEY, label: "模型供应商" }));
+        nav.append(overview, configGroup, registryGroup);
+        if (loadedSchemaVersion !== undefined) {
+          const foot = document.createElement("p");
+          foot.className = "nav-foot";
+          foot.textContent = "配置文件版本 " + loadedSchemaVersion;
+          nav.appendChild(foot);
+        }
+        panes.removeAttribute("aria-busy");
+        // 导航里基础信息的连接状态异步刷新，不阻塞配置面板渲染
         refreshBotInfoNav();
         const known = activePane === MODELS_KEY || activePane === PERCEPTION_KEY ||
-          activePane === BOTINFO_KEY ||
-          document.querySelectorAll('.pane[data-key="' + activePane + '"]').length > 0;
+          activePane === BOTINFO_KEY || viewFor(activePane || "-") !== null;
         selectPane(known && activePane ? activePane : (firstKey || MODELS_KEY));
         $("banner").className = "";
       } catch (error) {
-        if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
+        if (error.message !== "unauthorized") showConfigLoadError(CONNECTION_ERROR_TEXT, error.message);
+      }
+    }
+
+    // 读取配置失败：首次读取时在页内说明并给“重试”；已有内容时保留页面，只在横幅里说明
+    function showConfigLoadError(text, detail) {
+      const panes = $("panes");
+      if (panes.querySelector(".pane")) {
+        showBanner(text + (detail ? "\n" + detail : ""), true);
+        return;
+      }
+      viewState(panes, text, { detail: detail, retry: loadConfig });
+      const nav = $("sideNav");
+      if (nav.querySelector(".nav-item") === null) {
+        const note = document.createElement("p");
+        note.className = "nav-busy";
+        note.textContent = "未能读取配置";
+        nav.replaceChildren(note);
       }
     }
 
@@ -3976,6 +3974,8 @@
         // 顺序反了通知会被自己冲掉；保存结果走右下角非模态通知
         await loadConfig();
         const parts = saveResultParts(body);
+        lastSaveNote.config = timeStamp() + " " + parts.title + (parts.body ? "：" + parts.body : "");
+        updateSaveStatus();
         showToast(parts.title, parts.body, parts.isError, 6000);
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
@@ -4189,7 +4189,7 @@
       manualInput.setAttribute("list", listId);
       const manualAdd = document.createElement("button");
       manualAdd.type = "button";
-      manualAdd.className = "mini-btn";
+      manualAdd.className = "btn btn-secondary btn-s mini-btn";
       manualAdd.textContent = "添加";
       manual.append(manualInput, manualAdd);
 
@@ -4197,15 +4197,15 @@
       actions.className = "model-actions";
       const fetchButton = document.createElement("button");
       fetchButton.type = "button";
-      fetchButton.className = "mini-btn";
+      fetchButton.className = "btn btn-secondary btn-s mini-btn";
       setButtonContent(fetchButton, "refresh", "获取模型列表");
       const manualToggle = document.createElement("button");
       manualToggle.type = "button";
-      manualToggle.className = "mini-btn";
+      manualToggle.className = "btn btn-secondary btn-s mini-btn";
       setButtonContent(manualToggle, "plus", "手动输入");
       const probeButton = document.createElement("button");
       probeButton.type = "button";
-      probeButton.className = "mini-btn";
+      probeButton.className = "btn btn-secondary btn-s mini-btn";
       setButtonContent(probeButton, "eye", "检测视觉");
       probeButton.title = "对已选模型逐一发送极小图片请求，自动标注是否支持视觉输入";
       const noteLine = document.createElement("span");
@@ -4438,6 +4438,8 @@
 
       syncDataList();
       renderChips();
+      const empty = $("providers").querySelector(".empty");
+      if (empty !== null) empty.remove();
       $("providers").appendChild(card);
       return card;
     }
@@ -4506,20 +4508,40 @@
         if (!response.ok) { showBanner("读取模型注册表失败：HTTP " + response.status, true); return; }
         const body = await response.json();
         const info = $("registryInfo");
-        info.textContent = "注册表文件：" + body.registry_path +
-          (body.exists ? "" : "（文件尚不存在，首次保存时将创建）") +
-          "。保存后机器人进程内即时生效，无需重启。";
+        $("registryMeta").textContent = "模型注册表 / " + body.registry_path;
+        info.textContent = body.exists ? "" : "注册表文件还不存在，第一次保存时会创建。";
+        info.hidden = body.exists === true;
         const providers = $("providers");
         providers.textContent = "";
         const list = (body.models && body.models.Models) || [];
         list.forEach((provider, index) => addProviderCard(provider, index));
-        if (!list.length)
-          info.textContent += " 当前没有注册任何供应商，点击上方按钮添加。";
+        if (!list.length) showProvidersEmpty();
         modelsLoaded = true;
         $("banner").className = "";
       } catch (error) {
         if (error.message !== "unauthorized") showBanner("无法连接面板服务：" + error.message, true);
       }
+    }
+
+    // 注册表为空：卡片内一句陈述加“添加供应商”
+    function showProvidersEmpty() {
+      const box = document.createElement("div");
+      box.className = "card empty";
+      const line = document.createElement("p");
+      line.textContent = "还没有供应商。添加后，其中的模型会出现在各处的模型下拉里。";
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "btn btn-secondary";
+      setButtonContent(add, "plus", "添加供应商");
+      add.addEventListener("click", addProviderAndFocus);
+      box.append(line, add);
+      $("providers").replaceChildren(box);
+    }
+
+    function addProviderAndFocus() {
+      const card = addProviderCard(null);
+      card.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
+      card.querySelector('[data-field="describe"]').focus({ preventScroll: true });
     }
 
     async function saveModels() {
@@ -4540,6 +4562,9 @@
         // 注册表已更新：重渲染配置面板，让模型下拉框拿到新名单
         await loadConfig();
         const hotReloaded = body.hotReloaded === true;
+        lastSaveNote.registry = timeStamp() + (hotReloaded ? " 已保存，模型注册表已换用新表。"
+          : " 已写入文件，但进程内仍在用旧表。");
+        updateSaveStatus();
         showToast(hotReloaded ? "保存成功" : "已写盘，热重载失败",
                   hotReloaded ? "模型注册表已即时生效，无需重启"
                               : "需重启机器人后生效，进程内暂用旧表继续服务",
@@ -4552,16 +4577,20 @@
     /* ---------- 入口 ---------- */
 
     $("save").addEventListener("click", () => activePane === MODELS_KEY ? saveModels() : saveConfig());
-    $("reload").addEventListener("click", () => {
-      if (activePane === MODELS_KEY) return loadModels();
-      if (activePane === PERCEPTION_KEY) return loadPerception();
-      if (activePane === BOTINFO_KEY) return loadBotInfo();
-      loadConfig();
+    $("reload").addEventListener("click", () => activePane === MODELS_KEY ? loadModels() : loadConfig());
+    $("botInfoRefresh").addEventListener("click", () => loadBotInfo());
+    $("perceptionRefresh").addEventListener("click", () => loadPerception());
+    $("addProvider").addEventListener("click", addProviderAndFocus);
+    $("logout").addEventListener("click", () => {
+      try { localStorage.removeItem(TOKEN_STORAGE); } catch (error) { /* 读写不了本地存储时无事可清 */ }
+      $("login").style.display = "flex";
     });
-    $("addProvider").addEventListener("click", () => {
-      const card = addProviderCard(null);
-      card.scrollIntoView({ behavior: "smooth", block: "center" });
-      card.querySelector('[data-field="describe"]').focus();
+    $("navToggle").addEventListener("click", () => setNavOpen(!navIsOpen(), false));
+    $("sideNav").addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && navIsOpen()) {
+        event.preventDefault();
+        setNavOpen(false, true);
+      }
     });
     function setLoginError(text) {
       $("loginError").textContent = text;
