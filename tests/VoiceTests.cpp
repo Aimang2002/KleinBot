@@ -98,3 +98,44 @@ TEST(VoiceLiveConfigTest, NextSynthesisUsesReplacedOptions)
     EXPECT_EQ(second.received()[0]["prompt_text"], "参考B");
     EXPECT_EQ(second.received()[0]["ref_audio_path"], "参考B.wav");
 }
+
+// ===== 送达形式（Application/SpokenForm，ADR-024：内容与送达分离） =====
+#include "Application/SpokenForm.h"
+
+TEST(SpokenFormTest, TextWhenVoiceNotWanted)
+{
+    int calls = 0;
+    const SpokenForm form = chooseSpokenForm("你好", false, [&calls](const std::string &)
+                                             {
+                                                 ++calls;
+                                                 return std::string("a.wav");
+                                             });
+    EXPECT_FALSE(form.voice);
+    EXPECT_FALSE(form.voiceFailed);
+    EXPECT_EQ(calls, 0) << "不要语音就不合成";
+}
+
+TEST(SpokenFormTest, VoiceWhenSynthesisSucceeds)
+{
+    std::string seen;
+    const SpokenForm form = chooseSpokenForm("你好", true, [&seen](const std::string &text)
+                                             {
+                                                 seen = text;
+                                                 return std::string("/tmp/a.wav");
+                                             });
+    EXPECT_TRUE(form.voice);
+    EXPECT_EQ(form.audioPath, "/tmp/a.wav");
+    EXPECT_EQ(seen, "你好") << "合成的就是她要说的那句";
+}
+
+// 2026-11-16 真机：语音服务没开，原话被换成"系统提示：语音模块异常。"。现在退回文字发原话
+TEST(SpokenFormTest, FallsBackToTextWhenSynthesisFails)
+{
+    const SpokenForm failed =
+        chooseSpokenForm("好，我退开了", true, [](const std::string &) { return std::string(); });
+    EXPECT_FALSE(failed.voice);
+    EXPECT_TRUE(failed.voiceFailed);
+    const SpokenForm unwired = chooseSpokenForm("好，我退开了", true, SpeechSynthesizer{});
+    EXPECT_FALSE(unwired.voice);
+    EXPECT_TRUE(unwired.voiceFailed);
+}

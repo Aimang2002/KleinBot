@@ -18,6 +18,7 @@
 #include "../utils/LocalDate.h"
 #include "Message.h"
 #include "../Application/NonTextLabels.h"
+#include "../Application/SpokenForm.h"
 #include <algorithm>
 #include <iomanip>
 #include <thread>
@@ -207,7 +208,7 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 				current_data,
 				this->perception != nullptr ? this->perception->topicNoteFor(current_data.group_id)
 											: std::string(),
-				this->chatService.toolNames(), currentLocalHour());
+				this->chatService.toolNamesIn(ToolVenue::Group), currentLocalHour());
 		};
 		const std::string judgeMaterial = policyDecides
 			? requestContext + "\n触发句：" + conversationText
@@ -278,6 +279,11 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 				? utils::uniqueId("dlv") : std::string());
 		const auto deliver = [&]()
 		{
+			// 她这一轮确实开口了（文字或工具出站）：报给跟进那边记一句应答（ADR-024），
+			// 一轮只报一次，分条发送不重复计
+			if (isGroup && this->groupContext != nullptr &&
+				(textWillSend || !chatReply.outbound_messages.empty()))
+				this->groupContext->onAtAnswered(current_data.group_id);
 			if (!inboundAssetId.empty())
 				this->imageAssetStore.attachToConversation(current_data.user_id, inboundAssetId,
 					chatReply.user_message_id);
@@ -306,25 +312,19 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 				return;
 			}
 
-			// 语音模式：text → TTS → VoiceMessage；否则直接 TextMessage 走分段
-			if (*this->global_Voice.get() && this->userSession.isVoiceMode(current_data.user_id))
-			{
-				std::string audioPath = this->textToVoice(llm_text);
-				if (audioPath.empty())
-				{
-					dispatch(current_data, TextMessage{"系统提示：语音模块异常。"},
-							 replyContextPending, correlationPending);
-				}
-				else
-				{
-					dispatch(current_data, VoiceMessage{audioPath}, replyContextPending,
-							 correlationPending);
-				}
-			}
+			// 送达形式（Application/SpokenForm）：语音模式下先试语音，合成失败就发原文——
+			// 内容只有一份，失败不顶替内容
+			const bool wantVoice =
+				*this->global_Voice.get() && this->userSession.isVoiceMode(current_data.user_id);
+			const SpokenForm form = chooseSpokenForm(llm_text, wantVoice,
+				[this](const std::string &text) { return this->textToVoice(text); });
+			if (form.voiceFailed)
+				LOG_WARNING("语音合成失败，本条回复改发文字");
+			if (form.voice)
+				dispatch(current_data, VoiceMessage{form.audioPath}, replyContextPending,
+						 correlationPending);
 			else
-			{
 				dispatchText(current_data, llm_text, replyContextPending, correlationPending);
-			}
 		};
 
 		if (shadowPolicy)

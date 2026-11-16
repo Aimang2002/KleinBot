@@ -10,6 +10,7 @@
 #include "../Application/ToolLoop.h"
 #include "../Application/ContextDigest.h"
 #include "../Application/ToolPolicyFilter.h"
+#include "../Port/ToolNames.h"
 #include "../utils/LocalDate.h"
 #include "../Log/Log.h"
 #include "../Memory/TextRecall.h"
@@ -135,7 +136,7 @@ const char *const kSaySchema =
     R"({"type":"function","function":{"name":"group_say","description":"在群里说一句话（原样发出）。要说话时调用，绝不直接用文字回复。","parameters":{"type":"object","properties":{"text":{"type":"string","description":"要说的那句话本身，口语、自然、简短"}},"required":["text"]}}})";
 
 const char *const kLeaveSchema =
-    R"({"type":"function","function":{"name":"leave_topic","description":"结束这次话题跟进。话题翻页、无话可说或不该继续跟时调用。","parameters":{"type":"object","properties":{"reason":{"type":"string","description":"一句话离场理由（仅日志）"},"final_text":{"type":"string","description":"离场前想留下的最后一句话，可为空"}},"required":["reason"]}}})";
+    R"({"type":"function","function":{"name":"leave_topic","description":"结束这次话题跟进。话题翻页、无话可说或不该继续跟时调用。","parameters":{"type":"object","properties":{"reason":{"type":"string","description":"一句话离场理由（仅日志）"},"final_text":{"type":"string","description":"离场前想留下的最后一句话，可为空"},"step_back":{"type":"boolean","description":"有人请你别说了、先退下时为 true：之后一段时间你不会主动接话，被 @ 仍会回答；只是话题该停了就不填"}},"required":["reason"]}}})";
 
 const char *const kRecallSchema =
     R"({"type":"function","function":{"name":"recall_context","description":"在更早的群聊记录里按关键词检索相关消息。当前材料不足以掌握话题时才用。","parameters":{"type":"object","properties":{"keywords":{"type":"array","items":{"type":"string"},"description":"检索关键词，2-4 个"}},"required":["keywords"]}}})";
@@ -248,12 +249,19 @@ void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool at
         persistColdLocked(record.groupId);
     }
 
+    // 在场账本（ADR-024）：别人的每条消息都记，与会话状态无关（份额窗口跨会话）。
+    // 她自己的发言由两条发言路径各自按应答/主动记，不经这里
+    if (!record.isSelf)
+        presenceLocked(record.groupId).noteOthersMessage(now, record.userId);
+
     auto it = sessions.find(record.groupId);
     if (it == sessions.end() || it->second.state != EngagementState::Active)
     {
         // 无存活会话：提名字无 @ 直接开会话进入场轮——是不是在叫她由她本人
-        // 读现场判断（入场轮可 leave_topic 沉默）。激活预算只是资源护栏
+        // 读现场判断（入场轮可 leave_topic 沉默）。激活预算只是资源护栏；
+        // 退场期内（她被请走了）不因点名重新开始跟进
         if (!atMentioned && record.mentionsBot && !record.isSelf && submitTurn &&
+            !presenceLocked(record.groupId).withdrawn(now) &&
             allowNameActivationLocked(record.groupId, now))
         {
             createSessionLocked(record.groupId, record.text, now, "提名字");
@@ -297,12 +305,21 @@ void EngagementService::onAtActivated(std::uint64_t groupId, const std::string &
         it->second.lastActivityTs = now; // 会话已在跟：@ 只是活动
         return;
     }
+    // 退场期内（被请走了）：@ 由 Message 路径照常回答，但不开始跟进
+    if (presenceLocked(groupId).withdrawn(now))
+    {
+        LOG_INFO("退场期内被 @：照常回答，不开始跟进（群 " + std::to_string(groupId) + "）");
+        return;
+    }
     createSessionLocked(groupId, triggerText, now, "@");
 }
 
-void EngagementService::onSelfActivity(std::uint64_t groupId, std::int64_t now)
+void EngagementService::onAtAnswered(std::uint64_t groupId)
 {
+    const std::int64_t now = clock();
     std::lock_guard<std::mutex> lock(mutex);
+    // 被 @ 的回答是应答义务：记账，不占份额
+    presenceLocked(groupId).noteSpeech(now, affect::SpeechKind::Answer);
     auto it = sessions.find(groupId);
     if (it == sessions.end() || it->second.state != EngagementState::Active)
         return;
@@ -315,6 +332,28 @@ void EngagementService::onSelfActivity(std::uint64_t groupId, std::int64_t now)
     session.lastSpeakTs = now;
     session.followUpTurnsUsed = 0;
     session.lastMessageAtSelf = false;
+}
+
+void EngagementService::leaveTopic(std::uint64_t groupId, bool stepBack, const std::string &reason)
+{
+    const std::int64_t now = clock();
+    std::lock_guard<std::mutex> lock(mutex);
+    leaveLocked(groupId, now, stepBack, reason);
+}
+
+void EngagementService::leaveLocked(std::uint64_t groupId, std::int64_t now, bool stepBack,
+                                    const std::string &reason)
+{
+    if (stepBack)
+    {
+        presenceLocked(groupId).withdraw(now);
+        LOG_INFO("被请退开：群 " + std::to_string(groupId) + " 进入退场期，期间不主动接话");
+    }
+    auto it = sessions.find(groupId);
+    if (it == sessions.end() || it->second.state != EngagementState::Active)
+        return;
+    const std::string why = !reason.empty() ? reason : (stepBack ? "被请退开" : "离场");
+    endSessionLocked(it->second, now, why, false);
 }
 
 void EngagementService::pump(std::int64_t now)
@@ -354,11 +393,16 @@ void EngagementService::pump(std::int64_t now)
                 continue;
             }
 
+            // 没人叫她的轮次（追问窗口、lull）只在发言份额还有时才看（ADR-024）：
+            // 份额只随别人说话恢复，她自己开口不会让它变多。下面两条触发规则管的是
+            // “什么时候看一眼”（模型调用开销），份额管的是“能不能主动开口”
+            const bool mayVolunteer = presenceLocked(session.groupId).mayVolunteer(now);
+
             // 追问窗口：她开口后 120s 内，群友接了话（哪怕 1 条、不引用不点名）且归于
             // 安静，就给她一轮——她问"lulu是谁？"，别人答了，她得能看到。只是资源预算：
             // 每次开口至多 2 轮、不计 lull 每小时帽、不受跨轮节流；接不接由她在轮内决定。
             // 已有待执行的点名/入场轮时不重复提交；本拍追问轮已提交则跳过 lull
-            if (session.lastSpeakTs > 0 &&
+            if (mayVolunteer && session.lastSpeakTs > 0 &&
                 now - session.lastSpeakTs <= kFollowUpWindowSeconds &&
                 session.newMessagesSinceTurn >= 1 &&
                 now - session.lastActivityTs >= kLullSeconds &&
@@ -381,7 +425,7 @@ void EngagementService::pump(std::int64_t now)
             while (!session.recentTurnTs.empty() &&
                    now - session.recentTurnTs.front() >= kLullFuseWindow)
                 session.recentTurnTs.pop_front();
-            if (session.newMessagesSinceTurn >= kNewMessagesForTurn &&
+            if (mayVolunteer && session.newMessagesSinceTurn >= kNewMessagesForTurn &&
                 now - session.lastActivityTs >= kLullSeconds &&
                 now - session.lastTurnTs >= kTurnCooldown &&
                 session.recentTurnTs.size() < kLullHourlyCap)
@@ -398,6 +442,9 @@ void EngagementService::pump(std::int64_t now)
         {
             auto it = sessions.find(groupId);
             if (it != sessions.end() && it->second.state == EngagementState::Active)
+                continue;
+            // 冷启动是没人叫她的主动加入：退场期内或份额用完时不评估（也不耗当日评估次数）
+            if (!presenceLocked(groupId).mayVolunteer(now))
                 continue;
             if (coldCheckLocked(groupId, cold, now))
                 coldTriggers.push_back(groupId);
@@ -1019,6 +1066,11 @@ void EngagementService::runTurn(std::uint64_t groupId)
         session.followUpPending = false;
         session.lastTurnTs = now;
         session.newMessagesSinceTurn = 0;
+        // 这一轮她若开口，在账本里算应答还是主动（ADR-024）：被点名/引用回复、提名字入场
+        // 是有人叫她；追问窗口、lull、冷启动都是她主动开口，占发言份额
+        const affect::SpeechKind speechKind =
+            (kind == TurnKind::Address || kind == TurnKind::Entry) ? affect::SpeechKind::Answer
+                                                                  : affect::SpeechKind::Unprompted;
 
         switch (turn.kind)
         {
@@ -1035,7 +1087,11 @@ void EngagementService::runTurn(std::uint64_t groupId)
             deliverPending = true;
             session.turnCount += 1;
             session.consecutivePasses = 0;
-            // 追问窗口：从这一句起算，追问轮预算归零
+            session.lastActivityTs = now;
+            session.lastMessageAtSelf = false;
+            presenceLocked(groupId).noteSpeech(now, speechKind);
+            // 追问窗口：从这一句起算，追问轮预算归零（只管“什么时候看一眼”；
+            // 她能不能再主动开口由账本的份额决定，不因这里归零而变多）
             session.lastSpeakTs = now;
             session.followUpTurnsUsed = 0;
             if (++session.turnsSinceMood >= kMoodUpdateEveryTurns)
@@ -1049,14 +1105,17 @@ void EngagementService::runTurn(std::uint64_t groupId)
             break;
         }
         case EngagementTurn::Kind::Leave:
-            LOG_INFO("会话离场：群 " + std::to_string(groupId) + "（" + turn.reason + "）");
+            LOG_INFO("会话离场：群 " + std::to_string(groupId) + "（" + turn.reason +
+                     (turn.stepBack ? "，暂时退开" : "") + "）");
             if (!utils::trim(turn.text).empty())
             {
                 deliverPending = true;
                 session.lastSpeakTs = now; // 会话随即结束，仅保持"她最近开口"语义一致
                 session.followUpTurnsUsed = 0;
+                presenceLocked(groupId).noteSpeech(now, speechKind);
             }
-            endSessionLocked(session, now, turn.reason.empty() ? "模型离场" : turn.reason, false);
+            // 与 @ 回复路径的 leave_topic 工具同一实现（ADR-024）
+            leaveLocked(groupId, now, turn.stepBack, turn.reason.empty() ? "模型离场" : turn.reason);
             break;
         case EngagementTurn::Kind::Pass:
         default:
@@ -1158,6 +1217,16 @@ std::optional<EngagementSession> EngagementService::sessionOf(std::uint64_t grou
     if (it == sessions.end())
         return std::nullopt;
     return it->second;
+}
+
+affect::PresenceView EngagementService::presenceOf(std::uint64_t groupId) const
+{
+    const std::int64_t now = clock();
+    std::lock_guard<std::mutex> lock(mutex);
+    auto it = presences.find(groupId);
+    if (it == presences.end())
+        return affect::GroupPresence{}.view(now);
+    return it->second.view(now);
 }
 
 void EngagementService::createSessionLocked(std::uint64_t groupId, const std::string &topicLine,

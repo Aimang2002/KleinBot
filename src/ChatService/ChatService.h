@@ -73,7 +73,8 @@ public:
                                     const std::vector<ChatMessage> &history,
                                     const std::vector<std::string> &toolSchemas);
     // reply() 提供给模型的工具名（决策层情境卡的 available_tools）
-    std::vector<std::string> toolNames() const { return tools.names(); }
+    // 这次对话场合下开放的工具名（与 reply() 实际给模型的工具表同一口径）
+    std::vector<std::string> toolNamesIn(ToolVenue venue) const { return tools.namesIn(venue); }
     // 私聊滚动摘要的杂务模型 seam（组合根用 makeWorkerSeam 适配，20 秒超时）。
     // 未注入时锚点前移照常发生，被移出的原文直接丢弃（2026-11-08 之前的行为）
     void setContextDigestWorker(DigestWorker worker) { this->digestWorker = std::move(worker); }

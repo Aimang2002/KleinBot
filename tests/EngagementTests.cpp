@@ -14,6 +14,8 @@
 #include "Port/OutboundDelivery.h"
 #include "Action/WebToolGuidance.h"
 #include "Tool/ImageToolGuidance.h"
+#include "Tool/LeaveTopicTool.h"
+#include "Tool/ToolContext.h"
 #include "Tool/Tool.h"
 #include "Tool/ToolRegistry.h"
 #include "utils/Live.h"
@@ -159,8 +161,8 @@ struct Harness
               identity, store.get(), affect, sender.get(), [this] { return now; }))
     {
         service->setSubmitTurn([this](std::uint64_t group) { submittedTurns.push_back(group); });
-        // 与组合根一致：她的出站经 recorder 入群缓冲并算会话活动（GroupContextService::
-        // recordOutbound 的最小等价物；集成测试走真实实现）
+        // 与组合根一致：她的出站经 recorder 入群缓冲（GroupContextService::recordOutbound
+        // 的最小等价物，只管入库；她这句算应答还是主动由会话轮自己记，ADR-024）
         service->setOutboundRecorder(
             [this, bot](std::uint64_t group, const OutboundMessage &message,
                         const std::string &correlationId)
@@ -175,7 +177,6 @@ struct Harness
                 self.isSelf = true;
                 self.correlationId = correlationId;
                 store->append(self);
-                service->onSelfActivity(group, now);
             });
         service->setMainAgent(
             [this](const std::string &contract, const std::vector<ChatMessage> &history,
@@ -203,6 +204,15 @@ struct Harness
               bool mentionsBot = false, bool atMentioned = false)
     {
         GroupMessageRecord value = record(group, 42, "小白", text, ts, mentionsBot);
+        store->append(value);
+        service->onGroupMessage(value, atMentioned);
+    }
+
+    // 指定发言人（在场账本按人数算份额）
+    void feedFrom(std::uint64_t group, std::uint64_t qq, const std::string &text, std::int64_t ts,
+                  bool mentionsBot = false, bool atMentioned = false)
+    {
+        GroupMessageRecord value = record(group, qq, "群友" + std::to_string(qq), text, ts, mentionsBot);
         store->append(value);
         service->onGroupMessage(value, atMentioned);
     }
@@ -485,7 +495,7 @@ TEST(EngagementSessionTest, FollowUpWindowSkipsAtMessagesAndOpensAfterAtReply)
 {
     Harness harness;
     harness.service->onAtActivated(8823, "在吗");
-    harness.service->onSelfActivity(8823, harness.now); // 她经 @ 路径回了一句（问了个问题）
+    harness.service->onAtAnswered(8823); // 她经 @ 路径回了一句（问了个问题）
     harness.submittedTurns.clear();
 
     // 对方不引用不点名地回答 → 追问窗口给她一轮
@@ -748,7 +758,7 @@ TEST(EngagementSessionTest, ActiveSessionMergesMentionsInsteadOfReactivation)
     EXPECT_EQ(session->startTs, startBefore);
 }
 
-TEST(EngagementSessionTest, SelfActivityResetsPassCounterAndBeat)
+TEST(EngagementSessionTest, AtAnswerResetsPassCounterAndBeat)
 {
     Harness harness;
     harness.service->onAtActivated(8823, "话题");
@@ -757,9 +767,197 @@ TEST(EngagementSessionTest, SelfActivityResetsPassCounterAndBeat)
     harness.service->runTurn(8823);
     EXPECT_EQ(harness.service->sessionOf(8823)->consecutivePasses, 1);
 
-    // 她经正常路径发言（@ 回复）：重置节拍
-    harness.service->onSelfActivity(8823, harness.now + 30);
+    // 她经 @ 路径回答：重置节拍，账本记一句应答（不占份额）
+    harness.now += 30;
+    harness.service->onAtAnswered(8823);
     EXPECT_EQ(harness.service->sessionOf(8823)->consecutivePasses, 0);
+    const affect::PresenceView presence = harness.service->presenceOf(8823);
+    EXPECT_EQ(presence.answers, 1);
+    EXPECT_EQ(presence.unprompted, 0);
+}
+
+// ===== 在场账本（ADR-024）：发言份额、两条路径共用的离场 =====
+
+// 没人叫她的轮次只在份额还有时才看：她自己开口不会让份额变多，别人继续说话才恢复
+TEST(EngagementPresenceTest, UnpromptedLooksWaitForTheShareToRecover)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    // 三个人各说一句：平均每人 1 条，她至多主动说 1 条
+    harness.feedFrom(8823, 1, "甲", harness.now);
+    harness.feedFrom(8823, 2, "乙", harness.now + 1);
+    harness.feedFrom(8823, 3, "丙", harness.now + 2);
+    harness.now += 3;
+    harness.turnResponses.push_back(sayResponse("我也说一句"));
+    harness.service->runTurn(8823);
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(harness.service->presenceOf(8823).unprompted, 1);
+    harness.submittedTurns.clear();
+
+    // 追问窗口里又有人说话：份额已用完，不看（此前她一开口追问预算就归零，会接着看、接着说）
+    harness.now += 2;
+    harness.feedFrom(8823, 1, "甲又说", harness.now);
+    harness.now += 5;
+    harness.service->pump(harness.now);
+    EXPECT_TRUE(harness.submittedTurns.empty()) << "份额用完，没人叫她就不看";
+    EXPECT_FALSE(harness.service->presenceOf(8823).mayVolunteer);
+
+    // 别人继续说到平均每人 2 条（共 6 条）：份额恢复，追问窗口照常给她一轮
+    harness.feedFrom(8823, 2, "乙又说", harness.now);
+    harness.feedFrom(8823, 3, "丙又说", harness.now + 1);
+    harness.now += 6;
+    harness.service->pump(harness.now);
+    ASSERT_EQ(harness.submittedTurns.size(), 1U);
+}
+
+// 2026-11-16 10:50：群友 @ 她“你退下吧”，她在 @ 回复里答应了，但这句回复重开了追问窗口、
+// 预算归零，她 10 秒后又接着说。现在 @ 回复只记一句应答，不让主动开口的份额变多
+TEST(EngagementPresenceTest, AnsweringAnAtNoLongerFeedsHerUnpromptedSpeech)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feedFrom(8823, 1, "甲", harness.now);
+    harness.feedFrom(8823, 2, "乙", harness.now + 1);
+    harness.feedFrom(8823, 3, "丙", harness.now + 2);
+    harness.now += 3;
+    harness.turnResponses.push_back(sayResponse("一句"));
+    harness.service->runTurn(8823);
+    harness.submittedTurns.clear();
+
+    harness.now += 3;
+    harness.feedFrom(8823, 1, "@Klein 你退下吧", harness.now, true, true);
+    harness.service->onAtAnswered(8823); // 她经 @ 路径回了一句
+    harness.now += 3;
+    harness.feedFrom(8823, 2, "哈哈", harness.now);
+    harness.now += 5;
+    harness.service->pump(harness.now);
+    EXPECT_TRUE(harness.submittedTurns.empty()) << "@ 回复打开了追问窗口，但份额没有变多";
+    const affect::PresenceView presence = harness.service->presenceOf(8823);
+    EXPECT_EQ(presence.answers, 1);
+    EXPECT_EQ(presence.unprompted, 1);
+}
+
+// 被请走（@ 回复路径的 leave_topic，step_back=true）：结束跟进；退场期内被 @ 只回答、
+// 提名字不开会话；期满恢复
+TEST(EngagementPresenceTest, StepBackEndsFollowingAndBlocksReengagementUntilItExpires)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feedFrom(8823, 1, "@Klein 你退下吧", harness.now, true, true);
+    harness.service->leaveTopic(8823, true, "被请安静");
+    auto ended = harness.service->sessionOf(8823);
+    ASSERT_TRUE(ended.has_value());
+    EXPECT_EQ(ended->state, EngagementState::Ended);
+    EXPECT_EQ(ended->endReason, "被请安静");
+    EXPECT_TRUE(harness.service->presenceOf(8823).withdrawn);
+    harness.submittedTurns.clear();
+
+    harness.now += 60;
+    harness.service->onAtActivated(8823, "@Klein 每个月花多少钱");
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended)
+        << "退场期内被 @：照常回答（Message 路径），不开始跟进";
+    harness.now += 120;
+    harness.feedFrom(8823, 2, "Klein 怎么不说话了", harness.now, true);
+    EXPECT_TRUE(harness.submittedTurns.empty()) << "退场期内提名字不开会话";
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
+
+    harness.now += 30 * 60;
+    EXPECT_FALSE(harness.service->presenceOf(8823).withdrawn);
+    harness.service->onAtActivated(8823, "@Klein 回来吧");
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Active);
+}
+
+// 会话轮的离场动词与 @ 回复路径的工具同义：带 step_back 一样进入退场；不带只结束这次跟进
+TEST(EngagementPresenceTest, LeaveVerbStepBackMatchesTheTool)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    harness.feedFrom(8823, 1, "Klein 你先别说了", harness.now, true); // 点名：被叫到的轮次
+    ChatResponse stepBack;
+    stepBack.code = 200;
+    stepBack.finish_reason = "tool_calls";
+    stepBack.tool_calls.push_back(
+        {"call-1", "leave_topic", R"({"reason":"被请安静","final_text":"好","step_back":true})"});
+    harness.turnResponses.push_back(stepBack);
+    harness.service->runTurn(8823);
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    EXPECT_EQ(harness.sender->texts.front(), "好");
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
+    affect::PresenceView presence = harness.service->presenceOf(8823);
+    EXPECT_TRUE(presence.withdrawn);
+    EXPECT_EQ(presence.answers, 1) << "被点名时说的最后一句是应答";
+    EXPECT_EQ(presence.unprompted, 0);
+
+    // 不带 step_back：只结束这次跟进，不进入退场（入场轮“不是在叫我”就是这样离场的）
+    harness.service->onAtActivated(8824, "话题");
+    harness.feedFrom(8824, 1, "现场消息", harness.now);
+    harness.turnResponses.push_back(leaveResponse("聊完了"));
+    harness.service->runTurn(8824);
+    EXPECT_EQ(harness.service->sessionOf(8824)->state, EngagementState::Ended);
+    EXPECT_FALSE(harness.service->presenceOf(8824).withdrawn);
+}
+
+// @ 回复路径的 leave_topic 工具：只在群聊开放、未接线不可用，落到同一个 leaveTopic
+TEST(EngagementPresenceTest, AtPathLeaveToolIsGroupOnlyAndReachesTheSameLeave)
+{
+    Harness harness;
+    auto owner = std::make_unique<LeaveTopicTool>();
+    LeaveTopicTool &tool = *owner;
+    ToolRegistry registry;
+    registry.registerTool(std::move(owner));
+    EXPECT_FALSE(tool.available()) << "未接线不可用";
+    EXPECT_TRUE(registry.namesIn(ToolVenue::Group).empty());
+
+    tool.bind([&harness](std::uint64_t groupId, bool stepBack, const std::string &reason)
+              { harness.service->leaveTopic(groupId, stepBack, reason); });
+    EXPECT_EQ(registry.namesIn(ToolVenue::Group), (std::vector<std::string>{"leave_topic"}));
+    EXPECT_TRUE(registry.namesIn(ToolVenue::Private).empty()) << "私聊工具表里没有它";
+    EXPECT_FALSE(LeaveTopicTool::guidanceText(GuidanceScene::Conversation).empty());
+    EXPECT_TRUE(LeaveTopicTool::guidanceText(GuidanceScene::GroupTurn).empty());
+
+    // 私聊里被调（模型臆造）：不动任何群
+    harness.service->onAtActivated(8823, "话题");
+    const ToolResult privateCall =
+        tool.execute(R"({"reason":"x","step_back":true})", ToolContext{7, 0, std::string(), 0});
+    EXPECT_NE(privateCall.model_content.find("私聊"), std::string::npos);
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Active);
+
+    // 群里被请走
+    const ToolResult groupCall = tool.execute(R"({"reason":"被请安静","step_back":true})",
+                                              ToolContext{7, 0, std::string(), 8823});
+    EXPECT_FALSE(groupCall.terminal) << "非终止：结果回灌后她照常写回复";
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
+    EXPECT_EQ(harness.service->sessionOf(8823)->endReason, "被请安静");
+    EXPECT_TRUE(harness.service->presenceOf(8823).withdrawn);
+}
+
+// 2026-11-16 10:47–10:53 的节奏回放（不含原文）：4 个群友约 6 分钟 25 条，她每次被给机会都开口。
+// 当时她说了 20 多条；现在至多说到其他人平均每人的条数
+TEST(EngagementPresenceTest, IncidentReplayNoLongerFloodsTheGroup)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "说一段语音");
+    harness.service->onAtAnswered(8823);
+    const std::vector<std::uint64_t> speakers = {1, 1, 4, 1, 4, 1, 4, 1, 2, 1, 1, 4, 1,
+                                                 4, 1, 4, 3, 1, 4, 1, 1, 1, 4, 2, 1};
+    for (std::size_t index = 0; index < speakers.size(); ++index)
+    {
+        harness.now += 9;
+        harness.feedFrom(8823, speakers[index], "群聊" + std::to_string(index), harness.now);
+        harness.now += 5;
+        const std::size_t before = harness.submittedTurns.size();
+        harness.service->pump(harness.now);
+        for (std::size_t turn = before; turn < harness.submittedTurns.size(); ++turn)
+        {
+            harness.turnResponses.push_back(sayResponse("我再补一句"));
+            harness.service->runTurn(8823);
+        }
+    }
+    const std::size_t said = harness.sender->texts.size();
+    RecordProperty("said", static_cast<int>(said));
+    EXPECT_LE(said, 7U) << "25 条 / 4 人：至多约 6 条";
+    EXPECT_GE(said, 3U) << "她仍能参与，只是不再刷屏";
+    EXPECT_EQ(harness.service->presenceOf(8823).unprompted, static_cast<int>(said));
 }
 
 TEST(EngagementContextTest, EstimateTokensHeuristic)

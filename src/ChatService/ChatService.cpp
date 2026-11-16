@@ -72,7 +72,8 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
     // 计划收窄（R1.c）：工具表、使用规则与下方工具循环的开放名单用同一份过滤结果
     //（规则不提没开放的工具，免得诱导调用后被拒、白耗一趟工具轮）
     // 可用工具（Tool::available，如联网工具的启用开关）在这里取一次，工具表与使用规则用同一份
-    std::vector<std::string> offeredToolNames = this->tools.names();
+    // 工具适用场合（Tool::offeredIn）：群里被 @ 时才有 leave_topic 这类只在群里有意义的工具
+    std::vector<std::string> offeredToolNames = this->tools.namesIn(venueOf(sharedScopeId));
     if (constraints != nullptr)
         offeredToolNames = filterToolNames(offeredToolNames, constraints->toolPolicy,
                                            constraints->allowedTools);

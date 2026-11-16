@@ -147,9 +147,17 @@ void GroupContextService::recordOutbound(std::uint64_t groupId, const OutboundMe
     record.timestamp = std::time(nullptr);
     record.isSelf = true;
     store->append(record);
-    // 她发言：会话活动（节拍重置、轮次节流刷新）
-    if (engagement != nullptr)
-        engagement->onSelfActivity(groupId, record.timestamp);
+    // 只管入库。她这句话算应答还是主动、对跟进有什么影响，由说这句话的路径
+    // 明确上报（@ 回复经 onAtAnswered，会话轮在定案处自己记；ADR-024）——
+    // 入库这一层分不出两条路径，此前在这里统一当“她发言了”处理，@ 回复会把会话轮
+    // 的追问预算一并重置
+}
+
+void GroupContextService::onAtAnswered(std::uint64_t groupId)
+{
+    if (!observingGroup(groupId) || engagement == nullptr)
+        return;
+    engagement->onAtAnswered(groupId);
 }
 
 void GroupContextService::onAtActivated(std::uint64_t groupId, const std::string &triggerText)

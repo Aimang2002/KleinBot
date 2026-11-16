@@ -1,4 +1,5 @@
 #include "EngagementTurn.h"
+#include "../Port/ToolNames.h"
 #include "../Tool/ToolArgumentParser.h"
 #include "../utils/TextTokenize.h"
 #include "../utils/Utils.hpp"
@@ -18,7 +19,7 @@ EngagementTurn parseEngagementTurn(const ChatResponse &response)
     EngagementTurn turn;
     for (const auto &call : response.tool_calls)
     {
-        if (call.name != "group_say" && call.name != "leave_topic")
+        if (call.name != "group_say" && call.name != KleinLeaveTopicToolName)
             continue;
         const nlohmann::json arguments = parseToolArguments(call.arguments);
         if (call.name == "group_say")
@@ -31,6 +32,9 @@ EngagementTurn parseEngagementTurn(const ChatResponse &response)
         turn.kind = EngagementTurn::Kind::Leave;
         turn.reason = jsonArg(arguments, "reason");
         turn.text = jsonArg(arguments, "final_text");
+        turn.stepBack = arguments.is_object() && arguments.contains(KleinLeaveTopicStepBackParam) &&
+                        arguments[KleinLeaveTopicStepBackParam].is_boolean() &&
+                        arguments[KleinLeaveTopicStepBackParam].get<bool>();
         return turn;
     }
     if (!response.tool_calls.empty())

@@ -46,6 +46,11 @@ public:
     // 对它的调用按“未开放”拒绝。按配置开关的工具读自己的活值；默认可用
     virtual bool available() const { return true; }
 
+    // 适用场合（与 available() 正交：available 看配置开关，场合看这次对话发生在哪）。
+    // ToolRegistry::namesIn 按它筛选；默认私聊与群聊都开放，只在群里有意义的工具
+    //（如 leave_topic）覆写
+    virtual bool offeredIn(ToolVenue) const { return true; }
+
     // 工具自带的使用规则（何时该用我、用完怎么做），由 Application/ToolGuidance 的
     // composeToolGuidance 按场景、按固定顺序拼进 system prompt；没有规则返回空串。
     // 文本必须稳定（只随 context 里的日期等运行时锚点变化）：它位于前缀缓存最前端

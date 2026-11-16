@@ -23,6 +23,7 @@ add_executable(kleinbot_tests
     GroupAssetTests.cpp
     OpenAIImageParseTests.cpp
     GroupContextTests.cpp
+    GroupPresenceTests.cpp
     GroupListTests.cpp
     ImagePlaceholderTests.cpp
     InboundCoalescerTests.cpp

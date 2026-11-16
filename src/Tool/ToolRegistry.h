@@ -63,6 +63,18 @@ public:
         return result;
     }
 
+    // 当前可用、且适用于该场合（Tool::offeredIn）的工具名，按注册顺序。
+    // 对话路径（ChatService::reply）按这次对话的场合取工具表
+    std::vector<std::string> namesIn(ToolVenue venue) const
+    {
+        std::vector<std::string> result;
+        result.reserve(tools.size());
+        for (const auto &tool : tools)
+            if (tool->available() && tool->offeredIn(venue))
+                result.push_back(tool->name());
+        return result;
+    }
+
     // 全部已注册的工具名（含当前不可用的），按注册顺序；只供启动日志
     std::vector<std::string> registeredNames() const
     {

@@ -449,7 +449,8 @@ TEST(InboundCoalescerMessageTest, SingleMessageBurstMatchesLegacyRequest)
 }
 
 // 配置实时生效（L1.c）：Message 每次投递回复时现取语音总开关。用户开着语音模式，
-// 开关关着时回文本；打开开关后下一条就走语音路径（这里的 TTS 地址连不上，落到“语音模块异常”的提示）
+// 开关关着时回文本；打开开关后下一条就走语音路径（这里的 TTS 地址连不上，合成失败按
+// Application/SpokenForm 退回文字发原话——ADR-024 之前这里发的是“系统提示：语音模块异常。”）
 TEST(MessageLiveConfigTest, GlobalVoiceSwitchIsReadAtEachReply)
 {
     PrivateMessageFixture fixture;
@@ -466,8 +467,8 @@ TEST(MessageLiveConfigTest, GlobalVoiceSwitchIsReadAtEachReply)
 
     fixture.globalVoice.set(true);
     fixture.message.handleMessage(privateText(7, "还在吗"));
-    EXPECT_EQ(fixture.sender.texts, (std::vector<std::string>{"回复1", "系统提示：语音模块异常。"}))
-        << "开关打开后下一条走语音路径";
+    EXPECT_EQ(fixture.sender.texts, (std::vector<std::string>{"回复1", "回复2"}))
+        << "开关打开后下一条走语音路径；合成失败发原话，不发系统提示";
 }
 
 // 配置实时生效（L1.f）：群聊开关在每次过滤时取。先放行一条 @ 她的群消息，

@@ -59,6 +59,7 @@
 #include "ChatService/ChatService.h"
 #include "Tool/ToolRegistry.h"
 #include "Tool/GetTimeTool.h"
+#include "Tool/LeaveTopicTool.h"
 #include "Tool/ActionTool.h"
 #include "Action/GetCurrentModelAction.h"
 #include "Action/VoiceModeAction.h"
@@ -496,6 +497,11 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<SendImageTool>(imageAssetStore, &groupImageAssets));
 	tools.registerTool(std::make_unique<ActionTool>(voiceModeAction));
 	tools.registerTool(std::make_unique<ActionTool>(adminControlAction));
+	// 离场（ADR-024）：群里被 @ 时她也能结束跟进、被请走时暂时退开。注册表持有，
+	// 跟进服务构造后在下方 bind；未接线时不可用（工具表不出现），只在群聊开放
+	auto leaveTopicToolOwner = std::make_unique<LeaveTopicTool>();
+	LeaveTopicTool &leaveTopicTool = *leaveTopicToolOwner;
+	tools.registerTool(std::move(leaveTopicToolOwner));
 	SetReminderAction setReminderAction(reminderService);
 	ListRemindersAction listRemindersAction(reminderService);
 	CancelReminderAction cancelReminderAction(reminderService);
@@ -674,6 +680,10 @@ int main(int argc, char **argv)
 	engagementService.setDecisionRecorder(&decisionRecorder);
 	engagementService.setPolicy(&decisionPolicy);
 	groupContextService.setEngagement(&engagementService);
+	// @ 回复路径的 leave_topic 与会话轮的离场动词落到同一处（ADR-024）
+	leaveTopicTool.bind([&engagementService](std::uint64_t groupId, bool stepBack,
+											 const std::string &reason)
+						{ engagementService.leaveTopic(groupId, stepBack, reason); });
 	if (settings.bot.managerId != 0)
 	{
 		engagementService.setMainAgent(

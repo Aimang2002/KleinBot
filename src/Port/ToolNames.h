@@ -21,6 +21,11 @@ inline constexpr const char *KleinGetCurrentModelToolName = "get_current_model";
 inline constexpr const char *KleinSetVoiceModeToolName = "set_voice_mode";
 inline constexpr const char *KleinAdminControlToolName = "admin_control";
 
+// 离场（ADR-024）：两条群发言路径共用的同一个动作——话题会话轮的定案动词与被 @ 回复时的
+// 群聊工具同名同义。参数 step_back=true 表示被请走、暂时退开（之后一段时间不主动接话）
+inline constexpr const char *KleinLeaveTopicToolName = "leave_topic";
+inline constexpr const char *KleinLeaveTopicStepBackParam = "step_back";
+
 // 联网（klein_ 前缀：避免第三方网关抢占保留名 web_search / web_fetch）
 inline constexpr const char *KleinWebSearchToolName = "klein_web_search";
 inline constexpr const char *KleinWebFetchToolName = "klein_web_fetch";

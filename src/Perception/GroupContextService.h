@@ -79,6 +79,8 @@ public:
     // @ 硬激活转发（Message 处理群 @ 时调用）：回答走既有回复路径，
     // 会话的开启/合并由 EngagementService 决定
     void onAtActivated(std::uint64_t groupId, const std::string &triggerText);
+    // @ 回答已发出（Message 在这一轮确有出站时调用一次）：转给 EngagementService 记应答
+    void onAtAnswered(std::uint64_t groupId);
 
     // [不回应] 标记检测（群聊收敛契约的抑制判据，Message 层调用）
     static bool isSuppressed(const std::string &replyText);

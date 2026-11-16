@@ -24,6 +24,17 @@
  * 轮次触发：点名/引用回复她（立即）、追问窗口（她开口后 120s 内群友接话 + 静默，
  * 每次开口至多 2 轮）、lull（攒 5 条 + 静默 + 节流 + 每小时帽）——都只是资源预算，
  * 每轮说不说由她决定。
+ *
+ * 在场账本（ADR-024，2026-11-16）：每群一份 affect::GroupPresence，是两条发言路径
+ * （Message 的 @ 回复、这里的会话轮）共用的唯一事实来源。触发规则管“什么时候看一眼”
+ *（模型调用开销），账本管“能不能主动开口”（发言份额）：
+ *   - 没人叫她的轮次（追问窗口、lull、冷启动）只在账本允许主动开口时才提交；
+ *     被叫到的轮次（点名、引用回复、提名字入场）与 @ 回复是应答义务，不受份额限制；
+ *   - 她说出口的每一句都按“应答 / 主动”记进账本：会话轮在定案处记，@ 回复经
+ *     onAtAnswered 记——她自己说话永远不会让份额变多；
+ *   - 离场是两条路径共用的同一个动作（会话轮的 leave_topic 动词、@ 回复路径的
+ *     leave_topic 工具，都落到 leaveTopic）。带 step_back 即暂时退开：结束跟进，
+ *     退场期内不主动开口、点名与冷启动不再开会话；被 @ 仍由 @ 路径照常回答。
  * 硬后盖不依赖模型自觉：轮次上限、
  * 会话时长、群内不活跃时长任一触顶强制结束。
  *
@@ -31,11 +42,12 @@
  * 清旧建新（旧上下文让位），2h 无续接由 pump 清扫。进程重启即失
  * （短时状态，群内容库才是持久层）。
  *
- * 线程模型：onGroupMessage/onAtActivated/onSelfActivity 在 worker 线程，
+ * 线程模型：onGroupMessage/onAtActivated/onAtAnswered/leaveTopic 在 worker 线程，
  * pump 在 pollingThread，runTurn 经 submit seam 在群 lane worker
  * 执行——内部 mutex 统一保护，模型调用一律在锁外。
  */
 #include "../Affect/AffectOptions.h"
+#include "../Affect/GroupPresence.h"
 #include "../Application/BotIdentity.h"
 #include "../utils/Live.h"
 #include "GroupContextStore.h"
@@ -74,7 +86,7 @@ struct EngagementSession
     std::int64_t startTs = 0;
     std::int64_t lastActivityTs = 0; // 群内最近新消息（不活跃收场的基准）
     std::int64_t lastTurnTs = 0;     // 她最近一轮（节流基准）
-    std::int64_t lastSpeakTs = 0;    // 她最近一次在会话轮开口（group_say / 离场最后一句；追问窗口基准）
+    std::int64_t lastSpeakTs = 0;    // 她最近一次开口（会话轮或 @ 回复；追问窗口基准）
     int followUpTurnsUsed = 0;       // 本次开口后已用的追问轮数（她再开口归零）
     bool lastMessageAtSelf = false;  // 最新一条群消息 @ 了她：归 @ 路径回答，追问窗口不接（防双回）
     std::int64_t endTs = 0;          // Ended 生效时刻（保留期起算）
@@ -167,8 +179,12 @@ public:
     // 回复路径，不入场轮。会话已存活时仅记活动
     void onAtActivated(std::uint64_t groupId, const std::string &triggerText);
 
-    // 她经正常路径发言（@ 回复等）：算一轮会话活动
-    void onSelfActivity(std::uint64_t groupId, std::int64_t now);
+    // 她经 @ 路径回答了（Message 在确有出站时调用一次，分条发送也只调一次）：
+    // 在场账本记一句应答（不占份额）；会话存活时算会话活动并打开追问窗口
+    void onAtAnswered(std::uint64_t groupId);
+    // 离场（ADR-024，两条路径共用）：结束该群存活的会话；stepBack=true 时同时进入退场期。
+    // @ 回复路径的 leave_topic 工具经组合根接到这里；会话轮的 leave_topic 动词在 runTurn 里走同一逻辑
+    void leaveTopic(std::uint64_t groupId, bool stepBack, const std::string &reason);
 
     // pollingThread 每 3s：硬后盖（消息量/不活跃）+ 保留期清扫 + 追问窗口/lull 轮次触发
     void pump(std::int64_t now);
@@ -183,6 +199,7 @@ public:
 
     // 调试/测试观测
     std::optional<EngagementSession> sessionOf(std::uint64_t groupId) const;
+    affect::PresenceView presenceOf(std::uint64_t groupId) const;
 
 private:
     struct PreparedContext
@@ -198,6 +215,10 @@ private:
                              std::int64_t now, const char *source);
     void endSessionLocked(EngagementSession &session, std::int64_t now,
                           std::string reason, bool forced);
+    // 离场的唯一实现（锁内）：记离场、按 stepBack 进入退场期、结束存活的会话
+    void leaveLocked(std::uint64_t groupId, std::int64_t now, bool stepBack,
+                     const std::string &reason);
+    affect::GroupPresence &presenceLocked(std::uint64_t groupId) { return presences[groupId]; }
     // correlationId：回执关联键（R0.2）；投递与自消息入库共用同一个，回执到达后
     // 执行记录推进 sent/failed/unknown、自消息补上真实 message_id
     void deliverMessage(std::uint64_t groupId, const OutboundMessage &message,
@@ -246,6 +267,7 @@ private:
     std::map<std::uint64_t, ColdState> colds;
     std::map<std::uint64_t, std::int64_t> coldCooldownUntil; // 冷启动禁入截止
     std::map<std::uint64_t, std::deque<std::int64_t>> nameActivationHistory; // 激活预算记账
+    std::map<std::uint64_t, affect::GroupPresence> presences; // 在场账本（ADR-024），会话锁保护
     MainAgent mainAgent;
     Worker worker;
     Submit submitTurn;

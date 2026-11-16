@@ -72,6 +72,28 @@ TEST(EngagementTurnTest, LeaveTopicKeepsReasonAndFinalText)
     EXPECT_EQ(omitted.kind, EngagementTurn::Kind::Leave);
     EXPECT_TRUE(omitted.text.empty());
     EXPECT_EQ(omitted.unspokenChars, 0U);
+    EXPECT_FALSE(omitted.stepBack) << "不填 step_back = 只结束这次跟进";
+}
+
+// 被请走（ADR-024）：step_back=true 才是暂时退开；非布尔值不算
+TEST(EngagementTurnTest, LeaveTopicCarriesStepBack)
+{
+    const EngagementTurn stepBack = parseEngagementTurn(withToolCalls(
+        {{"c1", "leave_topic", R"({"reason":"被请安静","final_text":"好","step_back":true})"}}));
+    EXPECT_EQ(stepBack.kind, EngagementTurn::Kind::Leave);
+    EXPECT_TRUE(stepBack.stepBack);
+    EXPECT_EQ(stepBack.text, "好");
+
+    const EngagementTurn explicitFalse = parseEngagementTurn(
+        withToolCalls({{"c1", "leave_topic", R"({"reason":"聊完了","step_back":false})"}}));
+    EXPECT_FALSE(explicitFalse.stepBack);
+    const EngagementTurn notBoolean = parseEngagementTurn(
+        withToolCalls({{"c1", "leave_topic", R"({"reason":"聊完了","step_back":"yes"})"}}));
+    EXPECT_FALSE(notBoolean.stepBack);
+
+    const EngagementTurn say =
+        parseEngagementTurn(withToolCalls({{"c1", "group_say", R"({"text":"在","step_back":true})"}}));
+    EXPECT_FALSE(say.stepBack) << "只有离场带 step_back";
 }
 
 // 同一回复里夹着别的调用：跳过非定案调用，按调用顺序取第一个定案动词

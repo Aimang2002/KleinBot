@@ -8,7 +8,8 @@
  * 这是 ADR-017 的 L3 程序护栏：硬约束由代码执行，不依赖模型自觉。会话契约告诉她
  * "文字内容只有经 group_say 才会被发出"，这里让代码照这句话办：
  *   - 工具调用里有 group_say：发言，内容是参数 text（text 只有空白时由调用方按沉默处理）；
- *   - 工具调用里有 leave_topic：离场，reason 只进日志，final_text 是离场前留下的那句（可空）；
+ *   - 工具调用里有 leave_topic：离场，reason 只进日志，final_text 是离场前留下的那句（可空），
+ *     step_back=true 表示被请走、暂时退开（ADR-024，与 @ 回复路径的 leave_topic 工具同义）；
  *     两个动词出现在同一个回复里时，按调用顺序取第一个；
  *   - 有工具调用，但都不是这两个（只剩未知/未开放工具，或工具轮到顶仍在要工具）：这一拍沉默；
  *   - 没有任何工具调用：一律沉默，不论 content 是否为空。
@@ -37,6 +38,7 @@ struct EngagementTurn
     Kind kind = Kind::Pass;
     std::string text;              // Speak：group_say 的 text；Leave：final_text（可空）
     std::string reason;            // Leave：离场理由（仅日志）
+    bool stepBack = false;         // Leave：被请走、暂时退开（之后一段时间不主动接话）
     std::size_t unspokenChars = 0; // 仅在没有任何工具调用时填写：模型直接写出、未发出的文字的码点数
 };
 
