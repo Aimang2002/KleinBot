@@ -82,7 +82,10 @@ public:
     // trimWindow=false：只装配人格/超参数/当前窗口，不前移锚点、不产出 evicted_lines。
     // 供 replyInCharacter/requestInCharacter 这类自带 history 的调用——它们丢弃窗口，
     // 若在这里前移锚点，被移出的那段就永远进不了摘要
-    std::optional<ChatCallBundle> buildChatRequest(const uint64_t &user_id, bool trimWindow = true);
+    // serviceContract=false：人格之后不追加服务契约（经历层 E1：计划 v2 生效时的群聊轮；
+    // 私聊与其余调用一律保持默认 true）
+    std::optional<ChatCallBundle> buildChatRequest(const uint64_t &user_id, bool trimWindow = true,
+                                                   bool serviceContract = true);
     // 滚动摘要读写（持锁）；只在内存，重启即空
     void setContextDigest(uint64_t user_id, const std::string &digest);
     std::string getContextDigest(uint64_t user_id);

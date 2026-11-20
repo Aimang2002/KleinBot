@@ -17,6 +17,7 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include <vector>
 
 // 返回决策 id（记录器关闭时为空串，此时只投递）
 inline std::string recordShadowAroundDelivery(affect::DecisionRecorder &recorder,
@@ -25,7 +26,8 @@ inline std::string recordShadowAroundDelivery(affect::DecisionRecorder &recorder
                                               const std::string &material,
                                               const std::string &triggerMessageId,
                                               affect::ExecutionRecord execution,
-                                              const std::function<void()> &deliver)
+                                              const std::function<void()> &deliver,
+                                              const std::vector<affect::ReplyCandidate> &candidates = {})
 {
     if (!recorder.enabled())
     {
@@ -47,7 +49,7 @@ inline std::string recordShadowAroundDelivery(affect::DecisionRecorder &recorder
         failure = std::current_exception();
     }
 
-    const affect::Decision decision = policy.decide(card, material);
+    const affect::Decision decision = policy.decideFor(card, material, candidates);
     affect::DecisionRecord record = affect::makePolicyDecision(
         card.source, card.groupId, card.userId, triggerMessageId, decision, policy, card);
     record.decisionId = decisionId;

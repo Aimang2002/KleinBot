@@ -68,4 +68,32 @@ TEST(ReplyConstraintsTest, ToolNamesTrimmedByConstraints)
     const ReplyConstraints inherit = fromPlan(replyPlan("answer", "认真", 0));
     EXPECT_EQ(filterToolNames(offered, inherit.toolPolicy, inherit.allowedTools), offered);
 }
+// 计划 v2（经历层 E1）：没有分寸注记；不追加服务契约；按长度档核对（没给档时 few）；任务句由调用方填
+TEST(ReplyConstraintsTest, PlanV2MapsToMechanismConstraints)
+{
+    affect::BehaviorPlan plan;
+    plan.schemaVersion = affect::BehaviorPlan::kSchemaVersionV2;
+    plan.action = "reply";
+    plan.move = "answer";
+    plan.length = "short";
+    plan.occasion = "有人在问她";
+    plan.toolPolicy = "allow_list";
+    plan.allowedTools = {"klein_web_search"};
+    ReplyConstraints constraints = fromPlan(plan);
+    EXPECT_FALSE(constraints.serviceContract);
+    EXPECT_EQ(constraints.lengthTier, "short");
+    EXPECT_EQ(constraints.toneNote, "");
+    EXPECT_EQ(constraints.maxCodepoints, 0);
+    EXPECT_EQ(constraints.taskNote, "");
+    EXPECT_EQ(planNote(constraints), "");
+    EXPECT_EQ(constraints.toolPolicy, "allow_list");
+    EXPECT_EQ(constraints.allowedTools, std::vector<std::string>{"klein_web_search"});
+
+    plan.length.clear();
+    EXPECT_EQ(fromPlan(plan).lengthTier, "few");
+
+    const ReplyConstraints v1 = fromPlan(replyPlan("answer", "认真", 0));
+    EXPECT_TRUE(v1.serviceContract) << "v1 计划（基线、回退）照旧";
+    EXPECT_EQ(v1.lengthTier, "");
+}
 } // namespace

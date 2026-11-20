@@ -159,6 +159,18 @@ TEST(FactsCardTest, OversizedFileIsTruncatedOnUtf8Boundary)
     EXPECT_EQ(facts.read(), std::string(4096, 'y'));
 }
 
+// 读取上限可给（经历层 E1：判定器读 soul.md 用 16 KiB），截断规则相同
+TEST(FactsCardTest, MaxBytesIsConfigurablePerFile)
+{
+    FactsDirectory directory;
+    ASSERT_FALSE(directory.path().empty());
+    const std::string path = directory.path() + "/soul.md";
+    writeFile(path, std::string(5000, 's'));
+    EXPECT_EQ(affect::DeployerFacts(path).read().size(), affect::DeployerFacts::kMaxBytes);
+    EXPECT_EQ(affect::DeployerFacts(path, 16384).read(), std::string(5000, 's'));
+    EXPECT_EQ(affect::DeployerFacts(path, 10).read(), std::string(10, 's'));
+}
+
 // 一轮的事实卡：affect 关着或没接线时什么都不加、不读文件；开着时现场事实总有，
 // 部署者事实段按文件内容决定
 TEST(FactsCardTest, CardIsEmptyWhenAffectOffOrNotWired)

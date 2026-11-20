@@ -108,6 +108,124 @@ TEST(BehaviorPlanTest, RejectsInvalidSchemaActionAndToolPolicy)
     EXPECT_TRUE(plan.validate(error)) << error;
 }
 
+// 经历层 E1（ADR-027）：计划 v2 的字段、取值与 JSON 形状
+namespace
+{
+affect::BehaviorPlan v2Plan()
+{
+    affect::BehaviorPlan plan;
+    plan.schemaVersion = affect::BehaviorPlan::kSchemaVersionV2;
+    plan.action = "group_say";
+    plan.replyTo = "8812";
+    plan.move = "follow";
+    plan.length = "one";
+    plan.occasion = "老余在夸一个声音，没人在跟她说话";
+    plan.reactionToLast = "上一句之后阿青接着说了下去，算接住了";
+    plan.why = "有话可接";
+    return plan;
+}
+} // namespace
+
+TEST(BehaviorPlanTest, PlanV2RoundTripsJson)
+{
+    const affect::BehaviorPlan plan = v2Plan();
+    std::string error;
+    ASSERT_TRUE(plan.validate(error)) << error;
+    const nlohmann::json json = plan.toJson();
+    EXPECT_EQ(json, nlohmann::json::parse(
+                        R"({"schema_version":2,"action":"group_say","reply_to":"8812","move":"follow",)"
+                        R"("length":"one","occasion":"老余在夸一个声音，没人在跟她说话",)"
+                        R"("reaction_to_last":"上一句之后阿青接着说了下去，算接住了","why":"有话可接",)"
+                        R"("tool_policy":"inherit","allowed_tools":[]})"));
+    EXPECT_FALSE(json.contains("speech_act")) << "v2 不用 speech_act / tone / max_codepoints";
+    EXPECT_FALSE(json.contains("tone"));
+    EXPECT_FALSE(json.contains("max_codepoints"));
+
+    const std::optional<affect::BehaviorPlan> parsed = affect::BehaviorPlan::fromJson(json, error);
+    ASSERT_TRUE(parsed.has_value()) << error;
+    EXPECT_TRUE(parsed->isV2());
+    EXPECT_EQ(parsed->toJson(), json);
+
+    // 不说：没有做法与长度；reply_to 为 null；可选项省略
+    affect::BehaviorPlan quiet;
+    quiet.schemaVersion = affect::BehaviorPlan::kSchemaVersionV2;
+    quiet.action = "no_reply";
+    quiet.toolPolicy = "none";
+    quiet.occasion = "群里在斗图";
+    ASSERT_TRUE(quiet.validate(error)) << error;
+    const nlohmann::json quietJson = quiet.toJson();
+    EXPECT_TRUE(quietJson["reply_to"].is_null());
+    EXPECT_FALSE(quietJson.contains("move"));
+    EXPECT_FALSE(quietJson.contains("reaction_to_last"));
+    ASSERT_TRUE(affect::BehaviorPlan::fromJson(quietJson, error).has_value()) << error;
+}
+
+// 读到 v1 记录时按 v1 解析，不迁移旧数据；v2 字段为空
+TEST(BehaviorPlanTest, V1RecordsStillParseAsV1)
+{
+    std::string error;
+    const std::optional<affect::BehaviorPlan> v1 = affect::BehaviorPlan::fromJson(
+        nlohmann::json::parse(R"({"schema_version":1,"action":"group_say","speech_act":"banter",)"
+                              R"("tone":"轻松","max_codepoints":80,"tool_policy":"inherit","allowed_tools":[]})"),
+        error);
+    ASSERT_TRUE(v1.has_value()) << error;
+    EXPECT_FALSE(v1->isV2());
+    EXPECT_EQ(v1->speechAct, "banter");
+    EXPECT_EQ(v1->tone, "轻松");
+    EXPECT_EQ(v1->maxCodepoints, 80);
+    EXPECT_TRUE(v1->move.empty());
+    EXPECT_TRUE(v1->occasion.empty());
+    EXPECT_FALSE(v1->replyTo.has_value());
+    EXPECT_EQ(v1->toJson(),
+              nlohmann::json::parse(R"({"schema_version":1,"action":"group_say","speech_act":"banter",)"
+                                    R"("tone":"轻松","max_codepoints":80,"tool_policy":"inherit","allowed_tools":[]})"))
+        << "v1 序列化形状不变";
+    EXPECT_FALSE(affect::BehaviorPlan::fromJson(
+                     nlohmann::json::parse(R"({"schema_version":3,"action":"reply"})"), error)
+                     .has_value());
+}
+
+TEST(BehaviorPlanTest, PlanV2ValidationCoversEveryField)
+{
+    std::string error;
+    affect::BehaviorPlan plan = v2Plan();
+    ASSERT_TRUE(plan.validate(error)) << error;
+
+    plan.move = "";
+    EXPECT_FALSE(plan.validate(error)) << "说话类动作必须有做法";
+    plan.move = "banter";
+    EXPECT_FALSE(plan.validate(error)) << "做法是封闭集合";
+    plan.move = "follow";
+    plan.length = "long";
+    EXPECT_FALSE(plan.validate(error));
+    plan.length = "";
+    EXPECT_FALSE(plan.validate(error)) << "说话类动作必须有长度档";
+    plan.length = "few";
+    plan.occasion = "";
+    EXPECT_TRUE(plan.validate(error)) << "存储层允许空场合（隐私护栏清空后照常落库读回）；judge 给空由 parse 拒收";
+    plan.occasion = "两行\n场合";
+    EXPECT_FALSE(plan.validate(error)) << "场合不换行";
+    std::string longText;
+    for (std::size_t index = 0; index <= affect::BehaviorPlan::kMaxNoteCodepoints; ++index)
+        longText += "长";
+    plan.occasion = longText;
+    EXPECT_FALSE(plan.validate(error)) << "超过码点上限";
+    plan.occasion = "正常的场合";
+    plan.replyTo = std::string();
+    EXPECT_FALSE(plan.validate(error)) << "reply_to 要么 null 要么非空";
+    plan.replyTo.reset();
+    EXPECT_TRUE(plan.validate(error)) << error;
+
+    plan.action = "leave_topic";
+    plan.move = "";
+    plan.length = "";
+    EXPECT_TRUE(plan.validate(error)) << "离场可不带做法与长度";
+    plan.action = "no_reply";
+    EXPECT_FALSE(plan.validate(error)) << "no_reply 仍要 tool_policy=none";
+    plan.toolPolicy = "none";
+    EXPECT_TRUE(plan.validate(error)) << error;
+}
+
 TEST(BehaviorPlanTest, RejectsMalformedJson)
 {
     std::string error;
@@ -193,6 +311,32 @@ TEST(DecisionStoreTest, PersistsDecisionExecutionAndFeedbackAcrossReopen)
     const auto recent = reopened.recentDecisions(10);
     ASSERT_EQ(recent.size(), 1U);
     EXPECT_EQ(recent.front().decisionId, decisionId);
+}
+
+// 经历层 E1：计划 v2 写进同一列 plan_json（不改表结构），v1、v2 记录读回各按各的版本
+TEST(DecisionStoreTest, PlanV1AndV2ShareTheSameColumn)
+{
+    TemporaryDirectory directory;
+    affect::DecisionStore store(directory.path() + "/affect.db");
+    store.open();
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return 1000; });
+    const std::string v1Id =
+        recorder.recordDecision(affect::makeBaselineDecision("at_reply", 8823, 1, "m", "reply"));
+    affect::DecisionRecord v2 = affect::makeBaselineDecision("engagement_turn", 8823, 0, "", "group_say");
+    v2.plan = v2Plan();
+    v2.policyVersion = "judge_v2";
+    v2.planVersion = "judge_plan_v2";
+    const std::string v2Id = recorder.recordDecision(v2);
+
+    const std::optional<affect::DecisionRecord> readV1 = store.findDecision(v1Id);
+    const std::optional<affect::DecisionRecord> readV2 = store.findDecision(v2Id);
+    ASSERT_TRUE(readV1.has_value());
+    ASSERT_TRUE(readV2.has_value());
+    EXPECT_FALSE(readV1->plan.isV2());
+    EXPECT_EQ(readV1->plan.speechAct, "unspecified");
+    EXPECT_TRUE(readV2->plan.isV2());
+    EXPECT_EQ(readV2->plan.toJson(), v2Plan().toJson());
+    EXPECT_EQ(readV2->plan.occasion, "老余在夸一个声音，没人在跟她说话");
 }
 
 TEST(DecisionStoreTest, DuplicateIdsAreIdempotent)

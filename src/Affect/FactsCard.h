@@ -35,7 +35,8 @@ class DeployerFacts
 public:
     static constexpr std::size_t kMaxBytes = 4096;
 
-    explicit DeployerFacts(std::string path);
+    // maxBytes：读取上限（资源护栏）；facts.md 用默认 4096，判定器读 soul.md 时组合根给更大的值
+    explicit DeployerFacts(std::string path, std::size_t maxBytes = kMaxBytes);
     DeployerFacts(const DeployerFacts &) = delete;
     DeployerFacts &operator=(const DeployerFacts &) = delete;
 
@@ -44,6 +45,7 @@ public:
 
 private:
     std::string filePath;
+    std::size_t maxBytes;
     mutable std::atomic<std::uintmax_t> warnedSize{0}; // 已为之告警的超长文件大小（0 = 没有）
 };
 

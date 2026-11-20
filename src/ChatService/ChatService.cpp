@@ -1,4 +1,5 @@
 #include "ChatService.h"
+#include "../Affect/ReplyCheck.h"
 #include "../Application/CurrentImageRouting.h"
 #include "../Application/RecallContextInjection.h"
 #include "../Application/ReplyConstraints.h"
@@ -26,7 +27,8 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
     resultReply.user_message_id = userMessageId;
 
     // 2. 构造请求包（USS 负责裁切、查模型、拼超参数）
-    auto bundleOpt = this->userSession.buildChatRequest(user_id);
+    auto bundleOpt = this->userSession.buildChatRequest(
+        user_id, true, constraints == nullptr || constraints->serviceContract);
     if (!bundleOpt)
     {
         resultReply.text = "系统提示：当前模型未注册，请管理员检查 ModelsName.json。";
@@ -99,6 +101,9 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
     // 调用方给的当轮尾部注记（R2.2 连发：后面还有哪几条、会各自单独回复）
     if (!tailNote.empty())
         appendContextNote(bundle.request, tailNote);
+    // 计划 v2 的本轮任务句（经历层 E1）：每轮都变，同样只进请求副本的尾部
+    if (constraints != nullptr && !constraints->taskNote.empty())
+        appendContextNote(bundle.request, constraints->taskNote);
 
     const std::string automaticRecall = this->memoryService.recallForMessage(
         user_id, text, userMessageId);
@@ -190,6 +195,35 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
         return resultReply;
     }
 
+    // 结构核对（经历层 E1“后核”，计划 v2 生效时）：落库之前核对她这句，不合格重说一次。
+    // 重说的请求是副本：她那句作为 assistant 消息，再追加一条说明哪里不合格的 user 消息，工具表
+    // 不动（前缀缓存）；第二次要工具、失败或没有文字时按第一次的文字下结论。工具的终态结果不是她的话，不核对
+    const bool checking = constraints != nullptr && !constraints->lengthTier.empty();
+    if (checking && !terminalToolResult)
+    {
+        const affect::SettledReply settled = affect::checkWithRetry(
+            LLM_content, affect::lengthTierOr(constraints->lengthTier),
+            [this, &bundle, &LLM_content](const std::string &note) -> std::optional<std::string>
+            {
+                LOG_INFO("结构核对：回复不合格，重说一次");
+                ChatRequest retry = bundle.request;
+                retry.history.push_back({"assistant", LLM_content});
+                retry.history.push_back({"user", "[系统注] " + note});
+                const ChatResponse again =
+                    this->dock.RequestChat(bundle.model, bundle.model_name, retry);
+                if (again.cancelled || again.code != 200 || !again.tool_calls.empty() ||
+                    utils::trim(again.content).empty())
+                    return std::nullopt;
+                return again.content;
+            });
+        resultReply.checkDeviation = settled.deviation;
+        if (!settled.deviation.empty())
+            LOG_INFO("结构核对偏差：" + settled.deviation);
+        if (!settled.send)
+            return resultReply; // 不发：不落 assistant 消息
+        LLM_content = settled.text;
+    }
+
     // 5. 增量追加助手回复（内存 + SQLite 同步落盘），并入长期记忆提取队列
     {
         std::string persistedAssistantContent = LLM_content;
@@ -202,7 +236,13 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
     }
 
     // 6. finish_reason 附加提示
-    if (response.finish_reason == "length")
+    // 计划 v2 生效时（checking）不往她的话里追加程序提示：错误串与她的话分开传递（经历层 E1）
+    if (checking)
+    {
+        if (response.finish_reason == "length" || response.finish_reason == "content_filter")
+            LOG_WARNING("模型回答结束原因：" + response.finish_reason + "（未追加提示）");
+    }
+    else if (response.finish_reason == "length")
     {
         LOG_WARNING("该模型的回答长度超出了管理员设定的最大限制...");
         LLM_content += "\n模型已超出最大长度限制，回答可能不全。";
@@ -264,10 +304,11 @@ std::string ChatService::buildOnceWith(const ModelEndpointOptions &worker,
 
 ChatResponse ChatService::requestInCharacter(uint64_t personaSourceId, const std::string &systemNote,
                                              const std::vector<ChatMessage> &history,
-                                             const std::vector<std::string> &toolSchemas)
+                                             const std::vector<std::string> &toolSchemas,
+                                             bool serviceContract)
 {
     // 历史由调用方给定：不前移该用户的私聊锚点（trimWindow=false）
-    auto bundleOpt = this->userSession.buildChatRequest(personaSourceId, false);
+    auto bundleOpt = this->userSession.buildChatRequest(personaSourceId, false, serviceContract);
     if (!bundleOpt)
     {
         LOG_ERROR("ChatService::requestInCharacter 模型未注册，user_id=" +

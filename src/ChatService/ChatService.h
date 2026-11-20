@@ -23,6 +23,9 @@ struct ChatReply
     std::string text;
     std::vector<OutboundMessage> outbound_messages;
     int64_t user_message_id = 0;
+    // 结构核对（经历层 E1，constraints->lengthTier 非空时）的偏差："reply_check:…"；空 = 无偏差。
+    // 核对不发时 text 为空、这里写原因
+    std::string checkDeviation;
 };
 
 class ChatService
@@ -46,6 +49,9 @@ public:
     // 分寸注记接在 situationNote 之后，工具表与工具循环的开放名单按 tool_policy 收窄为同一份
     // tailNote（R2.2 连发注记等）：可空 = 与此前逐字相同。非空时经 appendContextNote 以
     // "[系统注]" 尾插到本轮最后一条 user 消息（请求副本，不落库）
+    // 计划 v2（经历层 E1，constraints 来自 v2 计划时）：不追加服务契约；taskNote 接在 tailNote
+    // 之后尾插；模型回复在落库前经 affect::checkWithRetry 结构核对，不合格重说一次，结论与偏差
+    // 见 ChatReply（不发时 text 为空）
     ChatReply reply(uint64_t user_id, const std::string &text,
                     std::optional<ChatImageContent> currentImage = std::nullopt,
                     const std::string &situationNote = {},
@@ -69,9 +75,11 @@ public:
     // 会话轮请求（群聊话题跟进）：人格 system（用户人格/soul 兜底 + 服务契约）
     // + systemNote 追加，history 与工具表由调用方给定，单次请求返回原始
     // ChatResponse（工具调用由调用方执行）。不落库、不入记忆、不写会话
+    // serviceContract=false（经历层 E1，计划 v2 生效的会话轮）：人格之后不追加服务契约
     ChatResponse requestInCharacter(uint64_t personaSourceId, const std::string &systemNote,
                                     const std::vector<ChatMessage> &history,
-                                    const std::vector<std::string> &toolSchemas);
+                                    const std::vector<std::string> &toolSchemas,
+                                    bool serviceContract = true);
     // reply() 提供给模型的工具名（决策层情境卡的 available_tools）
     // 这次对话场合下开放的工具名（与 reply() 实际给模型的工具表同一口径）
     std::vector<std::string> toolNamesIn(ToolVenue venue) const { return tools.namesIn(venue); }

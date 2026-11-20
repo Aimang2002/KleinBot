@@ -295,7 +295,8 @@ std::string UserSessionService::getContextDigest(uint64_t user_id)
 }
 
 std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_t &user_id,
-                                                                   bool trimWindow)
+                                                                   bool trimWindow,
+                                                                   bool serviceContract)
 {
     // 本次装配用的配置快照：模型解析、采样参数、存活时间都取这一份（ADR-023）。
     // 在业务锁外取，活值的锁不与 mutex_message 嵌套
@@ -320,7 +321,9 @@ std::optional<ChatCallBundle> UserSessionService::buildChatRequest(const uint64_
 
     // 超参数 + system_prompt：人格 + 服务契约（契约总是包裹在人格外层，含自定义人格）
     // 采样参数取本次快照：温度/惩罚项是全局口味，重载后下一次请求即对所有用户生效
-    result.request.system_prompt = p.system_prompt + kServiceContractFrame;
+    // 经历层 E1：计划 v2 生效的群聊轮不追加服务契约（serviceContract=false），由每轮计划取代
+    result.request.system_prompt =
+        serviceContract ? p.system_prompt + kServiceContractFrame : p.system_prompt;
     result.request.temperature = chat->temperature;
     result.request.frequency_penalty = chat->frequencyPenalty;
     result.request.presence_penalty = chat->presencePenalty;

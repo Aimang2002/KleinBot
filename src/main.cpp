@@ -539,6 +539,9 @@ int main(int argc, char **argv)
 	// 现场事实进本轮 user 侧）；关着时请求与此前逐字相同。声明在所有使用者（judge、话题会话、
 	// Message）之前、在它们之后析构
 	affect::DeployerFacts deployerFacts("source/facts.md");
+	// 她的人格（经历层 E1，ADR-027）：判定器读与默认人格同一个 source/soul.md，每次决策现读；
+	// 读取上限 16 KiB（资源护栏）。用户经 #设置人格 的个人人格不进判定器。同样声明在 judge 之前
+	affect::DeployerFacts deployerSoul("source/soul.md", 16384);
 	// R1 决策层（ADR-023 稳定外壳）：基线与 judge 两个策略始终构造，外壳 decisionPolicy 按当前
 	// 配置转给其中一个——affect.enabled 为真且 affect.policy 为 judge 时用 judge，否则基线。
 	// 两条群回应路径（Message 的 @ 回复、话题会话轮）共用这一个外壳，每次决策按快照选一次；
@@ -569,6 +572,7 @@ int main(int argc, char **argv)
 		LOG_WARNING("affect.judge_model 未在模型注册表找到：" + settings.affect.judgeModel +
 					"，judge 将改用 worker 模型（models.worker）");
 	judgePolicy.setFactsSource([&deployerFacts]() { return deployerFacts.read(); });
+	judgePolicy.setSoulSource([&deployerSoul]() { return deployerSoul.read(); });
 	affect::SwitchingPolicy decisionPolicy(liveSettings.affect, baselinePolicy, judgePolicy);
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;
@@ -702,6 +706,15 @@ int main(int argc, char **argv)
 				const std::string &systemNote, const std::vector<ChatMessage> &history,
 				const std::vector<std::string> &toolSchemas)
 			{ return chatService.requestInCharacter(managerId, systemNote, history, toolSchemas); });
+		// 计划 v2 生效的会话轮（经历层 E1）：同一人格，不追加服务契约
+		engagementService.setPlannedAgent(
+			[&chatService, managerId = settings.bot.managerId](
+				const std::string &systemNote, const std::vector<ChatMessage> &history,
+				const std::vector<std::string> &toolSchemas)
+			{
+				return chatService.requestInCharacter(managerId, systemNote, history, toolSchemas,
+													  false);
+			});
 	}
 	engagementService.setWorker(makeWorkerSeam(workerEndpoint));
 	// 私聊滚动摘要（2026-11-08）：锚点前移时把移出窗口的原文合并进摘要。

@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <sqlite3.h>
 
 #include "Affect/DecisionRecorder.h"
 #include "Affect/DecisionStore.h"
@@ -253,17 +254,26 @@ private:
     std::string directory;
 };
 
-// Fake 主模型：记录每次请求，第 n 次回复"回复n"
+// Fake 主模型：记录每次请求，第 n 次回复"回复n"；script 非空时依次取它的内容（经历层 E1 的重说用例）
 class CountingChatPort final : public LLMPort
 {
 public:
-    explicit CountingChatPort(std::vector<ChatRequest> *captured) : captured(captured) {}
+    explicit CountingChatPort(std::vector<ChatRequest> *captured,
+                              std::vector<std::string> *script = nullptr)
+        : captured(captured), script(script)
+    {
+    }
     ChatResponse request_chat(const ChatModel &, const std::string &, const ChatRequest &request) override
     {
         captured->push_back(request);
         ChatResponse response;
         response.code = 200;
         response.content = "回复" + std::to_string(captured->size());
+        if (script != nullptr && !script->empty())
+        {
+            response.content = script->front();
+            script->erase(script->begin());
+        }
         response.finish_reason = "stop";
         return response;
     }
@@ -279,6 +289,7 @@ public:
 
 private:
     std::vector<ChatRequest> *captured;
+    std::vector<std::string> *script;
 };
 
 class RecordingSender final : public MessageSenderPort
@@ -314,7 +325,7 @@ struct PrivateMessageFixture
                   [] { return ModelEndpointOptions{}; }, liveAffect, nullptr, nullptr,
                   nullptr, recorder, nullptr, policy, facts)
     {
-        dock.registerStandard("Fake", std::make_unique<CountingChatPort>(&captured));
+        dock.registerStandard("Fake", std::make_unique<CountingChatPort>(&captured, &script));
     }
     ~PrivateMessageFixture() { memory.shutdown(); }
 
@@ -371,6 +382,7 @@ struct PrivateMessageFixture
     Live<AffectOptions> liveAffect{AffectOptions{}};
     Message message;
     std::vector<ChatRequest> captured;
+    std::vector<std::string> script; // 主模型依次回复的内容（空 = "回复n"）
 };
 
 const std::string kNotePrefix = "\n[系统注] 对方在这条之后紧接着还发了 ";
@@ -642,4 +654,235 @@ TEST(MessageFactsCardTest, EmptyFactsStillTellsTheTimeAfterBurstNote)
                 b.history.back().content == a.history.back().content + "\n" + affect::sceneFactsNote(after))
         << b.history.back().content;
     EXPECT_NE(a.history.back().content.find("[系统注] 连发注记"), std::string::npos);
+}
+
+// ---- 经历层 E1（ADR-027）：群 @ 回复路径的先定、再说、后核 ----
+namespace
+{
+// judge 给 @ 回复的计划 v2：回应触发句（message_id 1）
+std::string atPlan(const std::string &length = "one")
+{
+    return R"({"schema_version":2,"action":"reply","reply_to":"1","move":"answer","length":")" +
+           length +
+           R"(","occasion":"有人在群里叫她，问她在不在","why":"被叫到","tool_policy":"inherit"})";
+}
+
+InboundMessage namedAt(const std::string &text)
+{
+    InboundMessage at = groupAt(text);
+    at.nickname = "老余";
+    return at;
+}
+
+void setEnforce(PrivateMessageFixture &fixture, bool enforce)
+{
+    AffectOptions options = *fixture.liveAffect.get();
+    options.enforce = enforce;
+    fixture.liveAffect.set(options);
+}
+
+// 最近一条执行记录：status / actual_text / deviation_reason
+std::vector<std::string> lastExecution(const std::string &dbPath)
+{
+    std::vector<std::string> row;
+    sqlite3 *db = nullptr;
+    if (sqlite3_open_v2(dbPath.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK)
+    {
+        sqlite3_close(db);
+        return row;
+    }
+    sqlite3_stmt *statement = nullptr;
+    sqlite3_prepare_v2(db,
+                       "SELECT status, actual_text, deviation_reason FROM affect_executions"
+                       " ORDER BY created_at DESC, rowid DESC LIMIT 1;",
+                       -1, &statement, nullptr);
+    if (sqlite3_step(statement) == SQLITE_ROW)
+        for (int index = 0; index < 3; ++index)
+            row.emplace_back(reinterpret_cast<const char *>(sqlite3_column_text(statement, index)));
+    sqlite3_finalize(statement);
+    sqlite3_close(db);
+    return row;
+}
+
+std::string hans(int count)
+{
+    std::string text;
+    for (int index = 0; index < count; ++index)
+        text += "字";
+    return text;
+}
+
+// 生效期的一套接线：决策库、记录器与给定输出的 judge
+struct PlannedAt
+{
+    CoalesceTemporaryDirectory decisions;
+    affect::DecisionStore store{decisions.path() + "/affect.db"};
+    affect::DecisionRecorder recorder{store, affectEnabled(), [] { return std::int64_t(1000); }};
+    std::string judgeOutput;
+    int judgeCalls = 0;
+    affect::JudgePolicy judge{[this](const std::string &, const std::string &)
+                              {
+                                  ++judgeCalls;
+                                  return judgeOutput;
+                              },
+                              "judge-model"};
+    explicit PlannedAt(std::string output) : judgeOutput(std::move(output)) {}
+    std::string dbPath() const { return decisions.path() + "/affect.db"; }
+};
+} // namespace
+
+// 生效期 + 计划 v2：system 去掉服务契约（其余逐字不变，群聊收敛契约仍在），本轮任务句尾插进
+// 最后一条 user 消息；工具表不变；合格的回复照常发出、无偏差
+TEST(MessagePlanV2Test, EnforcedPlanDropsServiceContractAndAddsTask)
+{
+    PrivateMessageFixture legacy;
+    legacy.message.handleMessage(namedAt("在吗"));
+    PlannedAt plan(atPlan());
+    PrivateMessageFixture planned(&plan.recorder, &plan.judge);
+    setEnforce(planned, true);
+    planned.message.handleMessage(namedAt("在吗"));
+
+    ASSERT_EQ(legacy.captured.size(), 1U);
+    ASSERT_EQ(planned.captured.size(), 1U);
+    const ChatRequest &a = legacy.captured[0];
+    const ChatRequest &b = planned.captured[0];
+    const std::size_t serviceAt = a.system_prompt.find("\n\n[服务契约]");
+    const std::size_t groupAt = a.system_prompt.find(GroupContextService::groupConversationContract());
+    ASSERT_NE(serviceAt, std::string::npos);
+    ASSERT_NE(groupAt, std::string::npos);
+    EXPECT_EQ(b.system_prompt, a.system_prompt.substr(0, serviceAt) + a.system_prompt.substr(groupAt));
+    EXPECT_EQ(b.system_prompt.find("[服务契约]"), std::string::npos);
+    EXPECT_EQ(a.tools, b.tools);
+    expectSameExceptLastUser(a, b);
+    EXPECT_EQ(b.history.back().content,
+              a.history.back().content +
+                  "\n[系统注] 本轮任务：回应老余的那句「在吗」；这一句是回答；一句以内。");
+    EXPECT_EQ(planned.sender.texts, legacy.sender.texts);
+    EXPECT_EQ(lastExecution(plan.dbPath()), (std::vector<std::string>{"queued", "回复1", ""}));
+    EXPECT_TRUE(plan.store.recentDecisions(1).front().plan.isV2());
+}
+
+// 后核：超出本档字数 → 在同一请求副本上重说一次（她那句作 assistant、说明作 user）；
+// 第二次仍超 → 照样发出、记偏差；落进会话历史的是发出的那句
+TEST(MessagePlanV2Test, OverLongReplyIsRetriedOnceThenSentWithDeviation)
+{
+    PlannedAt plan(atPlan("one"));
+    PrivateMessageFixture planned(&plan.recorder, &plan.judge);
+    setEnforce(planned, true);
+    planned.script = {hans(70), hans(80)};
+    planned.message.handleMessage(namedAt("在吗"));
+
+    ASSERT_EQ(planned.captured.size(), 2U) << "只重说一次";
+    const ChatRequest &retry = planned.captured[1];
+    ASSERT_GE(retry.history.size(), 2U);
+    EXPECT_EQ(retry.history[retry.history.size() - 2].role, "assistant");
+    EXPECT_EQ(retry.history[retry.history.size() - 2].content, hans(70));
+    EXPECT_EQ(retry.history.back().role, "user");
+    EXPECT_EQ(retry.history.back().content,
+              "[系统注] 刚才那句没有发出：有 70 个字，这一轮最多 60 个字。照本轮任务重说一次。");
+    EXPECT_EQ(retry.system_prompt, planned.captured[0].system_prompt);
+    EXPECT_EQ(retry.tools, planned.captured[0].tools);
+    EXPECT_EQ(planned.sender.texts, std::vector<std::string>{hans(80)});
+    EXPECT_EQ(lastExecution(plan.dbPath()),
+              (std::vector<std::string>{"queued", hans(80), "reply_check:length"}));
+}
+
+TEST(MessagePlanV2Test, MarkdownRetryThatFitsIsSentWithoutDeviation)
+{
+    PlannedAt plan(atPlan("short"));
+    PrivateMessageFixture planned(&plan.recorder, &plan.judge);
+    setEnforce(planned, true);
+    planned.script = {"**在的**", "在的"};
+    planned.message.handleMessage(namedAt("在吗"));
+
+    ASSERT_EQ(planned.captured.size(), 2U);
+    EXPECT_NE(planned.captured[1].history.back().content.find("带了 Markdown 记号"), std::string::npos);
+    EXPECT_EQ(planned.sender.texts, std::vector<std::string>{"在的"});
+    EXPECT_EQ(lastExecution(plan.dbPath()), (std::vector<std::string>{"queued", "在的", ""}));
+}
+
+// 程序错误串（模型无返回时 ChatService 给的"系统提示：…"）不是她的话：计划生效时不发
+TEST(MessagePlanV2Test, ProgramErrorTextIsNotSent)
+{
+    PlannedAt plan(atPlan());
+    PrivateMessageFixture planned(&plan.recorder, &plan.judge);
+    setEnforce(planned, true);
+    planned.script = {""};
+    planned.message.handleMessage(namedAt("在吗"));
+
+    EXPECT_EQ(planned.captured.size(), 1U);
+    EXPECT_TRUE(planned.sender.texts.empty());
+    EXPECT_EQ(lastExecution(plan.dbPath()),
+              (std::vector<std::string>{"skipped", "", "model_override:no_reply;reply_check:system_text"}));
+
+    // 对照：今天（affect 关着）错误串照常发出
+    PrivateMessageFixture legacy;
+    legacy.script = {""};
+    legacy.message.handleMessage(namedAt("在吗"));
+    EXPECT_EQ(legacy.sender.texts, std::vector<std::string>{"系统提示：模型无返回内容！"});
+}
+
+// 影子期（enforce=false）、affect 关着（policy=judge、enforce=true 也不起作用）、私聊：
+// 请求与发出的话和没有决策层时逐字相同
+TEST(MessagePlanV2Test, ShadowAffectOffAndPrivateStayByteIdentical)
+{
+    PrivateMessageFixture legacyPrivate;
+    legacyPrivate.message.handleMessage(privateText(7, "在吗"));
+
+    PlannedAt shadowPlan(atPlan("short"));
+    PrivateMessageFixture shadow(&shadowPlan.recorder, &shadowPlan.judge);
+    shadow.script = {hans(70)}; // 影子期不核对：超长照发
+    PrivateMessageFixture legacyLong;
+    legacyLong.script = {hans(70)};
+    legacyLong.message.handleMessage(namedAt("在吗"));
+    shadow.message.handleMessage(namedAt("在吗"));
+
+    PlannedAt offPlan(atPlan());
+    Live<AffectOptions> off{AffectOptions{}};
+    affect::DecisionRecorder offRecorder(offPlan.store, off, [] { return std::int64_t(1000); });
+    PrivateMessageFixture affectOff(&offRecorder, &offPlan.judge);
+    setEnforce(affectOff, true);
+    affectOff.message.handleMessage(namedAt("在吗"));
+    PrivateMessageFixture legacyAgain;
+    legacyAgain.message.handleMessage(namedAt("在吗"));
+
+    PlannedAt privatePlan(atPlan());
+    PrivateMessageFixture privateOn(&privatePlan.recorder, &privatePlan.judge);
+    enableAffect(privateOn);
+    setEnforce(privateOn, true);
+    privateOn.message.handleMessage(privateText(7, "在吗"));
+
+    const std::vector<std::pair<const PrivateMessageFixture *, const PrivateMessageFixture *>> pairs{
+        {&legacyLong, &shadow}, {&legacyAgain, &affectOff}, {&legacyPrivate, &privateOn}};
+    for (const auto &[expected, actual] : pairs)
+    {
+        ASSERT_EQ(expected->captured.size(), 1U);
+        ASSERT_EQ(actual->captured.size(), 1U);
+        const ChatRequest &a = expected->captured[0];
+        const ChatRequest &b = actual->captured[0];
+        EXPECT_EQ(a.system_prompt, b.system_prompt);
+        EXPECT_EQ(a.tools, b.tools);
+        expectSameExceptLastUser(a, b);
+        EXPECT_EQ(a.history.back().content, b.history.back().content);
+        EXPECT_EQ(expected->sender.texts, actual->sender.texts);
+    }
+    EXPECT_EQ(shadowPlan.judgeCalls, 1) << "影子期 judge 在投递之后照常记录";
+    EXPECT_EQ(offPlan.judgeCalls, 0);
+    EXPECT_EQ(privatePlan.judgeCalls, 0) << "私聊不经决策点";
+    EXPECT_NE(legacyPrivate.captured[0].system_prompt.find("[服务契约]"), std::string::npos)
+        << "私聊保留服务契约";
+}
+
+// 会话轮的计划 seam 在组合根接 requestInCharacter(..., serviceContract=false)：只去掉服务契约
+TEST(MessagePlanV2Test, RequestInCharacterCanSkipServiceContract)
+{
+    PrivateMessageFixture fixture;
+    const std::vector<ChatMessage> history{{"user", "现场"}};
+    fixture.chat.requestInCharacter(7, "\n\n[系统注] 会话轮", history, {});
+    fixture.chat.requestInCharacter(7, "\n\n[系统注] 会话轮", history, {}, false);
+    ASSERT_EQ(fixture.captured.size(), 2U);
+    const std::string &with = fixture.captured[0].system_prompt;
+    const std::size_t serviceAt = with.find("\n\n[服务契约]");
+    ASSERT_NE(serviceAt, std::string::npos);
+    EXPECT_EQ(fixture.captured[1].system_prompt, with.substr(0, serviceAt) + "\n\n[系统注] 会话轮");
 }

@@ -13,6 +13,9 @@
 #include "../Affect/DecisionRecord.h"
 #include "../Affect/DecisionRecorder.h"
 #include "../Affect/FactsCard.h"
+#include "../Affect/PlanTask.h"
+#include "../Affect/ReplyCheck.h"
+#include "../Perception/GroupLineFormat.h"
 #include "../Application/AtReplySituation.h"
 #include "../Application/ReplyConstraints.h"
 #include "../Application/ShadowDecision.h"
@@ -223,16 +226,30 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		const std::string judgeMaterial = policyDecides
 			? requestContext + "\n触发句：" + conversationText
 			: std::string();
+		// 计划 v2 的可回应消息（经历层 E1）：@ 路径只有触发句这一条（只在内存里交给 judge 与任务句）
+		std::vector<affect::ReplyCandidate> atCandidates;
+		if (policyDecides && !utils::trim(current_data.plain_text).empty())
+			atCandidates.push_back({triggerMessageId,
+				!current_data.card.empty() ? current_data.card : current_data.nickname,
+				replyQuoteOf(current_data.plain_text), current_data.plain_text});
 		// R1.c 生效期：judge 前置、决策在回复前记（与基线顺序一致）；动作只可能是 reply
 		//（越界已在 JudgePolicy 回退），计划只约束分寸与工具
 		ReplyConstraints constraints;
 		std::string plannedAction;
+		// 计划 v2 生效（经历层 E1）：不追加服务契约、尾插本轮任务句、回复经结构核对（ChatService 内
+		// 重说一次）；judge 回退时是 v1 基线计划，照 R1 的生效路径
+		bool planInEffect = false;
 		if (enforcedPolicy)
 		{
 			const affect::SituationCard card = atCard();
-			const affect::Decision decision = activePolicy->decide(card, judgeMaterial);
+			const affect::Decision decision = activePolicy->decideFor(card, judgeMaterial, atCandidates);
 			plannedAction = decision.plan.action;
 			constraints = fromPlan(decision.plan);
+			planInEffect = decision.plan.isV2();
+			const std::string task = affect::planTaskSentence(decision.plan,
+				affect::findCandidate(atCandidates, decision.plan.replyTo));
+			if (planInEffect && !task.empty())
+				constraints.taskNote = "本轮任务：" + task;
 			decisionId = this->decisionRecorder->recordDecision(affect::makePolicyDecision(
 				"at_reply", current_data.group_id, current_data.user_id, triggerMessageId,
 				decision, *activePolicy, card));
@@ -255,6 +272,16 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 			situationNote, requestContext, isGroup ? current_data.group_id : 0,
 			enforcedPolicy ? &constraints : nullptr, tailNote);
 		std::string llm_text = chatReply.text;
+		// 结构核对的最后一道（经历层 E1）：ChatService 的错误串（"系统提示：…"）不是她的话，计划 v2
+		// 生效时不发；她自己的回复已在 ChatService 里核对过，偏差随回复带回
+		std::string checkDeviation = chatReply.checkDeviation;
+		if (planInEffect && !llm_text.empty() && affect::looksLikeSystemText(llm_text))
+		{
+			LOG_WARNING("结构核对：@ 回复是程序提示，不发出（群 " +
+						std::to_string(current_data.group_id) + "）");
+			checkDeviation = "reply_check:system_text";
+			llm_text.clear();
+		}
 		// 群聊收敛契约（T7b）：模型判定无增量时输出 [不回应] 标记，静默不发
 		const bool textSuppressed = current_data.message_type == "group" &&
 			!llm_text.empty() && GroupContextService::isSuppressed(llm_text);
@@ -272,12 +299,15 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 			execution.decisionId = decisionId;
 			execution.status = (!textWillSend && chatReply.outbound_messages.empty())
 				? "skipped" : "queued";
-			execution.actualText = chatReply.text;
+			execution.actualText = planInEffect ? llm_text : chatReply.text;
 			// 生效期：她没有开口（[不回应] 或空回复）即与 reply 计划不符
 			const char *const actualAction =
 				(textWillSend || !chatReply.outbound_messages.empty()) ? "reply" : "no_reply";
 			if (enforcedPolicy && plannedAction != actualAction)
 				execution.deviationReason = std::string("model_override:") + actualAction;
+			if (!checkDeviation.empty())
+				execution.deviationReason +=
+					(execution.deviationReason.empty() ? "" : ";") + checkDeviation;
 			if (!shadowPolicy)
 				this->decisionRecorder->recordExecution(execution);
 		}
@@ -330,7 +360,7 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		if (shadowPolicy)
 		{
 			recordShadowAroundDelivery(*this->decisionRecorder, *activePolicy, atCard(),
-				judgeMaterial, triggerMessageId, std::move(execution), deliver);
+				judgeMaterial, triggerMessageId, std::move(execution), deliver, atCandidates);
 		}
 		else
 		{

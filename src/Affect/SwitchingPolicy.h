@@ -26,6 +26,11 @@ public:
     {
         return current().decide(card, transientMaterial);
     }
+    Decision decideFor(const SituationCard &card, const std::string &transientMaterial,
+                       const std::vector<ReplyCandidate> &candidates) override
+    {
+        return current().decideFor(card, transientMaterial, candidates);
+    }
     std::string version() const override { return current().version(); }
     std::string planVersion() const override { return current().planVersion(); }
 

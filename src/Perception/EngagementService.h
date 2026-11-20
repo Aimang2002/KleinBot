@@ -24,6 +24,10 @@
  * 材料每一行经 Perception/GroupLineFormat（唯一的行格式化点），画出回复的是谁的哪句。
  * 事实卡（经历层 E0，ADR-026）：affect.enabled 为真且接了部署者事实时，契约最前是部署者
  * 事实段（进 system），现场事实（日期、星期、时刻）作为一行放在材料之后（本轮 user 侧）。
+ * 先定、再说、后核（经历层 E1，ADR-027）：affect.enforce 为真且 judge 给出计划 v2 时，契约只留
+ * 机制（怎么说、怎么沉默、怎么离场），不追加服务契约，提问语换成中性的“以上是群聊现场。”加本轮
+ * 任务句；她要说出口的那句经 affect::checkReply 结构核对，不合格重说一次。影子期、回退基线、
+ * affect 关着时请求与此前逐字相同。
  * 轮次触发：点名/引用回复她（立即）、追问窗口（她开口后 120s 内群友接话 + 静默，
  * 每次开口至多 2 轮）、lull（攒 5 条 + 静默 + 节流 + 每小时帽）——都只是资源预算，
  * 每轮说不说由她决定。
@@ -146,6 +150,9 @@ public:
                       std::function<std::int64_t()> clock = {});
 
     void setMainAgent(MainAgent mainAgent) { this->mainAgent = std::move(mainAgent); }
+    // 计划 v2 生效时的主模型 seam（经历层 E1，ADR-027）：同 MainAgent，但人格之后不追加服务契约
+    //（组合根适配 requestInCharacter(..., serviceContract=false)）。可空 = 用 mainAgent
+    void setPlannedAgent(MainAgent plannedAgent) { this->plannedAgent = std::move(plannedAgent); }
     void setWorker(Worker worker) { this->worker = std::move(worker); }
     void setSubmitTurn(Submit submitTurn) { this->submitTurn = std::move(submitTurn); }
     void setMemberProvider(MemberProvider memberProvider)
@@ -277,6 +284,7 @@ private:
     std::map<std::uint64_t, std::deque<std::int64_t>> nameActivationHistory; // 激活预算记账
     std::map<std::uint64_t, affect::GroupPresence> presences; // 在场账本（ADR-024），会话锁保护
     MainAgent mainAgent;
+    MainAgent plannedAgent;
     Worker worker;
     Submit submitTurn;
     MemberProvider memberProvider;

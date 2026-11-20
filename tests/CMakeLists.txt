@@ -44,6 +44,7 @@ add_executable(kleinbot_tests
     PushDeliveryTests.cpp
     PushServerTests.cpp
     ReminderTests.cpp
+    ReplyCheckTests.cpp
     ReplyConstraintsTests.cpp
     ReplyContextRoutingTests.cpp
     ShadowDecisionTests.cpp

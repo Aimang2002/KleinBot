@@ -29,6 +29,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -2264,10 +2265,14 @@ void expectSameRequestsAndActions(const TurnTranscript &actual, const TurnTransc
     EXPECT_EQ(actual.texts, legacy.texts);
 }
 
+// judge 的计划 v2（经历层 E1）：说话类给做法与长度，不说不给
 std::string judgeReply(const std::string &action)
 {
-    return R"({"schema_version":1,"action":")" + action +
-           R"(","tool_policy":")" + (action == "no_reply" ? "none" : "inherit") + R"("})";
+    const bool quiet = action == "no_reply";
+    return R"({"schema_version":2,"action":")" + action + R"(","reply_to":null,"move":")" +
+           (quiet ? "" : "follow") + R"(","length":")" + (quiet ? "" : "one") +
+           R"(","occasion":"群友在聊一个话题","why":"测试","tool_policy":")" +
+           (quiet ? "none" : "inherit") + R"("})";
 }
 } // namespace
 
@@ -2340,7 +2345,7 @@ TEST(EngagementDecisionPointTest, AlwaysPresentShellFollowsLiveAffectSwitches)
     ASSERT_TRUE(store.isOpen());
     std::vector<affect::DecisionRecord> decisions = store.recentDecisions(10);
     ASSERT_EQ(decisions.size(), 1U);
-    EXPECT_EQ(decisions.front().policyVersion, "judge_v1");
+    EXPECT_EQ(decisions.front().policyVersion, "judge_v2");
     EXPECT_EQ(nlohmann::json::parse(decisions.front().stateJson)["judge_model"], "judge-a");
 
     // 换 judge 模型（等同 affect.judge_model 重载）：下一次决策调用新模型、记录新标签
@@ -2390,8 +2395,8 @@ TEST(EngagementDecisionPointTest, ShadowJudgeRecordsPlanButKeepsBaselineAction)
         const affect::DecisionRecord &decision = shadow.decisions[index];
         EXPECT_EQ(decision.source, "engagement_turn");
         EXPECT_EQ(decision.plan.action, "no_reply");
-        EXPECT_EQ(decision.policyVersion, "judge_v1");
-        EXPECT_EQ(decision.planVersion, "judge_plan_v1");
+        EXPECT_EQ(decision.policyVersion, "judge_v2");
+        EXPECT_EQ(decision.planVersion, "judge_plan_v2");
         EXPECT_TRUE(decision.fallbackReason.empty());
         const nlohmann::json state = nlohmann::json::parse(decision.stateJson);
         EXPECT_EQ(state["trigger_kind"], "lull");
@@ -2591,12 +2596,13 @@ struct EnforcedHarness
 };
 
 std::string planWithTools(const std::string &toolPolicy, const std::string &allowedTools = "[]",
-                          const std::string &speechAct = "unspecified",
-                          const std::string &tone = "unspecified", int maxCodepoints = 0)
+                          const std::string &move = "follow", const std::string &length = "one",
+                          const std::string &replyTo = "null")
 {
-    return R"({"schema_version":1,"action":"group_say","speech_act":")" + speechAct +
-           R"(","tone":")" + tone + R"(","max_codepoints":)" + std::to_string(maxCodepoints) +
-           R"(,"tool_policy":")" + toolPolicy + R"(","allowed_tools":)" + allowedTools + "}";
+    return R"({"schema_version":2,"action":"group_say","reply_to":)" + replyTo +
+           R"(,"move":")" + move + R"(","length":")" + length +
+           R"(","occasion":"群友在聊一个话题","why":"测试","tool_policy":")" + toolPolicy +
+           R"(","allowed_tools":)" + allowedTools + "}";
 }
 } // namespace
 
@@ -2712,37 +2718,274 @@ TEST(EngagementEnforceTest, ModelOverrideRecordsDeviation)
     EXPECT_EQ(enforced.latestDeviation(), "model_override:leave_topic");
 }
 
-// 分寸注记：只出现非 unspecified / 非 0 的片段；全无则契约与基线逐字相同
-TEST(EngagementEnforceTest, ToneNoteAppendedOnlyWhenSpecified)
+// ---- 经历层 E1（ADR-027）：先定、再说、后核 ----
+namespace
+{
+// 计划 v2 生效时的契约：今天的契约去掉“先看懂再开口……”整段语用清单，其余（机制、召回注记、
+// 工具规则）逐字不变
+std::string mechanismOnly(const std::string &legacyContract)
+{
+    const std::size_t from = legacyContract.find("先看懂再开口");
+    const std::size_t to = legacyContract.find("\n\n[系统注] ", from);
+    if (from == std::string::npos || to == std::string::npos)
+        return "<契约里找不到语用段>";
+    return legacyContract.substr(0, from) + legacyContract.substr(to);
+}
+
+// 计划生效时的主模型 seam（不追加服务契约）：与 Harness 的主 Agent 记进同一组向量、取同一个
+// 回复队列，另外计数，用来确认这一轮走的是哪个 seam
+void wirePlannedAgent(Harness &harness, int &calls)
+{
+    harness.service->setPlannedAgent(
+        [&harness, &calls](const std::string &contract, const std::vector<ChatMessage> &history,
+                           const std::vector<std::string> &schemas)
+        {
+            ++calls;
+            harness.agentContracts.push_back(contract);
+            harness.agentHistories.push_back(history);
+            harness.agentSchemas.push_back(schemas);
+            if (harness.turnResponses.empty())
+                return passResponse();
+            ChatResponse response = harness.turnResponses.front();
+            harness.turnResponses.erase(harness.turnResponses.begin());
+            return response;
+        });
+}
+
+// 一拍 lull：开会话、一条带 message_id 的群友消息（可回应的消息），她按给定回复（可多个，重说用）
+void lullWithCandidate(Harness &harness, std::vector<ChatResponse> responses)
+{
+    harness.service->onAtActivated(8823, "话题");
+    GroupMessageRecord value = record(8823, 77, "老余", "普鸭的挺好听的", harness.now);
+    value.messageId = "m-1";
+    harness.store->append(value);
+    harness.service->onGroupMessage(value, false);
+    for (ChatResponse &response : responses)
+        harness.turnResponses.push_back(std::move(response));
+    harness.service->runTurn(8823);
+}
+
+std::string han(int count)
+{
+    return repeatUtf8("字", count);
+}
+
+const char *const kTaskLine =
+    "\n\n以上是群聊现场。\n本轮任务：回应老余的那句「普鸭的挺好听的」；这一句是随口接话；一句以内。";
+} // namespace
+
+// 生效期 + 计划 v2：契约只留机制（去掉语用清单），走不追加服务契约的 seam；提问语换成中性说明
+// 加本轮任务句（按 reply_to 引出老余那句）；工具表不变。judge 看到可回应的消息；记录里是 v2 计划，
+// 不含群友原文
+TEST(EngagementPlanV2Test, EnforcedPlanUsesMechanismContractNeutralAskAndTask)
 {
     Harness legacy;
-    legacy.service->onAtActivated(8823, "话题");
-    legacy.feed(8823, "现场消息", legacy.now);
-    legacy.service->runTurn(8823);
+    lullWithCandidate(legacy, {sayResponse("是挺好听")});
+
+    std::vector<std::string> judgePrompts;
+    affect::JudgePolicy judge(
+        [&judgePrompts](const std::string &, const std::string &user)
+        {
+            judgePrompts.push_back(user);
+            return planWithTools("inherit", "[]", "follow", "one", R"("m-1")");
+        },
+        "judge-model");
+    EnforcedHarness enforced("", &judge);
+    int planned = 0;
+    wirePlannedAgent(enforced.harness, planned);
+    lullWithCandidate(enforced.harness, {sayResponse("是挺好听")});
+
     ASSERT_EQ(legacy.agentContracts.size(), 1U);
+    ASSERT_EQ(enforced.harness.agentContracts.size(), 1U) << "只请求了一次";
+    EXPECT_EQ(planned, 1) << "计划生效：走不追加服务契约的 seam";
+    const std::string &contract = enforced.harness.agentContracts.front();
+    EXPECT_EQ(contract, mechanismOnly(legacy.agentContracts.front()));
+    EXPECT_EQ(contract.find("先看懂再开口"), std::string::npos);
+    EXPECT_EQ(contract.find("lulu是谁"), std::string::npos);
+    EXPECT_NE(contract.find("group_say"), std::string::npos) << "怎么说、怎么沉默、怎么离场仍在";
+    EXPECT_NE(contract.find("leave_topic"), std::string::npos);
 
-    EnforcedHarness noted(planWithTools("inherit", "[]", "banter", "轻松", 80));
-    noted.harness.service->onAtActivated(8823, "话题");
-    noted.harness.feed(8823, "现场消息", noted.harness.now);
-    noted.harness.service->runTurn(8823);
-    ASSERT_EQ(noted.harness.agentContracts.size(), 1U);
-    EXPECT_EQ(noted.harness.agentContracts.front(),
-              legacy.agentContracts.front() +
-                  "\n\n[系统注] 这一轮的分寸：speech_act=banter；tone=轻松；最多 80 个字符。");
+    const std::string &before = legacy.agentHistories.front().front().content;
+    const std::size_t askAt = before.find("\n\n以上是");
+    ASSERT_NE(askAt, std::string::npos);
+    EXPECT_EQ(enforced.harness.agentHistories.front().front().content,
+              before.substr(0, askAt) + kTaskLine);
+    EXPECT_EQ(enforced.harness.agentSchemas, legacy.agentSchemas);
+    EXPECT_EQ(enforced.harness.sender->texts, std::vector<std::string>{"是挺好听"});
 
-    EnforcedHarness toneOnly(planWithTools("inherit", "[]", "unspecified", "轻松", 0));
-    toneOnly.harness.service->onAtActivated(8823, "话题");
-    toneOnly.harness.feed(8823, "现场消息", toneOnly.harness.now);
-    toneOnly.harness.service->runTurn(8823);
-    EXPECT_EQ(toneOnly.harness.agentContracts.front(),
-              legacy.agentContracts.front() + "\n\n[系统注] 这一轮的分寸：tone=轻松。");
+    ASSERT_EQ(judgePrompts.size(), 1U);
+    EXPECT_NE(judgePrompts.front().find("可回应的消息（reply_to 只能填这里的 id）：\n- id \"m-1\"：老余 「普鸭的挺好听的」"),
+              std::string::npos)
+        << judgePrompts.front();
+    const affect::DecisionRecord decision = enforced.store.recentDecisions(1).front();
+    EXPECT_TRUE(decision.plan.isV2());
+    EXPECT_EQ(decision.plan.replyTo, std::optional<std::string>("m-1"));
+    EXPECT_EQ(decision.policyVersion, "judge_v2");
+    EXPECT_EQ(decision.plan.toJson().dump().find("普鸭"), std::string::npos) << "计划里没有群友原文";
+    EXPECT_EQ(decision.stateJson.find("普鸭"), std::string::npos);
+    EXPECT_EQ(enforced.latestDeviation(), "");
+}
 
-    EnforcedHarness plain(planWithTools("inherit"));
-    plain.harness.service->onAtActivated(8823, "话题");
-    plain.harness.feed(8823, "现场消息", plain.harness.now);
-    plain.harness.service->runTurn(8823);
-    EXPECT_EQ(plain.harness.agentContracts.front(), legacy.agentContracts.front());
-    EXPECT_EQ(plain.harness.agentSchemas.front(), legacy.agentSchemas.front());
+// 生效期但 judge 失败：回退 v1 基线计划，请求与今天逐字相同（R1 生效路径，分寸注记为空），不走计划 seam
+TEST(EngagementPlanV2Test, JudgeFallbackKeepsTodaysRequest)
+{
+    Harness legacy;
+    lullWithCandidate(legacy, {sayResponse("是挺好听")});
+    EnforcedHarness enforced("不是 JSON");
+    int planned = 0;
+    wirePlannedAgent(enforced.harness, planned);
+    lullWithCandidate(enforced.harness, {sayResponse("是挺好听")});
+
+    EXPECT_EQ(planned, 0);
+    EXPECT_EQ(enforced.harness.agentContracts, legacy.agentContracts);
+    EXPECT_EQ(enforced.harness.agentSchemas, legacy.agentSchemas);
+    ASSERT_EQ(enforced.harness.agentHistories.size(), 1U);
+    EXPECT_EQ(flattenHistory(enforced.harness.agentHistories.front()),
+              flattenHistory(legacy.agentHistories.front()));
+    const affect::DecisionRecord decision = enforced.store.recentDecisions(1).front();
+    EXPECT_FALSE(decision.plan.isV2());
+    EXPECT_EQ(decision.fallbackReason.rfind("judge_invalid:", 0), 0U);
+}
+
+// 影子期（enforce=false）与 affect 关着：即使 judge 给出计划 v2、计划 seam 已接线，请求、工具表、
+// 发出的话与没有决策层时逐字相同
+TEST(EngagementPlanV2Test, ShadowAndAffectOffStayByteIdentical)
+{
+    Harness legacy;
+    lullWithCandidate(legacy, {sayResponse("是挺好听")});
+
+    // 影子期：计划只进记录
+    Harness shadow;
+    affect::DecisionStore shadowStore(shadow.directory.path() + "/affect.db");
+    affect::DecisionRecorder shadowRecorder(shadowStore, affectEnabled(), [&shadow] { return shadow.now; });
+    affect::JudgePolicy judge([](const std::string &, const std::string &)
+                              { return planWithTools("inherit", "[]", "follow", "short", R"("m-1")"); },
+                              "judge-model");
+    shadow.service->setDecisionRecorder(&shadowRecorder);
+    shadow.service->setPolicy(&judge);
+    int shadowPlanned = 0;
+    wirePlannedAgent(shadow, shadowPlanned);
+    lullWithCandidate(shadow, {sayResponse("是挺好听")});
+
+    // affect 关着：组合根同款的稳定外壳，policy=judge、enforce=true 也不起作用
+    Harness off;
+    affect::DecisionStore offStore(off.directory.path() + "/affect.db");
+    affect::DecisionRecorder offRecorder(offStore, off.affect, [&off] { return off.now; });
+    affect::BaselinePolicy baseline;
+    int judgeCalls = 0;
+    affect::JudgePolicy offJudge([&judgeCalls](const std::string &, const std::string &)
+                                 {
+                                     ++judgeCalls;
+                                     return planWithTools("inherit");
+                                 },
+                                 "judge-model");
+    affect::SwitchingPolicy shell(off.affect, baseline, offJudge);
+    AffectOptions offOptions;
+    offOptions.enabled = false;
+    offOptions.policy = "judge";
+    offOptions.enforce = true;
+    off.affect.set(offOptions);
+    off.service->setDecisionRecorder(&offRecorder);
+    off.service->setPolicy(&shell);
+    int offPlanned = 0;
+    wirePlannedAgent(off, offPlanned);
+    lullWithCandidate(off, {sayResponse("是挺好听")});
+
+    for (const Harness *harness : {&shadow, &off})
+    {
+        EXPECT_EQ(harness->agentContracts, legacy.agentContracts);
+        EXPECT_EQ(harness->agentSchemas, legacy.agentSchemas);
+        EXPECT_EQ(harness->sender->texts, legacy.sender->texts);
+        ASSERT_EQ(harness->agentHistories.size(), legacy.agentHistories.size());
+        for (std::size_t index = 0; index < legacy.agentHistories.size(); ++index)
+            EXPECT_EQ(flattenHistory(harness->agentHistories[index]),
+                      flattenHistory(legacy.agentHistories[index]));
+    }
+    EXPECT_EQ(shadowPlanned, 0);
+    EXPECT_EQ(offPlanned, 0);
+    EXPECT_EQ(judgeCalls, 0);
+    EXPECT_FALSE(offStore.isOpen());
+    const affect::DecisionRecord decision = shadowStore.recentDecisions(1).front();
+    EXPECT_TRUE(decision.plan.isV2()) << "影子期照样记下 v2 计划";
+    EXPECT_EQ(executionsOf(shadow.directory.path() + "/affect.db", decision.decisionId).front().second,
+              "shadow");
+}
+
+// 后核：超出本档字数 → 重说一次（告诉她哪里不合格）；第二次仍超 → 照样发出，记偏差
+TEST(EngagementPlanV2Test, OverLongIsRetriedOnceThenSentWithDeviation)
+{
+    EnforcedHarness enforced(planWithTools("inherit", "[]", "follow", "short", R"("m-1")"));
+    int planned = 0;
+    wirePlannedAgent(enforced.harness, planned);
+    lullWithCandidate(enforced.harness, {sayResponse(han(30)), sayResponse(han(40))});
+
+    EXPECT_EQ(planned, 2) << "只重说一次";
+    ASSERT_EQ(enforced.harness.agentHistories.size(), 2U);
+    const std::string &retryTurn = enforced.harness.agentHistories[1].back().content;
+    EXPECT_NE(retryTurn.find("\n\n[系统注] 你刚才要说的「" + han(30) +
+                             "」没有发出：有 30 个字，这一轮最多 24 个字。照本轮任务重说一次。"),
+              std::string::npos)
+        << retryTurn;
+    EXPECT_EQ(enforced.harness.agentContracts[1], enforced.harness.agentContracts[0]);
+    EXPECT_EQ(enforced.harness.sender->texts, std::vector<std::string>{han(40)})
+        << "被叫到时不能因为话长了就不回";
+    EXPECT_EQ(enforced.latestDeviation(), "reply_check:length");
+}
+
+TEST(EngagementPlanV2Test, RetryThatFitsIsSentWithoutDeviation)
+{
+    EnforcedHarness enforced(planWithTools("inherit", "[]", "follow", "short", R"("m-1")"));
+    int planned = 0;
+    wirePlannedAgent(enforced.harness, planned);
+    lullWithCandidate(enforced.harness, {sayResponse("好听。我也喜欢。"), sayResponse("是挺好听")});
+
+    EXPECT_EQ(planned, 2);
+    EXPECT_NE(enforced.harness.agentHistories[1].back().content.find("有 2 句，这一轮最多 1 句"),
+              std::string::npos);
+    EXPECT_EQ(enforced.harness.sender->texts, std::vector<std::string>{"是挺好听"});
+    EXPECT_EQ(enforced.latestDeviation(), "");
+}
+
+// Markdown：重说后仍带记号，去掉记号后发出
+TEST(EngagementPlanV2Test, MarkdownIsStrippedAfterTheSecondTry)
+{
+    EnforcedHarness enforced(planWithTools("inherit"));
+    int planned = 0;
+    wirePlannedAgent(enforced.harness, planned);
+    lullWithCandidate(enforced.harness, {sayResponse("**好听**"), sayResponse("**真的好听**")});
+
+    EXPECT_EQ(planned, 2);
+    EXPECT_EQ(enforced.harness.sender->texts, std::vector<std::string>{"真的好听"});
+    EXPECT_EQ(enforced.latestDeviation(), "reply_check:markdown_stripped");
+}
+
+// 程序提示类文字：不发、不重说，这一拍按沉默收尾
+TEST(EngagementPlanV2Test, SystemTextIsNotSentAndNotRetried)
+{
+    EnforcedHarness enforced(planWithTools("inherit"));
+    int planned = 0;
+    wirePlannedAgent(enforced.harness, planned);
+    lullWithCandidate(enforced.harness, {sayResponse("系统提示：模型无返回内容！")});
+
+    EXPECT_EQ(planned, 1);
+    EXPECT_TRUE(enforced.harness.sender->texts.empty());
+    EXPECT_EQ(enforced.harness.service->sessionOf(8823)->consecutivePasses, 1);
+    EXPECT_EQ(enforced.latestStatus(), "skipped");
+    EXPECT_EQ(enforced.latestDeviation(), "reply_check:system_text")
+        << "她是要说话的（与计划一致），话被核对拦下";
+}
+
+// 重说时她改主意不说了：那是她的决定，不记结构偏差
+TEST(EngagementPlanV2Test, ChoosingSilenceOnRetryIsHerChoice)
+{
+    EnforcedHarness enforced(planWithTools("inherit", "[]", "follow", "short"));
+    int planned = 0;
+    wirePlannedAgent(enforced.harness, planned);
+    lullWithCandidate(enforced.harness, {sayResponse(han(30)), passResponse()});
+
+    EXPECT_EQ(planned, 2);
+    EXPECT_TRUE(enforced.harness.sender->texts.empty());
+    EXPECT_EQ(enforced.latestDeviation(), "model_override:no_reply");
 }
 
 // ---- 裸文本不是发言（L3 护栏，2026-11-14）----
@@ -3007,21 +3250,20 @@ TEST(EngagementFactsCardTest, EmptyFactsKeepsContractButStillTellsTheTime)
               std::string::npos);
 }
 
-// 生效期重建的契约同样以部署者事实段开头，分寸注记照旧在最后
+// 生效期重建的契约同样以部署者事实段开头（计划 v2：之后是只留机制的契约）
 TEST(EngagementFactsCardTest, EnforcedContractAlsoStartsWithDeployerFacts)
 {
     Harness legacy;
     speakOnce(legacy);
     FactsFile file(kFactsText);
-    EnforcedHarness enforced(planWithTools("inherit", "[]", "unspecified", "轻松", 0));
+    EnforcedHarness enforced(planWithTools("inherit"));
     enforced.harness.service->setDeployerFacts(&file.facts);
     enableAffect(enforced.harness);
     speakOnce(enforced.harness);
 
     ASSERT_EQ(enforced.harness.agentContracts.size(), 1U);
     EXPECT_EQ(enforced.harness.agentContracts.front(),
-              affect::deployerFactsSection(kFactsText) + legacy.agentContracts.front() +
-                  "\n\n[系统注] 这一轮的分寸：tone=轻松。");
+              affect::deployerFactsSection(kFactsText) + mechanismOnly(legacy.agentContracts.front()));
 }
 
 // judge 自己在 prompt 里加“关于她的事实”与“此刻”；它拿到的材料不重复带现场事实那一行

@@ -52,7 +52,10 @@ std::string deployerFactsSection(const std::string &raw)
     return "\n\n[关于你的事实] 由部署者填写，是真实情况：\n" + facts;
 }
 
-DeployerFacts::DeployerFacts(std::string path) : filePath(std::move(path)) {}
+DeployerFacts::DeployerFacts(std::string path, std::size_t maxBytes)
+    : filePath(std::move(path)), maxBytes(maxBytes)
+{
+}
 
 std::string DeployerFacts::read() const
 {
@@ -60,22 +63,22 @@ std::string DeployerFacts::read() const
     if (!input.is_open())
         return {};
     // 多读 1 字节：据此判断是否超长，并看清截断处是不是落在一个字符中间
-    std::string content(kMaxBytes + 1, '\0');
+    std::string content(maxBytes + 1, '\0');
     input.read(&content[0], static_cast<std::streamsize>(content.size()));
     content.resize(static_cast<std::size_t>(input.gcount()));
-    if (content.size() <= kMaxBytes)
+    if (content.size() <= maxBytes)
     {
         warnedSize.store(0);
         return content;
     }
 
-    content.resize(utf8PrefixLength(content, kMaxBytes));
+    content.resize(utf8PrefixLength(content, maxBytes));
     std::error_code error;
     const std::uintmax_t total = std::filesystem::file_size(filePath, error);
     // 同一大小只告警一次：每个群聊回合都会读它，超长不改就不必每轮刷日志
-    const std::uintmax_t key = error ? static_cast<std::uintmax_t>(kMaxBytes + 1) : total;
+    const std::uintmax_t key = error ? static_cast<std::uintmax_t>(maxBytes + 1) : total;
     if (warnedSize.exchange(key) != key)
-        LOG_WARNING("部署者事实文件超过 " + std::to_string(kMaxBytes) + " 字节" +
+        LOG_WARNING("部署者文件超过 " + std::to_string(maxBytes) + " 字节" +
                     (error ? std::string() : "（" + std::to_string(total) + " 字节）") +
                     "，只取前 " + std::to_string(content.size()) + " 字节：" + filePath);
     return content;

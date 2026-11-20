@@ -139,7 +139,7 @@ TEST(ShadowDecisionTest, JudgeFailureStillWritesFallbackDecision)
     ASSERT_TRUE(decision.has_value());
     EXPECT_EQ(decision->plan.action, "reply");
     EXPECT_EQ(decision->fallbackReason, "judge_empty");
-    EXPECT_EQ(decision->policyVersion, "judge_v1");
+    EXPECT_EQ(decision->policyVersion, "judge_v2");
 }
 
 // 投递抛异常：照样补写决策再把异常抛出去
