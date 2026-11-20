@@ -15,6 +15,7 @@
  *
  * 话题跟进（意志层 v2）委托 EngagementService：观察入库喂会话、
  * @ 硬激活转发、她的出站计活动。本类只保留内容层职责。
+ * 每行经 GroupLineFormat（与会话轮材料同一个格式化点），回复关系按全部缓冲画出。
  */
 #include "GroupContextStore.h"
 #include "GroupListService.h"
@@ -34,6 +35,7 @@
 
 class EngagementService;
 class GlanceService;
+class GroupReplyIndex;
 class ImageAssetStore;
 
 class GroupContextService
@@ -98,10 +100,11 @@ private:
 
     // 该群此刻是否在观察（总开关 + 监控集，实时查询以便即时生效）
     bool observingGroup(std::uint64_t groupId) const;
+    // 每行经 GroupLineFormat（唯一的行格式化点）；replies 由全部缓冲构建，画出回复的是谁的哪句
     std::string formatRecords(const BotIdentity &bot, const std::vector<GroupMessageRecord> &records,
-                              std::int64_t watermarkTs) const;
-    std::string digestRecords(const BotIdentity &bot,
-                              const std::vector<GroupMessageRecord> &records) const;
+                              const GroupReplyIndex &replies, std::int64_t watermarkTs) const;
+    std::string digestRecords(const BotIdentity &bot, const std::vector<GroupMessageRecord> &records,
+                              const GroupReplyIndex &replies) const;
 
     GroupListService *const state;
     const Live<BotIdentity> &botIdentity;

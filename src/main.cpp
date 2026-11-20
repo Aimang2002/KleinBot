@@ -39,6 +39,7 @@
 #include "Affect/BaselinePolicy.h"
 #include "Affect/DecisionRecorder.h"
 #include "Affect/DecisionStore.h"
+#include "Affect/FactsCard.h"
 #include "Affect/JudgePolicy.h"
 #include "Affect/SwitchingPolicy.h"
 #include "Persistence/ReminderStore.h"
@@ -392,7 +393,8 @@ int main(int argc, char **argv)
 	ModelRegistry models(kModelRegistryPath);
 	const std::string &dbPath = settings.storage.conversationDatabase;
 	ConversationStore conversationStore(dbPath);
-	// M1 决策记录（影子）：默认关闭；开启后只写决策/执行/反馈表，不改变任何回应行为。
+	// M1 决策记录（影子）：默认关闭；开启后写决策/执行/反馈表。记录本身不改变回应行为
+	//（affect.enabled 另外打开群聊两条路径的事实卡，见下方 deployerFacts）。
 	// 稳定外壳（ADR-023）：决策库与记录器始终构造，affect.enabled 是活值，记录器每次问它；
 	// 决策库延迟打开——第一次在 enabled 为真时需要记录才打开并建表，没启用过就没有决策表。
 	// 打开失败时回退到不记录（只试一次）
@@ -402,7 +404,7 @@ int main(int argc, char **argv)
 	{
 		// 启动时就开着：当场打开，启动日志如实反映
 		if (decisionRecorder.enabled())
-			LOG_INFO("心境决策记录已启用（M1 影子：只记录，不改变回应）");
+			LOG_INFO("心境决策记录已启用（M1 影子：记录本身不改变回应）");
 		else
 			LOG_WARNING("心境决策记录启用失败：决策库不可用，已回退到不记录");
 	}
@@ -532,6 +534,11 @@ int main(int argc, char **argv)
 				   const std::string &systemPrompt, const std::string &userPrompt)
 		{ return chatService.buildOnceWith(provider(), systemPrompt, userPrompt, timeoutMs); };
 	};
+	// 事实卡（经历层 E0，ADR-026）：部署者写的 source/facts.md（可选，与 soul.md 同目录），每次用时现读，
+	// 改了下一次请求即生效。affect.enabled 为真时进判定器与两条群聊路径（部署者事实进 system，
+	// 现场事实进本轮 user 侧）；关着时请求与此前逐字相同。声明在所有使用者（judge、话题会话、
+	// Message）之前、在它们之后析构
+	affect::DeployerFacts deployerFacts("source/facts.md");
 	// R1 决策层（ADR-023 稳定外壳）：基线与 judge 两个策略始终构造，外壳 decisionPolicy 按当前
 	// 配置转给其中一个——affect.enabled 为真且 affect.policy 为 judge 时用 judge，否则基线。
 	// 两条群回应路径（Message 的 @ 回复、话题会话轮）共用这一个外壳，每次决策按快照选一次；
@@ -561,6 +568,7 @@ int main(int argc, char **argv)
 		!settings.affect.judgeModel.empty() && !models.find(settings.affect.judgeModel))
 		LOG_WARNING("affect.judge_model 未在模型注册表找到：" + settings.affect.judgeModel +
 					"，judge 将改用 worker 模型（models.worker）");
+	judgePolicy.setFactsSource([&deployerFacts]() { return deployerFacts.read(); });
 	affect::SwitchingPolicy decisionPolicy(liveSettings.affect, baselinePolicy, judgePolicy);
 	InboundMessageQueue inboundQueue;
 	OutboundMessageQueue outboundQueue;
@@ -681,6 +689,7 @@ int main(int argc, char **argv)
 										&messageSender);
 	engagementService.setDecisionRecorder(&decisionRecorder);
 	engagementService.setPolicy(&decisionPolicy);
+	engagementService.setDeployerFacts(&deployerFacts);
 	groupContextService.setEngagement(&engagementService);
 	// @ 回复路径的 leave_topic 与会话轮的离场动词落到同一处（ADR-024）
 	leaveTopicTool.bind([&engagementService](std::uint64_t groupId, bool stepBack,
@@ -723,7 +732,8 @@ int main(int argc, char **argv)
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
 		commandRegistry, liveSettings.message, visionEndpoint,
 		liveSettings.affect, &typingIndicator, &perceptionChannel,
-		&groupContextService, &decisionRecorder, &groupImageAssets, &decisionPolicy);
+		&groupContextService, &decisionRecorder, &groupImageAssets, &decisionPolicy,
+		&deployerFacts);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,

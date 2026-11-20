@@ -2,6 +2,7 @@
 
 #include "Affect/DecisionRecorder.h"
 #include "Affect/DecisionStore.h"
+#include "Affect/FactsCard.h"
 #include "Affect/JudgePolicy.h"
 #include "Application/InboundCoalescer.h"
 #include "Asset/ImageAssetStore.h"
@@ -10,12 +11,14 @@
 #include "Memory/MemoryService.h"
 #include "Message/Message.h"
 #include "ModelApiCaller/Dock.hpp"
+#include "Perception/GroupContextService.h"
 #include "Persistence/ConversationStore.h"
 #include "Port/MessageSenderPort.h"
 #include "Tool/ToolRegistry.h"
 #include "UserSession/UserSessionService.h"
 
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -291,9 +294,11 @@ public:
 
 struct PrivateMessageFixture
 {
-    // recorder / policy 可空（默认）：给了就走群聊决策点（配置实时生效的 enforce 用例）
+    // recorder / policy 可空（默认）：给了就走群聊决策点（配置实时生效的 enforce 用例）；
+    // facts 可空（默认）：给了就是组合根同款的事实卡接线（经历层 E0）
     explicit PrivateMessageFixture(affect::DecisionRecorder *recorder = nullptr,
-                                   affect::DecisionPolicy *policy = nullptr)
+                                   affect::DecisionPolicy *policy = nullptr,
+                                   const affect::DeployerFacts *facts = nullptr)
         : store(directory.path() + "/conversation.db"),
           registry(writeRegistry()),
           dock(network),
@@ -307,7 +312,7 @@ struct PrivateMessageFixture
           liveMessage(messageOptions()),
           message(dock, session, chat, sender, assets, commands, liveMessage,
                   [] { return ModelEndpointOptions{}; }, liveAffect, nullptr, nullptr,
-                  nullptr, recorder, nullptr, policy)
+                  nullptr, recorder, nullptr, policy, facts)
     {
         dock.registerStandard("Fake", std::make_unique<CountingChatPort>(&captured));
     }
@@ -503,4 +508,138 @@ TEST(MessageLiveConfigTest, EnforceIsReadAtEachMessage)
     ASSERT_EQ(fixture.captured.size(), 2U);
     EXPECT_EQ(requestsSeenByJudge, (std::vector<std::size_t>{1, 1}))
         << "生效期：先调 judge、再请求主模型";
+}
+
+// ---- 事实卡（经历层 E0，ADR-026）：群 @ 回复路径 ----
+namespace
+{
+InboundMessage groupAt(const std::string &text)
+{
+    InboundMessage at = privateText(7, text);
+    at.message_type = "group";
+    at.group_id = 8823;
+    at.message_id = 1;
+    at.mentioned_ids = {10086};
+    return at;
+}
+
+void enableAffect(PrivateMessageFixture &fixture)
+{
+    AffectOptions options = *fixture.liveAffect.get();
+    options.enabled = true;
+    fixture.liveAffect.set(options);
+}
+
+// 两次请求除最后一条 user 消息外逐字相同
+void expectSameExceptLastUser(const ChatRequest &a, const ChatRequest &b)
+{
+    EXPECT_EQ(a.tools, b.tools);
+    ASSERT_EQ(a.history.size(), b.history.size());
+    for (std::size_t index = 0; index + 1 < a.history.size(); ++index)
+    {
+        EXPECT_EQ(a.history[index].role, b.history[index].role);
+        EXPECT_EQ(a.history[index].content, b.history[index].content);
+    }
+}
+
+const char *const kFactsText = "你的声音来自语音合成。";
+} // namespace
+
+// affect 开着且接了部署者事实：部署者事实段接在群聊收敛契约之后（system），
+// 现场事实并入本轮尾注（"[系统注]" 尾插到最后一条 user 消息）
+TEST(MessageFactsCardTest, GroupAtReplyCarriesFactsCardWhenAffectOn)
+{
+    CoalesceTemporaryDirectory directory;
+    const std::string path = directory.path() + "/facts.md";
+    std::ofstream(path) << "\n" << kFactsText << "\n";
+    affect::DeployerFacts facts(path);
+
+    PrivateMessageFixture legacy;
+    PrivateMessageFixture withFacts(nullptr, nullptr, &facts);
+    enableAffect(withFacts);
+    legacy.message.handleMessage(groupAt("今天几号"));
+    const std::time_t before = std::time(nullptr);
+    withFacts.message.handleMessage(groupAt("今天几号"));
+    const std::time_t after = std::time(nullptr);
+
+    ASSERT_EQ(legacy.captured.size(), 1U);
+    ASSERT_EQ(withFacts.captured.size(), 1U);
+    const ChatRequest &a = legacy.captured[0];
+    const ChatRequest &b = withFacts.captured[0];
+    const std::string contract = GroupContextService::groupConversationContract();
+    const std::size_t contractAt = a.system_prompt.find(contract);
+    ASSERT_NE(contractAt, std::string::npos);
+    const std::size_t split = contractAt + contract.size();
+    EXPECT_EQ(b.system_prompt, a.system_prompt.substr(0, split) +
+                                   affect::deployerFactsSection(kFactsText) +
+                                   a.system_prompt.substr(split));
+    EXPECT_EQ(b.system_prompt.find("现在是"), std::string::npos) << "现场事实不进 system";
+
+    expectSameExceptLastUser(a, b);
+    const std::string &lastBefore = a.history.back().content;
+    const std::string &lastAfter = b.history.back().content;
+    EXPECT_TRUE(lastAfter == lastBefore + "\n[系统注] " + affect::sceneFactsNote(before) ||
+                lastAfter == lastBefore + "\n[系统注] " + affect::sceneFactsNote(after))
+        << lastAfter;
+    EXPECT_EQ(withFacts.sender.texts, legacy.sender.texts);
+}
+
+// affect 关着（即使接了事实）、私聊（本步不动）：请求与此前逐字相同
+TEST(MessageFactsCardTest, AffectOffAndPrivateChatStayAsBefore)
+{
+    CoalesceTemporaryDirectory directory;
+    const std::string path = directory.path() + "/facts.md";
+    std::ofstream(path) << kFactsText;
+    affect::DeployerFacts facts(path);
+
+    PrivateMessageFixture legacy;
+    PrivateMessageFixture off(nullptr, nullptr, &facts);
+    legacy.message.handleMessage(groupAt("今天几号"));
+    off.message.handleMessage(groupAt("今天几号"));
+
+    PrivateMessageFixture legacyPrivate;
+    PrivateMessageFixture privateOn(nullptr, nullptr, &facts);
+    enableAffect(privateOn);
+    legacyPrivate.message.handleMessage(privateText(7, "今天几号"));
+    privateOn.message.handleMessage(privateText(7, "今天几号"));
+
+    const std::vector<std::pair<const PrivateMessageFixture *, const PrivateMessageFixture *>> pairs{
+        {&legacy, &off}, {&legacyPrivate, &privateOn}};
+    for (const auto &[expected, actual] : pairs)
+    {
+        ASSERT_EQ(expected->captured.size(), 1U);
+        ASSERT_EQ(actual->captured.size(), 1U);
+        const ChatRequest &a = expected->captured[0];
+        const ChatRequest &b = actual->captured[0];
+        EXPECT_EQ(a.system_prompt, b.system_prompt);
+        expectSameExceptLastUser(a, b);
+        EXPECT_EQ(a.history.back().content, b.history.back().content);
+    }
+}
+
+// facts.md 为空：system 与此前逐字相同，现场事实照常进尾注；已有连发注记时用换行接在后面
+TEST(MessageFactsCardTest, EmptyFactsStillTellsTheTimeAfterBurstNote)
+{
+    CoalesceTemporaryDirectory directory;
+    const std::string path = directory.path() + "/facts.md";
+    std::ofstream(path) << "  \n";
+    affect::DeployerFacts facts(path);
+
+    PrivateMessageFixture legacy;
+    PrivateMessageFixture withFacts(nullptr, nullptr, &facts);
+    enableAffect(withFacts);
+    legacy.message.handleMessage(groupAt("今天几号"), "连发注记");
+    const std::time_t before = std::time(nullptr);
+    withFacts.message.handleMessage(groupAt("今天几号"), "连发注记");
+    const std::time_t after = std::time(nullptr);
+
+    ASSERT_EQ(withFacts.captured.size(), 1U);
+    const ChatRequest &a = legacy.captured[0];
+    const ChatRequest &b = withFacts.captured[0];
+    EXPECT_EQ(a.system_prompt, b.system_prompt);
+    expectSameExceptLastUser(a, b);
+    EXPECT_TRUE(b.history.back().content == a.history.back().content + "\n" + affect::sceneFactsNote(before) ||
+                b.history.back().content == a.history.back().content + "\n" + affect::sceneFactsNote(after))
+        << b.history.back().content;
+    EXPECT_NE(a.history.back().content.find("[系统注] 连发注记"), std::string::npos);
 }

@@ -5,6 +5,7 @@
 #include "Affect/DecisionRecord.h"
 #include "Affect/DecisionRecorder.h"
 #include "Affect/DecisionStore.h"
+#include "Affect/FactsCard.h"
 #include "Affect/JudgePolicy.h"
 #include "Affect/SwitchingPolicy.h"
 #include "Perception/EngagementService.h"
@@ -26,6 +27,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -1137,6 +1139,33 @@ TEST(EngagementContextTest, RecallNoteReflectsBudgetInContract)
     harness.turnResponses.push_back(sayResponse("第一轮"));
     harness.service->runTurn(8823);
     EXPECT_NE(harness.agentContracts.front().find("还有 1 次上下文召回"), std::string::npos);
+}
+
+// 回复关系（经历层 E0）：材料里画出回复的是谁的哪句——群友引用回复她，材料写“回复 你”和她那句的前 12 个字
+TEST(EngagementContextTest, MaterialDrawsWhoTheReplyIsTo)
+{
+    Harness harness;
+    harness.service->onAtActivated(8823, "话题");
+    GroupMessageRecord hers =
+        record(8823, 987654321, "Klein", "闲下来也挺好，摸鱼不用愧疚", harness.now, false, true);
+    hers.messageId = "s-1";
+    harness.store->append(hers);
+    GroupMessageRecord reply = record(8823, 42, "阿青", "我们部门被边缘化了", harness.now + 1);
+    reply.messageId = "m-2";
+    reply.replyToMessageId = "s-1";
+    harness.store->append(reply);
+    harness.service->onGroupMessage(reply, false); // 引用回复她：待回应
+    ASSERT_TRUE(harness.service->sessionOf(8823)->addressPending);
+    harness.turnResponses.push_back(sayResponse("嗯嗯"));
+    harness.service->runTurn(8823);
+
+    ASSERT_FALSE(harness.agentHistories.empty());
+    const std::string &material = harness.agentHistories.front().front().content;
+    EXPECT_NE(material.find("阿青（回复 你：「闲下来也挺好，摸鱼不用愧…」）: 我们部门被边缘化了"),
+              std::string::npos)
+        << material;
+    EXPECT_NE(material.find("Klein（你）: 闲下来也挺好，摸鱼不用愧疚"), std::string::npos)
+        << "没有引用的行与此前逐字相同";
 }
 
 TEST(EngagementContextTest, ContractPutsComprehensionFirst)
@@ -2864,4 +2893,171 @@ TEST(EngagementEnforceTest, EnforceFollowsLiveValueOnNextTurn)
                   .front()
                   .first,
               "skipped");
+}
+
+// ---- 事实卡（经历层 E0，ADR-026）----
+namespace
+{
+// 部署者写的 facts.md（临时目录里），与组合根一样经 DeployerFacts 现读
+struct FactsFile
+{
+    TemporaryDirectory directory;
+    std::string path;
+    affect::DeployerFacts facts;
+
+    explicit FactsFile(const std::string &content)
+        : path(directory.path() + "/facts.md"), facts(path)
+    {
+        std::ofstream(path, std::ios::binary | std::ios::trunc) << content;
+    }
+};
+
+void enableAffect(Harness &harness)
+{
+    AffectOptions options = *harness.affect.get();
+    options.enabled = true;
+    harness.affect.set(options);
+}
+
+// 一拍 lull：开会话、一条现场消息、她说一句
+void speakOnce(Harness &harness)
+{
+    harness.service->onAtActivated(8823, "话题");
+    harness.feed(8823, "现场消息", harness.now);
+    harness.turnResponses.push_back(sayResponse("接一句"));
+    harness.service->runTurn(8823);
+}
+
+const char *const kFactsText = "你的声音来自语音合成。\n你的来历没有记录。";
+} // namespace
+
+// affect 开着且接了部署者事实：部署者事实段在契约最前（紧跟人格与服务契约，进 system），
+// 现场事实一行在材料之后、提问语之前（本轮 user 侧）；工具表与动作不变
+TEST(EngagementFactsCardTest, AffectOnPutsDeployerFactsInSystemAndSceneLineInUserTurn)
+{
+    Harness legacy;
+    speakOnce(legacy);
+
+    FactsFile file(std::string("  ") + kFactsText + "\n");
+    Harness harness;
+    harness.service->setDeployerFacts(&file.facts);
+    enableAffect(harness);
+    speakOnce(harness);
+
+    ASSERT_EQ(legacy.agentContracts.size(), 1U);
+    ASSERT_EQ(harness.agentContracts.size(), 1U);
+    EXPECT_EQ(harness.agentContracts.front(),
+              "\n\n[关于你的事实] 由部署者填写，是真实情况：\n" + std::string(kFactsText) +
+                  legacy.agentContracts.front());
+    EXPECT_EQ(harness.agentContracts.front().find("现在是"), std::string::npos)
+        << "现场事实不进 system";
+
+    const std::string &before = legacy.agentHistories.front().front().content;
+    const std::string &after = harness.agentHistories.front().front().content;
+    const std::size_t askAt = before.find("\n\n以上是");
+    ASSERT_NE(askAt, std::string::npos);
+    EXPECT_EQ(after, before.substr(0, askAt) + "（" + affect::sceneFactsNote(harness.now) + "）" +
+                         before.substr(askAt));
+    EXPECT_EQ(harness.agentSchemas, legacy.agentSchemas);
+    EXPECT_EQ(harness.sender->texts, legacy.sender->texts);
+}
+
+// affect 关着（即使接了事实）或没接事实（即使 affect 开着）：请求与此前逐字相同
+TEST(EngagementFactsCardTest, AffectOffOrUnwiredKeepsRequestsAsBefore)
+{
+    Harness legacy;
+    speakOnce(legacy);
+    FactsFile file(kFactsText);
+
+    Harness off;
+    off.service->setDeployerFacts(&file.facts);
+    speakOnce(off);
+
+    Harness unwired;
+    enableAffect(unwired);
+    speakOnce(unwired);
+
+    for (const Harness *harness : {&off, &unwired})
+    {
+        EXPECT_EQ(harness->agentContracts, legacy.agentContracts);
+        EXPECT_EQ(harness->agentSchemas, legacy.agentSchemas);
+        EXPECT_EQ(harness->sender->texts, legacy.sender->texts);
+        ASSERT_EQ(harness->agentHistories.size(), legacy.agentHistories.size());
+        for (std::size_t index = 0; index < legacy.agentHistories.size(); ++index)
+            EXPECT_EQ(flattenHistory(harness->agentHistories[index]),
+                      flattenHistory(legacy.agentHistories[index]));
+    }
+}
+
+// facts.md 为空：system 与此前逐字相同，现场事实照常（由程序算，不靠部署者）
+TEST(EngagementFactsCardTest, EmptyFactsKeepsContractButStillTellsTheTime)
+{
+    Harness legacy;
+    speakOnce(legacy);
+    FactsFile file(" \n");
+    Harness harness;
+    harness.service->setDeployerFacts(&file.facts);
+    enableAffect(harness);
+    speakOnce(harness);
+
+    EXPECT_EQ(harness.agentContracts, legacy.agentContracts);
+    ASSERT_EQ(harness.agentHistories.size(), 1U);
+    EXPECT_NE(harness.agentHistories.front().front().content.find(
+                  "（" + affect::sceneFactsNote(harness.now) + "）\n\n以上是"),
+              std::string::npos);
+}
+
+// 生效期重建的契约同样以部署者事实段开头，分寸注记照旧在最后
+TEST(EngagementFactsCardTest, EnforcedContractAlsoStartsWithDeployerFacts)
+{
+    Harness legacy;
+    speakOnce(legacy);
+    FactsFile file(kFactsText);
+    EnforcedHarness enforced(planWithTools("inherit", "[]", "unspecified", "轻松", 0));
+    enforced.harness.service->setDeployerFacts(&file.facts);
+    enableAffect(enforced.harness);
+    speakOnce(enforced.harness);
+
+    ASSERT_EQ(enforced.harness.agentContracts.size(), 1U);
+    EXPECT_EQ(enforced.harness.agentContracts.front(),
+              affect::deployerFactsSection(kFactsText) + legacy.agentContracts.front() +
+                  "\n\n[系统注] 这一轮的分寸：tone=轻松。");
+}
+
+// judge 自己在 prompt 里加“关于她的事实”与“此刻”；它拿到的材料不重复带现场事实那一行
+TEST(EngagementFactsCardTest, JudgeAddsItsOwnMomentAndMaterialHasNoSceneLine)
+{
+    FactsFile file(kFactsText);
+    Harness harness;
+    affect::DecisionStore store(harness.directory.path() + "/affect.db");
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
+    std::vector<std::string> judgePrompts;
+    affect::JudgePolicy judge(
+        [&judgePrompts](const std::string &, const std::string &user)
+        {
+            judgePrompts.push_back(user);
+            return judgeReply("group_say");
+        },
+        "judge-model", [&harness] { return harness.now; });
+    judge.setFactsSource([&file]() { return file.facts.read(); });
+    harness.service->setDecisionRecorder(&recorder);
+    harness.service->setPolicy(&judge);
+    harness.service->setDeployerFacts(&file.facts);
+    enableAffect(harness);
+    speakOnce(harness);
+
+    ASSERT_EQ(judgePrompts.size(), 1U);
+    const std::string &prompt = judgePrompts.front();
+    const std::string scene = affect::sceneFactsNote(harness.now);
+    EXPECT_NE(prompt.find("关于她的事实（部署者填写，是真实情况；其中的“你”指她）：\n" +
+                          std::string(kFactsText)),
+              std::string::npos);
+    EXPECT_NE(prompt.find("\n\n此刻：" + scene), std::string::npos);
+    EXPECT_EQ(prompt.find("（" + scene + "）"), std::string::npos)
+        << "judge 的材料不重复带现场事实那一行";
+
+    ASSERT_EQ(harness.agentContracts.size(), 1U);
+    EXPECT_EQ(harness.agentContracts.front().rfind(affect::deployerFactsSection(kFactsText), 0), 0U);
+    EXPECT_NE(harness.agentHistories.front().front().content.find("（" + scene + "）"),
+              std::string::npos);
 }

@@ -21,6 +21,9 @@
  * 工具产出的出站消息（图）当场投递并入群缓冲。
  * 工具轮走 Application/ToolLoop（与一对一对话共用同一实现），开放工具的使用规则
  * 由工具自带、经 Application/ToolGuidance 组装（GroupTurn 场景）。
+ * 材料每一行经 Perception/GroupLineFormat（唯一的行格式化点），画出回复的是谁的哪句。
+ * 事实卡（经历层 E0，ADR-026）：affect.enabled 为真且接了部署者事实时，契约最前是部署者
+ * 事实段（进 system），现场事实（日期、星期、时刻）作为一行放在材料之后（本轮 user 侧）。
  * 轮次触发：点名/引用回复她（立即）、追问窗口（她开口后 120s 内群友接话 + 静默，
  * 每次开口至多 2 轮）、lull（攒 5 条 + 静默 + 节流 + 每小时帽）——都只是资源预算，
  * 每轮说不说由她决定。
@@ -69,6 +72,7 @@ namespace affect
 {
 class DecisionPolicy;
 class DecisionRecorder;
+class DeployerFacts;
 }
 class ToolRegistry;
 
@@ -162,6 +166,10 @@ public:
     // 与基线逐字相同（enforce 来自构造时给的活值）。policy 由组合根持有、须比本服务活得久；
     // 组合根给的是策略外壳，每个会话轮按 affect 快照 resolve 一次
     void setPolicy(affect::DecisionPolicy *policy) { this->policy = policy; }
+    // 事实卡（经历层 E0，ADR-026）：可空 = 不加事实卡。非空且当轮 affect.enabled 为真时，部署者
+    // 事实段排在契约最前（进 system），现场事实作为一行放在材料之后（本轮 user 侧）。
+    // facts 由组合根持有、须比本服务活得久；每轮现读一次文件
+    void setDeployerFacts(const affect::DeployerFacts *facts) { this->deployerFacts = facts; }
     // 会话轮可用的注册表工具（如 inspect_image / generate_image / send_image /
     // klein_web_search / klein_web_fetch；契约追加开放工具自带的 GroupTurn 使用规则）：
     // tools 由组合根持有、须比本服务活得久；allowedNames 当场过滤——未注册或
@@ -275,6 +283,7 @@ private:
     OutboundRecorder outboundRecorder;
     affect::DecisionRecorder *decisionRecorder = nullptr;
     affect::DecisionPolicy *policy = nullptr;
+    const affect::DeployerFacts *deployerFacts = nullptr;
     const ToolRegistry *tools = nullptr;
     std::vector<std::string> turnToolNames; // setTools 过滤后的会话轮注册表工具名
 };

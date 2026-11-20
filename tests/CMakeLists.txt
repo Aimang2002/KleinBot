@@ -17,12 +17,14 @@ add_executable(kleinbot_tests
     EngagementTests.cpp
     EngagementTurnTests.cpp
     EventRoutingTests.cpp
+    FactsCardTests.cpp
     FeedbackTests.cpp
     FsUtilTests.cpp
     GlanceTests.cpp
     GroupAssetTests.cpp
     OpenAIImageParseTests.cpp
     GroupContextTests.cpp
+    GroupLineFormatTests.cpp
     GroupPresenceTests.cpp
     GroupListTests.cpp
     ImagePlaceholderTests.cpp

@@ -299,6 +299,29 @@ TEST(GroupContextServiceTest, OutboundRecordedAndAlwaysIncluded)
     EXPECT_NE(note.find("歪了呀"), std::string::npos);
 }
 
+// 回复关系（经历层 E0）：@ 回复的群背景画出回复的是谁的哪句；被回复的那条不在缓冲里时
+// 如实写“更早的消息”；不再是只有“（引用回复）”四个字
+TEST(GroupContextServiceTest, AssembleDrawsReplyRelations)
+{
+    TemporaryDirectory temporaryDirectory;
+    ASSERT_FALSE(temporaryDirectory.path().empty());
+    GroupContextStore store(temporaryDirectory.path() + "/conversation.db");
+    auto state = observingState(temporaryDirectory.path() + "/conversation.db");
+    GroupContextService service(state.get(), liveTestBot(), &store);
+
+    service.observe(chat(10, "甲", "原神深渊十二层阵容讨论", 1000));               // m101000
+    service.observe(chat(20, "乙", "原神深渊我用的雷国", 1100, false, "m101000")); // 回复甲
+    service.observe(chat(30, "丙", "原神深渊同意", 1200, false, "m-gone"));        // 回复已不在缓冲的消息
+
+    const std::string note = service.assemble(8823, "原神深渊怎么配队");
+    ASSERT_FALSE(note.empty());
+    EXPECT_NE(note.find("乙（回复 甲：「原神深渊十二层阵容讨论」）: 原神深渊我用的雷国"),
+              std::string::npos)
+        << note;
+    EXPECT_NE(note.find("丙（回复了一条更早的消息）: 原神深渊同意"), std::string::npos) << note;
+    EXPECT_EQ(note.find("（引用回复）"), std::string::npos);
+}
+
 // 纯@（无实词触发）：计划为空 → 返回空串，交还关键词注记兜底
 TEST(GroupContextServiceTest, EmptyTriggerYieldsEmptyAssembly)
 {

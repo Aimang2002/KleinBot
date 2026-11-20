@@ -12,6 +12,7 @@
 #include "../Affect/BaselinePolicy.h"
 #include "../Affect/DecisionRecord.h"
 #include "../Affect/DecisionRecorder.h"
+#include "../Affect/FactsCard.h"
 #include "../Application/AtReplySituation.h"
 #include "../Application/ReplyConstraints.h"
 #include "../Application/ShadowDecision.h"
@@ -19,6 +20,7 @@
 #include "Message.h"
 #include "../Application/NonTextLabels.h"
 #include <algorithm>
+#include <ctime>
 #include <iomanip>
 #include <thread>
 #include <chrono>
@@ -33,13 +35,14 @@ Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatS
                  GroupContextService *groupContext,
                  affect::DecisionRecorder *decisionRecorder,
                  ImageAssetStore *sharedAssets,
-                 affect::DecisionPolicy *decisionPolicy)
+                 affect::DecisionPolicy *decisionPolicy,
+                 const affect::DeployerFacts *deployerFacts)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry),
       options(options), visionModel(std::move(visionModel)),
       typingIndicator(typingIndicator), perception(perception),
       groupContext(groupContext), decisionRecorder(decisionRecorder), sharedAssets(sharedAssets),
-      decisionPolicy(decisionPolicy), affectOptions(affectOptions)
+      decisionPolicy(decisionPolicy), affectOptions(affectOptions), deployerFacts(deployerFacts)
 {
 }
 
@@ -196,6 +199,15 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		const bool enforcePlan = affectNow->enforce;
 		const bool shadowPolicy = policyDecides && !enforcePlan;
 		const bool enforcedPolicy = policyDecides && enforcePlan;
+		// 事实卡（经历层 E0，ADR-026）：只在群聊、affect 开着且接了部署者事实时有。部署者事实段是
+		// 稳定文本，接在群聊收敛契约之后进 system；现场事实每分钟都变，并入本轮尾注（请求副本）。
+		// judge 的材料不带现场事实（它自己加“此刻”）
+		const affect::FactsCard facts = isGroup
+			? affect::factsCardFor(affectNow->enabled, this->deployerFacts, std::time(nullptr))
+			: affect::FactsCard{};
+		situationNote += facts.systemSection;
+		const std::string tailNote = facts.sceneNote.empty() ? burstNote
+			: (burstNote.empty() ? facts.sceneNote : burstNote + "\n" + facts.sceneNote);
 		const std::string triggerMessageId = !current_data.message_id_raw.empty()
 			? current_data.message_id_raw
 			: std::to_string(current_data.message_id);
@@ -241,7 +253,7 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		ChatReply chatReply = this->chatService.reply(
 			current_data.user_id, conversationText, std::move(currentImage),
 			situationNote, requestContext, isGroup ? current_data.group_id : 0,
-			enforcedPolicy ? &constraints : nullptr, burstNote);
+			enforcedPolicy ? &constraints : nullptr, tailNote);
 		std::string llm_text = chatReply.text;
 		// 群聊收敛契约（T7b）：模型判定无增量时输出 [不回应] 标记，静默不发
 		const bool textSuppressed = current_data.message_type == "group" &&

@@ -24,6 +24,7 @@ namespace affect
 {
 class DecisionPolicy;
 class DecisionRecorder;
+class DeployerFacts;
 }
 
 // 消息类
@@ -38,6 +39,8 @@ public:
     // options / affectOptions 都是组合根的活值（ADR-023，只读）：
     // 群聊开关在每次过滤时取，affect（策略选择与 enforce）在每次决策时取一次；
     // decisionPolicy 是组合根的策略外壳，每条消息按快照 resolve 一次。
+    // deployerFacts 可空（= 不加事实卡，经历层 E0）：非空且当条消息的 affect.enabled 为真时，群 @
+    // 回复的部署者事实段接在群聊收敛契约之后（进 system），现场事实并入本轮尾注；私聊不加。
     // 语音不在这里决定（2026-11-16）：她要用语音时调用 send_voice 工具，语音作为工具出站消息送达
     explicit Message(Dock &dock, UserSessionService &userSession, ChatService &chatService,
                      MessageSenderPort &sender, ImageAssetStore &imageAssetStore,
@@ -48,7 +51,8 @@ public:
                      class GroupContextService *groupContext = nullptr,
                      affect::DecisionRecorder *decisionRecorder = nullptr,
                      ImageAssetStore *sharedAssets = nullptr,
-                     affect::DecisionPolicy *decisionPolicy = nullptr);
+                     affect::DecisionPolicy *decisionPolicy = nullptr,
+                     const affect::DeployerFacts *deployerFacts = nullptr);
 
 	/**
 	 * @brief 消息过滤：群聊触发门槛与私聊放行
@@ -152,6 +156,7 @@ private:
     // 可空（= 基线）：R1 决策层。群聊 @ 且非基线策略时，影子期在投递之后跑 judge 并记录计划
     affect::DecisionPolicy *decisionPolicy = nullptr;
     const Live<AffectOptions> &affectOptions; // enforce：false = 影子期，计划只进记录
+    const affect::DeployerFacts *deployerFacts = nullptr; // 可空：事实卡（经历层 E0）
     // 可空：群资产库（ADR-019）。群聊的当前图片进这里（24h），不进发送者个人库；
     // 工具经 ToolContext.shared_scope_id 先查它
     ImageAssetStore *sharedAssets = nullptr;

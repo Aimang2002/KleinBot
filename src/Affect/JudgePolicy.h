@@ -35,6 +35,8 @@ public:
     };
     // 每次决策开头调用一次，按当前配置（affect.judge_model、models.worker、注册表）解析
     using TargetResolver = std::function<Target()>;
+    // 部署者事实来源（经历层 E0，ADR-026）：返回 source/facts.md 原文，每次决策调用一次
+    using FactsSource = std::function<std::string()>;
     static constexpr int kJudgeCallsPerHour = 30; // 资源护栏：每群每小时（滚动窗口）
     static constexpr int kMaxCodepoints = 400;    // 计划长度上限的夹紧值
     // judge 调用的 HTTP 超时：卡住时快速失败回退基线（适配器默认 300 秒会把同群
@@ -54,12 +56,21 @@ public:
     std::string version() const override { return "judge_v1"; }
     std::string planVersion() const override { return "judge_plan_v1"; }
 
+    // 事实卡（经历层 E0）：组合根在启动线程前设置一次。空函数（默认）= 不加事实卡，prompt 与
+    // 此前逐字相同；设置后每次决策在 prompt 里加“关于她的事实”（来源返回非空时）与“此刻”两段。
+    // judge 只在 affect.enabled 为真时被策略外壳选中，事实卡因此也只在那时出现
+    void setFactsSource(FactsSource source) { factsSource = std::move(source); }
+
     // 按当前配置解析出的模型名（不含端点/密钥）；记录里用的是 Decision::modelLabel
     std::string modelLabel() const;
     int callsThisHour(std::uint64_t groupId) const;          // 供 card.judgeCallsThisHour
 
     static std::string systemPrompt();
-    static std::string userPrompt(const SituationCard &card, const std::string &material);
+    // deployerFacts（部署者事实原文）与 sceneFacts（affect::sceneFactsNote 的一句）非空时各成一段，
+    // 放在现场材料之前；默认参数下输出与此前逐字相同
+    static std::string userPrompt(const SituationCard &card, const std::string &material,
+                                  const std::string &deployerFacts = {},
+                                  const std::string &sceneFacts = {});
     static std::vector<std::string> allowedActions(const SituationCard &card);
     // 解析 worker 原文：成功返回计划（error 可能带提示，如 allowed_tools_empty）；
     // 失败返回空，error 即回退原因（judge_invalid:… / judge_action_not_allowed）
@@ -71,6 +82,7 @@ private:
 
     TargetResolver resolver;
     std::function<std::int64_t()> clock;
+    FactsSource factsSource;
     mutable std::mutex mutex;
     std::map<std::uint64_t, std::deque<std::int64_t>> calls; // 每群调用时刻
 };
