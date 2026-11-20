@@ -96,6 +96,15 @@ struct KnowledgeHistoryRow
     std::int64_t createdAt = 0;
 };
 
+// 取用池的一条（经历层取用，ADR-029）：当前值 + 读时算出的有效强度 + 作者是不是教导。
+// 由 KnowledgeLedger::recallPool 读出，交给纯函数 selectKnowledge（KnowledgeRecall）挑选
+struct RecalledKnowledge
+{
+    KnowledgeEntry entry;
+    double effective = 0.0; // 读时按作者算（教导的不衰减），不落账
+    bool teaching = false;  // 当前起作用的作者是 teaching：取用时永远优先
+};
+
 // 一条改动请求（回想的输出、教导工具都翻成它）
 struct KnowledgeChange
 {
@@ -209,6 +218,11 @@ public:
     // 不做文本召回与预算——那是 E4 的 KnowledgeRecall
     std::vector<KnowledgeEntry> candidatesFor(std::uint64_t groupId,
                                               const std::vector<std::uint64_t> &people) const;
+
+    // 取用池（经历层取用，ADR-029）：active 且 scope_group 为 0 或本群的全部条目，带读时算出的
+    // 有效强度与“作者是不是教导”。只读：不跑遗忘、不写库（判定在群聊热路径上，遗忘落账留给账本工具与
+    // E3 的回想）；按种类与在场的人过滤、阈值、上限与排序都在 selectKnowledge 里
+    std::vector<RecalledKnowledge> recallPool(std::uint64_t groupId) const;
 
 private:
     std::int64_t now() const { return clock(); }

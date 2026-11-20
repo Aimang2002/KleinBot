@@ -197,6 +197,10 @@ std::string JudgePolicy::userPrompt(const SituationCard &card, const std::string
         prompt += "\n\n关于她的事实（部署者填写，是真实情况；其中的“你”指她）：\n" + facts;
     if (!sceneFacts.empty())
         prompt += "\n\n此刻：" + sceneFacts;
+    // 她的认识（取用，ADR-029）：与事实、此刻同一组——都是关于她的，排在标着“不可信数据”的材料之前，
+    // 免得被当成现场的一部分；只随条目进出才变。没有条目时不加（prompt 与此前逐字相同）
+    if (!card.knowledgeSection.empty())
+        prompt += "\n\n她的认识（账本里她记下的与部署者教的；其中的“你”指她）：\n" + card.knowledgeSection;
     // 可回应的消息（经历层 E1）：reply_to 只能从这里选；id 写成 JSON 字符串，原样抄回即可
     if (!candidates.empty())
     {

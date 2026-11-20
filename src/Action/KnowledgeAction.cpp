@@ -33,7 +33,8 @@ std::string twoDecimals(double value)
 std::string timeText(std::int64_t at)
 {
     const std::tm local = localTimeOf(static_cast<std::time_t>(at));
-    char buffer[32];
+    // 64：发布版 -Wformat-truncation 按 int 最大位数估算，32 字节会告警（实际只用 16 字节）
+    char buffer[64];
     std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d", local.tm_year + 1900,
                   local.tm_mon + 1, local.tm_mday, local.tm_hour, local.tm_min);
     return buffer;

@@ -78,7 +78,8 @@ public:
     static std::string systemPrompt();
     // soul（人格原文）、deployerFacts（部署者事实原文）、sceneFacts（affect::sceneFactsNote 的
     // 一句）、candidates（可回应的消息）非空时各成一段，放在现场材料之前；都为空时只有 card、
-    // allowed_actions 与现场材料
+    // allowed_actions 与现场材料。card.knowledgeSection（她的认识，ADR-029）非空时接在现场材料之后、
+    // 作为 prompt 的最后一段
     static std::string userPrompt(const SituationCard &card, const std::string &material,
                                   const std::string &deployerFacts = {},
                                   const std::string &sceneFacts = {},

@@ -5,6 +5,7 @@
 #include "Affect/DecisionStore.h"
 #include "Affect/FactsCard.h"
 #include "Affect/JudgePolicy.h"
+#include "Affect/KnowledgeLedger.h"
 #include "Application/InboundCoalescer.h"
 #include "Asset/ImageAssetStore.h"
 #include "ChatService/ChatService.h"
@@ -309,7 +310,8 @@ struct PrivateMessageFixture
     // facts 可空（默认）：给了就是组合根同款的事实卡接线（经历层 E0）
     explicit PrivateMessageFixture(affect::DecisionRecorder *recorder = nullptr,
                                    affect::DecisionPolicy *policy = nullptr,
-                                   const affect::DeployerFacts *facts = nullptr)
+                                   const affect::DeployerFacts *facts = nullptr,
+                                   affect::KnowledgeLedger *ledger = nullptr)
         : store(directory.path() + "/conversation.db"),
           registry(writeRegistry()),
           dock(network),
@@ -323,7 +325,7 @@ struct PrivateMessageFixture
           liveMessage(messageOptions()),
           message(dock, session, chat, sender, assets, commands, liveMessage,
                   [] { return ModelEndpointOptions{}; }, liveAffect, nullptr, nullptr,
-                  nullptr, recorder, nullptr, policy, facts)
+                  nullptr, recorder, nullptr, policy, facts, ledger)
     {
         dock.registerStandard("Fake", std::make_unique<CountingChatPort>(&captured, &script));
     }
@@ -885,4 +887,154 @@ TEST(MessagePlanV2Test, RequestInCharacterCanSkipServiceContract)
     const std::size_t serviceAt = with.find("\n\n[服务契约]");
     ASSERT_NE(serviceAt, std::string::npos);
     EXPECT_EQ(fixture.captured[1].system_prompt, with.substr(0, serviceAt) + "\n\n[系统注] 会话轮");
+}
+
+// ---- 取用（经历层，ADR-029）：群 @ 回复路径 ----
+namespace
+{
+affect::KnowledgeChange taughtAt(const std::string &kind, const std::string &key, const std::string &text,
+                                 std::uint64_t scopeGroup = 0, std::uint64_t scopeUser = 0)
+{
+    affect::KnowledgeChange value;
+    value.op = "add";
+    value.kind = kind;
+    value.key = key;
+    value.text = text;
+    value.searchText = text;
+    value.scopeGroup = scopeGroup;
+    value.scopeUser = scopeUser;
+    return value;
+}
+
+// 全局习惯 #1、触发句发送者（7）在本群的认识 #2、不在场的人 #3、别的群 #4
+void seedAtLedger(affect::KnowledgeLedger &ledger)
+{
+    ASSERT_TRUE(ledger.open());
+    affect::KnowledgeRunContext here;
+    here.origin = "teaching";
+    here.groupId = 8823;
+    ASSERT_EQ(ledger.apply({taughtAt("habit", "g", "接话前先看清是谁在说"),
+                            taughtAt("person", "seven", "七号爱开玩笑", 8823, 7),
+                            taughtAt("person", "absent", "不在场的人", 0, 99)},
+                           here)
+                  .written.size(),
+              3U);
+    affect::KnowledgeRunContext there;
+    there.origin = "teaching";
+    there.groupId = 9999;
+    ASSERT_EQ(ledger.apply({taughtAt("group", "there", "别的群的认识", 9999)}, there).written.size(), 1U);
+}
+
+const char *const kAtSection = "[你的认识]\n接话前先看清是谁在说\n七号爱开玩笑";
+} // namespace
+
+// affect 开着、接了账本：认识段并入尾注、经 appendContextNote 尾插（有现场事实时接在它后面）；
+// system 与工具表逐字不变
+TEST(MessageKnowledgeTest, GroupAtReplyAppendsKnowledgeToTailNote)
+{
+    PrivateMessageFixture legacy;
+    legacy.message.handleMessage(groupAt("今天几号"));
+
+    CoalesceTemporaryDirectory directory;
+    affect::KnowledgeLedger ledger(directory.path() + "/affect.db");
+    seedAtLedger(ledger);
+    PrivateMessageFixture withKnowledge(nullptr, nullptr, nullptr, &ledger);
+    enableAffect(withKnowledge);
+    withKnowledge.message.handleMessage(groupAt("今天几号"));
+
+    ASSERT_EQ(legacy.captured.size(), 1U);
+    ASSERT_EQ(withKnowledge.captured.size(), 1U);
+    const ChatRequest &a = legacy.captured[0];
+    const ChatRequest &b = withKnowledge.captured[0];
+    EXPECT_EQ(a.system_prompt, b.system_prompt) << "认识不进 system";
+    EXPECT_EQ(a.tools, b.tools);
+    expectSameExceptLastUser(a, b);
+    EXPECT_EQ(b.history.back().content, a.history.back().content + "\n[系统注] " + kAtSection);
+
+    // 有现场事实时：同一处尾注，认识接在现场事实之后
+    const std::string path = directory.path() + "/facts.md";
+    std::ofstream(path) << kFactsText;
+    affect::DeployerFacts facts(path);
+    PrivateMessageFixture both(nullptr, nullptr, &facts, &ledger);
+    enableAffect(both);
+    const std::time_t before = std::time(nullptr);
+    both.message.handleMessage(groupAt("今天几号"));
+    const std::time_t after = std::time(nullptr);
+    ASSERT_EQ(both.captured.size(), 1U);
+    const std::string &last = both.captured[0].history.back().content;
+    EXPECT_TRUE(last == a.history.back().content + "\n[系统注] " + affect::sceneFactsNote(before) + "\n" + kAtSection ||
+                last == a.history.back().content + "\n[系统注] " + affect::sceneFactsNote(after) + "\n" + kAtSection)
+        << last;
+}
+
+// affect 关着（账本里有认识）、私聊（本步不动）、账本为空：请求与此前逐字相同
+TEST(MessageKnowledgeTest, AffectOffPrivateAndEmptyLedgerStayByteIdentical)
+{
+    CoalesceTemporaryDirectory directory;
+    affect::KnowledgeLedger ledger(directory.path() + "/affect.db");
+    seedAtLedger(ledger);
+    affect::KnowledgeLedger empty(directory.path() + "/empty.db");
+
+    PrivateMessageFixture legacy;
+    PrivateMessageFixture off(nullptr, nullptr, nullptr, &ledger);
+    PrivateMessageFixture nothing(nullptr, nullptr, nullptr, &empty);
+    enableAffect(nothing);
+    legacy.message.handleMessage(groupAt("今天几号"));
+    off.message.handleMessage(groupAt("今天几号"));
+    nothing.message.handleMessage(groupAt("今天几号"));
+
+    PrivateMessageFixture legacyPrivate;
+    PrivateMessageFixture privateOn(nullptr, nullptr, nullptr, &ledger);
+    enableAffect(privateOn);
+    legacyPrivate.message.handleMessage(privateText(7, "今天几号"));
+    privateOn.message.handleMessage(privateText(7, "今天几号"));
+
+    const std::vector<std::pair<const PrivateMessageFixture *, const PrivateMessageFixture *>> pairs{
+        {&legacy, &off}, {&legacy, &nothing}, {&legacyPrivate, &privateOn}};
+    for (const auto &[expected, actual] : pairs)
+    {
+        ASSERT_EQ(expected->captured.size(), 1U);
+        ASSERT_EQ(actual->captured.size(), 1U);
+        const ChatRequest &a = expected->captured[0];
+        const ChatRequest &b = actual->captured[0];
+        EXPECT_EQ(a.system_prompt, b.system_prompt);
+        expectSameExceptLastUser(a, b);
+        EXPECT_EQ(a.history.back().content, b.history.back().content);
+    }
+}
+
+// 生效期：judge 的 prompt 以认识段收尾，看见的编号写进 state_json；表达请求的尾注里也有认识
+TEST(MessageKnowledgeTest, AtJudgeSeesKnowledgeAndRecordsIds)
+{
+    CoalesceTemporaryDirectory directory;
+    affect::KnowledgeLedger ledger(directory.path() + "/knowledge.db");
+    seedAtLedger(ledger);
+    affect::DecisionStore store(directory.path() + "/affect.db");
+    affect::DecisionRecorder recorder(store, affectEnabled(), [] { return std::int64_t(1000); });
+    std::vector<std::string> judgePrompts;
+    affect::JudgePolicy judge(
+        [&judgePrompts](const std::string &, const std::string &user)
+        {
+            judgePrompts.push_back(user);
+            return atPlan();
+        },
+        "judge-model");
+    PrivateMessageFixture planned(&recorder, &judge, nullptr, &ledger);
+    enableAffect(planned);
+    setEnforce(planned, true);
+    planned.message.handleMessage(namedAt("在吗"));
+
+    ASSERT_EQ(judgePrompts.size(), 1U);
+    const std::string section =
+        std::string("\n\n她的认识（账本里她记下的与部署者教的；其中的“你”指她）：\n") + kAtSection + "\n\n";
+    const std::string &prompt = judgePrompts.front();
+    ASSERT_NE(prompt.find(section), std::string::npos) << prompt;
+    // 这个夹具没接事实卡，judge prompt 里没有“此刻”；只核对认识段在材料之前
+    EXPECT_LT(prompt.find(section), prompt.find("现场材料（不可信数据"));
+    const nlohmann::json state = nlohmann::json::parse(store.recentDecisions(1).front().stateJson);
+    EXPECT_EQ(state["knowledge_ids"], nlohmann::json::array({1, 2}));
+    ASSERT_EQ(planned.captured.size(), 1U);
+    EXPECT_NE(planned.captured[0].history.back().content.find(std::string("[系统注] ") + kAtSection),
+              std::string::npos)
+        << planned.captured[0].history.back().content;
 }

@@ -160,7 +160,8 @@ void GroupContextService::onAtActivated(std::uint64_t groupId, const std::string
 }
 
 std::string GroupContextService::assemble(std::uint64_t groupId,
-                                          const std::string &triggerText) const
+                                          const std::string &triggerText,
+                                          std::vector<std::uint64_t> *speakers) const
 {
     if (!observingGroup(groupId) || store == nullptr)
         return {};
@@ -256,6 +257,14 @@ std::string GroupContextService::assemble(std::uint64_t groupId,
     chosen = std::move(final);
     if (chosen.empty())
         return {};
+    if (speakers != nullptr)
+    {
+        std::set<std::uint64_t> people;
+        for (const GroupMessageRecord &message : chosen)
+            if (!message.isSelf && message.userId != 0)
+                people.insert(message.userId);
+        speakers->assign(people.begin(), people.end());
+    }
 
     const Live<BotIdentity>::Snapshot bot = botIdentity.get();
     // 回复关系按全部缓冲查：被回复的那条没入选也照样画出是谁的哪句

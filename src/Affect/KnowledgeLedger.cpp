@@ -887,4 +887,29 @@ std::vector<KnowledgeEntry> KnowledgeLedger::candidatesFor(std::uint64_t groupId
         result.push_back(std::move(item.second));
     return result;
 }
+
+std::vector<RecalledKnowledge> KnowledgeLedger::recallPool(std::uint64_t groupId) const
+{
+    // 与其它读方法同一把锁：判定在工作线程跑，账本工具在私聊路径上写，连接只在锁内用
+    std::lock_guard<std::mutex> lock(mutex);
+    if (db == nullptr)
+        return {};
+    const std::int64_t at = now();
+    std::vector<KnowledgeEntry> rows = entriesWhere(
+        db, "status='active' AND (scope_group=0 OR scope_group=?1)",
+        [groupId](Statement &statement)
+        { return statement.integer(1, static_cast<std::int64_t>(groupId)); });
+    std::vector<RecalledKnowledge> pool;
+    pool.reserve(rows.size());
+    for (KnowledgeEntry &entry : rows)
+    {
+        const std::string author = authorFrom(historyDesc(db, entry.id));
+        RecalledKnowledge item;
+        item.effective = entry.effectiveFor(author, at);
+        item.teaching = author == "teaching";
+        item.entry = std::move(entry);
+        pool.push_back(std::move(item));
+    }
+    return pool;
+}
 } // namespace affect

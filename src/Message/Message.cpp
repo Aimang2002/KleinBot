@@ -13,6 +13,7 @@
 #include "../Affect/DecisionRecord.h"
 #include "../Affect/DecisionRecorder.h"
 #include "../Affect/FactsCard.h"
+#include "../Affect/KnowledgeRecall.h"
 #include "../Affect/PlanTask.h"
 #include "../Affect/ReplyCheck.h"
 #include "../Perception/GroupLineFormat.h"
@@ -39,13 +40,15 @@ Message::Message(Dock &dock, UserSessionService &userSession, ChatService &chatS
                  affect::DecisionRecorder *decisionRecorder,
                  ImageAssetStore *sharedAssets,
                  affect::DecisionPolicy *decisionPolicy,
-                 const affect::DeployerFacts *deployerFacts)
+                 const affect::DeployerFacts *deployerFacts,
+                 affect::KnowledgeLedger *knowledgeLedger)
     : dock(dock), userSession(userSession), chatService(chatService), sender(sender),
       imageAssetStore(imageAssetStore), registry(registry),
       options(options), visionModel(std::move(visionModel)),
       typingIndicator(typingIndicator), perception(perception),
       groupContext(groupContext), decisionRecorder(decisionRecorder), sharedAssets(sharedAssets),
-      decisionPolicy(decisionPolicy), affectOptions(affectOptions), deployerFacts(deployerFacts)
+      decisionPolicy(decisionPolicy), affectOptions(affectOptions), deployerFacts(deployerFacts),
+      knowledgeLedger(knowledgeLedger)
 {
 }
 
@@ -152,6 +155,8 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		// 数据注记只进请求副本（requestContext），不写会话历史、
 		// 不参与记忆召回/提取；管理员前缀缓存仍保持逐字稳定
 		std::string requestContext;
+		// 取用的“现场的人”（ADR-029）：群背景里入选的群友；触发句的发送者另加
+		std::vector<std::uint64_t> presentPeople;
 		if (current_data.message_type == "group")
 		{
 			// @ 硬激活（意志层 v2）：回答走下方既有回复路径；话题会话的
@@ -161,7 +166,7 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 
 			if (this->groupContext != nullptr)
 				requestContext = this->groupContext->assemble(current_data.group_id,
-					current_data.plain_text);
+					current_data.plain_text, &presentPeople);
 			if (requestContext.empty() && this->perception != nullptr)
 				requestContext = this->perception->topicNoteFor(current_data.group_id);
 		}
@@ -209,19 +214,33 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 			? affect::factsCardFor(affectNow->enabled, this->deployerFacts, std::time(nullptr))
 			: affect::FactsCard{};
 		situationNote += facts.systemSection;
-		const std::string tailNote = facts.sceneNote.empty() ? burstNote
+		// 取用（经历层，ADR-029）：同样只在群聊、affect 开着且接了账本时有。现场的人 = 群背景里入选的
+		// 群友 + 触发句的发送者（@ 路径唯一的回复候选）。表达请求的认识段并入尾注、接在现场事实之后
+		// （本轮 user 侧，绝不进 system）；judge 的那一份经 card 放在它 prompt 的尾部
+		if (isGroup && current_data.user_id != 0)
+			presentPeople.push_back(current_data.user_id);
+		const affect::KnowledgeCard knowledge = isGroup
+			? affect::knowledgeCardFor(affectNow->enabled, this->knowledgeLedger,
+				{current_data.group_id, presentPeople})
+			: affect::KnowledgeCard{};
+		std::string tailNote = facts.sceneNote.empty() ? burstNote
 			: (burstNote.empty() ? facts.sceneNote : burstNote + "\n" + facts.sceneNote);
+		if (!knowledge.replySection.empty())
+			tailNote += (tailNote.empty() ? "" : "\n") + knowledge.replySection;
 		const std::string triggerMessageId = !current_data.message_id_raw.empty()
 			? current_data.message_id_raw
 			: std::to_string(current_data.message_id);
 		// judge 只看内存材料：群背景 + 触发句；card 只含派生字段
 		const auto atCard = [&]()
 		{
-			return atReplySituation(
+			affect::SituationCard card = atReplySituation(
 				current_data,
 				this->perception != nullptr ? this->perception->topicNoteFor(current_data.group_id)
 											: std::string(),
 				this->chatService.toolNamesIn(ToolVenue::Group), currentLocalHour());
+			card.knowledgeSection = knowledge.judgeSection;
+			card.knowledgeIds = knowledge.judgeIds;
+			return card;
 		};
 		const std::string judgeMaterial = policyDecides
 			? requestContext + "\n触发句：" + conversationText

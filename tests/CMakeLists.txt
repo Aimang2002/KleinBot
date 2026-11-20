@@ -29,6 +29,7 @@ add_executable(kleinbot_tests
     ImagePlaceholderTests.cpp
     InboundCoalescerTests.cpp
     KnowledgeLedgerTests.cpp
+    KnowledgeRecallTests.cpp
     LiveTests.cpp
     MemoryRecallTests.cpp
     ModelCatalogTests.cpp

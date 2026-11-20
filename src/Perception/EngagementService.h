@@ -77,6 +77,7 @@ namespace affect
 class DecisionPolicy;
 class DecisionRecorder;
 class DeployerFacts;
+class KnowledgeLedger;
 }
 class ToolRegistry;
 
@@ -181,6 +182,10 @@ public:
     // 事实段排在契约最前（进 system），现场事实作为一行放在材料之后（本轮 user 侧）。
     // facts 由组合根持有、须比本服务活得久；每轮现读一次文件
     void setDeployerFacts(const affect::DeployerFacts *facts) { this->deployerFacts = facts; }
+    // 取用（经历层，ADR-029）：可空 = 不取用。非空且当轮 affect.enabled 为真时，从账本取全局的、本群的、
+    // 现场的人（材料窗口里的发言者 + 回复候选）的认识：judge 的 prompt 尾部一份，表达请求在现场事实
+    // 那一行之后、提问语之前一份；编号写进决策记录的 state_json。ledger 由组合根持有、须比本服务活得久
+    void setKnowledgeLedger(affect::KnowledgeLedger *ledger) { this->knowledgeLedger = ledger; }
     // 会话轮可用的注册表工具（如 inspect_image / generate_image / send_image /
     // klein_web_search / klein_web_fetch；契约追加开放工具自带的 GroupTurn 使用规则）：
     // tools 由组合根持有、须比本服务活得久；allowedNames 当场过滤——未注册或
@@ -296,6 +301,7 @@ private:
     affect::DecisionRecorder *decisionRecorder = nullptr;
     affect::DecisionPolicy *policy = nullptr;
     const affect::DeployerFacts *deployerFacts = nullptr;
+    affect::KnowledgeLedger *knowledgeLedger = nullptr;
     const ToolRegistry *tools = nullptr;
     std::vector<std::string> turnToolNames; // setTools 过滤后的会话轮注册表工具名
 };

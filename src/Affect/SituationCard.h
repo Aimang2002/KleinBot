@@ -40,6 +40,12 @@ struct SituationCard
     std::string journalTail;                 // R4 前空串
     std::string planSummary;                 // 对话计划摘要（扩展点）；R1 恒空串
 
+    // 取用（经历层，ADR-029）：这一轮给 judge 的认识段（affect::knowledgeSection，可空）与它的条目编号。
+    // 不进 toJson——card JSON 原样进 judge prompt，认识段另放在 prompt 尾部；编号由 makePolicyDecision
+    // 写进 state_json 的 knowledge_ids（只有编号，正文在账本里）
+    std::string knowledgeSection;
+    std::vector<std::int64_t> knowledgeIds;
+
     nlohmann::json toJson() const;
 };
 

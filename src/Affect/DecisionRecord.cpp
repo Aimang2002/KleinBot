@@ -50,6 +50,9 @@ DecisionRecord makePolicyDecision(const std::string &source,
         state["judge_latency_ms"] = decision.latencyMs;
         state["judge_model"] = decision.modelLabel;
     }
+    // 取用（ADR-029）：这一轮交给 judge 的认识编号；没取用时不写，state_json 与此前逐字相同
+    if (!card.knowledgeIds.empty())
+        state["knowledge_ids"] = card.knowledgeIds;
     record.stateJson = state.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
     return record;
 }

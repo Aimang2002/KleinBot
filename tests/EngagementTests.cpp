@@ -7,6 +7,7 @@
 #include "Affect/DecisionStore.h"
 #include "Affect/FactsCard.h"
 #include "Affect/JudgePolicy.h"
+#include "Affect/KnowledgeLedger.h"
 #include "Affect/SwitchingPolicy.h"
 #include "Perception/EngagementService.h"
 #include "Perception/GroupContextService.h"
@@ -3411,4 +3412,173 @@ TEST(EngagementInTheMomentTest, AtAnswerOrEmptyReadingFilesNothing)
     judgeOutput = silentPlanWithReaction(kReading);
     secondBeat(harness);
     EXPECT_EQ(enforced.store.feedbackCount(spoke), 0U) << "@ 回复之后的反应不归它";
+}
+
+// ---- 取用（经历层，ADR-029）：认识进会话轮的判定器与表达请求 ----
+namespace
+{
+affect::KnowledgeChange taught(const std::string &kind, const std::string &key, const std::string &text,
+                               std::uint64_t scopeGroup = 0, std::uint64_t scopeUser = 0)
+{
+    affect::KnowledgeChange value;
+    value.op = "add";
+    value.kind = kind;
+    value.key = key;
+    value.text = text;
+    value.searchText = text;
+    value.scopeGroup = scopeGroup;
+    value.scopeUser = scopeUser;
+    return value;
+}
+
+void teach(affect::KnowledgeLedger &ledger, const std::vector<affect::KnowledgeChange> &changes,
+           std::uint64_t groupId)
+{
+    ASSERT_TRUE(ledger.open());
+    affect::KnowledgeRunContext context;
+    context.origin = "teaching";
+    context.groupId = groupId;
+    ASSERT_EQ(ledger.apply(changes, context).written.size(), changes.size());
+}
+
+// 全局习惯 #1、本群认识 #2、在场的小白（42）#3、不在场的人 #4、别的群的认识 #5
+void seedLedger(affect::KnowledgeLedger &ledger)
+{
+    teach(ledger,
+          {taught("habit", "g", "接话前先看清是谁在说"), taught("group", "here", "这个群晚上常斗图", 8823),
+           taught("person", "xb", "小白喜欢被接梗", 8823, 42), taught("person", "absent", "不在场的人", 0, 55555)},
+          8823);
+    teach(ledger, {taught("group", "there", "别的群的认识", 9999)}, 9999);
+}
+
+const char *const kSeededSection = "[你的认识]\n接话前先看清是谁在说\n这个群晚上常斗图\n小白喜欢被接梗";
+} // namespace
+
+// affect 开着、接了账本：表达请求里认识段接在现场事实那一行之后、提问语之前（本轮 user 侧）；
+// system 与工具表逐字不变；只取全局的、本群的、在场的人的
+TEST(EngagementKnowledgeTest, KnowledgeGoesAfterSceneLineBeforeAskInUserTurnOnly)
+{
+    FactsFile file(kFactsText);
+    Harness withFacts;
+    withFacts.service->setDeployerFacts(&file.facts);
+    enableAffect(withFacts);
+    speakOnce(withFacts);
+
+    Harness harness;
+    affect::KnowledgeLedger ledger(harness.directory.path() + "/affect.db", [&harness] { return harness.now; });
+    seedLedger(ledger);
+    harness.service->setDeployerFacts(&file.facts);
+    harness.service->setKnowledgeLedger(&ledger);
+    enableAffect(harness);
+    speakOnce(harness);
+
+    EXPECT_EQ(harness.agentContracts, withFacts.agentContracts) << "认识不进 system";
+    EXPECT_EQ(harness.agentSchemas, withFacts.agentSchemas);
+    ASSERT_EQ(harness.agentHistories.size(), 1U);
+    const std::string &before = withFacts.agentHistories.front().front().content;
+    const std::string &after = harness.agentHistories.front().front().content;
+    const std::size_t askAt = before.find("\n\n以上是");
+    ASSERT_NE(askAt, std::string::npos);
+    EXPECT_EQ(after, before.substr(0, askAt) + "\n" + kSeededSection + before.substr(askAt));
+    EXPECT_NE(after.find("（" + affect::sceneFactsNote(harness.now) + "）\n[你的认识]"), std::string::npos);
+    EXPECT_EQ(after.find("别的群的认识"), std::string::npos);
+    EXPECT_EQ(after.find("不在场的人"), std::string::npos);
+    EXPECT_EQ(harness.sender->texts, withFacts.sender->texts);
+}
+
+// affect 关着（即使接了账本、账本里有认识）或账本里没有条目：请求与此前逐字相同，不加空标题
+TEST(EngagementKnowledgeTest, AffectOffOrEmptyLedgerKeepsRequestsByteIdentical)
+{
+    Harness legacy;
+    speakOnce(legacy);
+
+    Harness off;
+    affect::KnowledgeLedger seeded(off.directory.path() + "/affect.db", [&off] { return off.now; });
+    seedLedger(seeded);
+    off.service->setKnowledgeLedger(&seeded);
+    speakOnce(off);
+
+    Harness empty;
+    affect::KnowledgeLedger nothing(empty.directory.path() + "/affect.db", [&empty] { return empty.now; });
+    empty.service->setKnowledgeLedger(&nothing);
+    enableAffect(empty);
+    speakOnce(empty);
+
+    for (const Harness *harness : {&off, &empty})
+    {
+        EXPECT_EQ(harness->agentContracts, legacy.agentContracts);
+        EXPECT_EQ(harness->agentSchemas, legacy.agentSchemas);
+        EXPECT_EQ(harness->sender->texts, legacy.sender->texts);
+        ASSERT_EQ(harness->agentHistories.size(), legacy.agentHistories.size());
+        for (std::size_t index = 0; index < legacy.agentHistories.size(); ++index)
+            EXPECT_EQ(flattenHistory(harness->agentHistories[index]),
+                      flattenHistory(legacy.agentHistories[index]));
+    }
+    EXPECT_EQ(legacy.agentHistories.front().front().content.find("[你的认识]"), std::string::npos);
+}
+
+// judge：认识段与事实、此刻同一组，在“此刻”之后、可回应的消息与现场材料之前；它拿到的材料里没有
+// 表达请求那一份；看见的编号写进这次决策的 state_json
+TEST(EngagementKnowledgeTest, JudgeSeesKnowledgeBeforeMaterialAndRecordsIds)
+{
+    Harness harness;
+    affect::DecisionStore store(harness.directory.path() + "/affect.db");
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
+    std::vector<std::string> judgePrompts;
+    affect::JudgePolicy judge(
+        [&judgePrompts](const std::string &, const std::string &user)
+        {
+            judgePrompts.push_back(user);
+            return judgeReply("group_say");
+        },
+        "judge-model", [&harness] { return harness.now; });
+    affect::KnowledgeLedger ledger(harness.directory.path() + "/affect.db", [&harness] { return harness.now; });
+    seedLedger(ledger);
+    harness.service->setDecisionRecorder(&recorder);
+    harness.service->setPolicy(&judge);
+    harness.service->setKnowledgeLedger(&ledger);
+    enableAffect(harness);
+    speakOnce(harness);
+
+    ASSERT_EQ(judgePrompts.size(), 1U);
+    const std::string &prompt = judgePrompts.front();
+    const std::string section =
+        std::string("\n\n她的认识（账本里她记下的与部署者教的；其中的“你”指她）：\n") + kSeededSection + "\n\n";
+    ASSERT_NE(prompt.find(section), std::string::npos);
+    // 这个夹具的 judge 没接事实卡（没有“此刻”）；位置由 KnowledgeRecallTest 用纯函数核对，这里只看相对材料
+    EXPECT_LT(prompt.find(section), prompt.find("可回应的消息（reply_to"));
+    EXPECT_LT(prompt.find(section), prompt.find("现场材料（不可信数据"));
+    EXPECT_EQ(prompt.find("[你的认识]"), prompt.rfind("[你的认识]")) << "材料里不重复带表达那一份";
+
+    const nlohmann::json state = nlohmann::json::parse(store.recentDecisions(1).front().stateJson);
+    EXPECT_EQ(state["knowledge_ids"], nlohmann::json::array({1, 2, 3}));
+}
+
+// 计划 v2 生效：认识段在中性提问语与任务句之前；回复候选的发言者算在场，其余不在场的人不取
+TEST(EngagementKnowledgeTest, PlannedTurnPutsKnowledgeBeforeNeutralAsk)
+{
+    const std::string plan = planWithTools("inherit", "[]", "follow", "one", R"("m-1")");
+    EnforcedHarness plain(plan);
+    enableAffect(plain.harness);
+    lullWithCandidate(plain.harness, {sayResponse("是挺好听")});
+
+    EnforcedHarness enforced(plan);
+    affect::KnowledgeLedger ledger(enforced.harness.directory.path() + "/affect.db",
+                                   [&enforced] { return enforced.harness.now; });
+    seedLedger(ledger);
+    teach(ledger, {taught("person", "laoyu", "老余说话爱反着说", 0, 77)}, 8823);
+    enforced.harness.service->setKnowledgeLedger(&ledger);
+    enableAffect(enforced.harness);
+    lullWithCandidate(enforced.harness, {sayResponse("是挺好听")});
+
+    ASSERT_EQ(plain.harness.agentHistories.size(), 1U);
+    ASSERT_EQ(enforced.harness.agentHistories.size(), 1U);
+    EXPECT_EQ(enforced.harness.agentContracts, plain.harness.agentContracts);
+    const std::string &before = plain.harness.agentHistories.front().front().content;
+    const std::size_t askAt = before.find("\n\n以上是群聊现场。\n本轮任务：");
+    ASSERT_NE(askAt, std::string::npos) << before;
+    EXPECT_EQ(enforced.harness.agentHistories.front().front().content,
+              before.substr(0, askAt) + "[你的认识]\n接话前先看清是谁在说\n这个群晚上常斗图\n老余说话爱反着说" +
+                  before.substr(askAt))
+        << "小白（42）这一轮不在场；老余（77）是回复候选";
 }

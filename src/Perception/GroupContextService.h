@@ -75,8 +75,10 @@ public:
     void recordOutbound(std::uint64_t groupId, const OutboundMessage &outbound,
                         const std::string &correlationId = {});
 
-    // 被 @ 时的上下文装配：返回附在用户消息尾部的注记块；无相关内容返回空串
-    std::string assemble(std::uint64_t groupId, const std::string &triggerText) const;
+    // 被 @ 时的上下文装配：返回附在用户消息尾部的注记块；无相关内容返回空串。
+    // speakers 非空时写入入选记录里的群友（不含她自己，去重升序）——取用（ADR-029）的“现场的人”
+    std::string assemble(std::uint64_t groupId, const std::string &triggerText,
+                         std::vector<std::uint64_t> *speakers = nullptr) const;
 
     // @ 硬激活转发（Message 处理群 @ 时调用）：回答走既有回复路径，
     // 会话的开启/合并由 EngagementService 决定

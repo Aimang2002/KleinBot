@@ -700,6 +700,8 @@ int main(int argc, char **argv)
 	engagementService.setDecisionRecorder(&decisionRecorder);
 	engagementService.setPolicy(&decisionPolicy);
 	engagementService.setDeployerFacts(&deployerFacts);
+	// 取用（经历层，ADR-029）：与账本工具共用同一个账本；affect.enabled 为真时群聊两条路径与 judge 读它
+	engagementService.setKnowledgeLedger(&knowledgeLedger);
 	groupContextService.setEngagement(&engagementService);
 	// @ 回复路径的 leave_topic 与会话轮的离场动词落到同一处（ADR-024）
 	leaveTopicTool.bind([&engagementService](std::uint64_t groupId, bool stepBack,
@@ -752,7 +754,7 @@ int main(int argc, char **argv)
 		commandRegistry, liveSettings.message, visionEndpoint,
 		liveSettings.affect, &typingIndicator, &perceptionChannel,
 		&groupContextService, &decisionRecorder, &groupImageAssets, &decisionPolicy,
-		&deployerFacts);
+		&deployerFacts, &knowledgeLedger);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,
