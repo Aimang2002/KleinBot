@@ -3303,3 +3303,112 @@ TEST(EngagementFactsCardTest, JudgeAddsItsOwnMomentAndMaterialHasNoSceneLine)
     EXPECT_NE(harness.agentHistories.front().front().content.find("（" + scene + "）"),
               std::string::npos);
 }
+
+// ---- 经历层 E2（ADR-028）：当场察觉 ----
+namespace
+{
+std::string silentPlanWithReaction(const std::string &reaction)
+{
+    return R"({"schema_version":2,"action":"no_reply","reply_to":null,"move":"","length":"",)"
+           R"("occasion":"群友接着在聊","reaction_to_last":")" +
+           reaction + R"(","why":"测试","tool_policy":"none","allowed_tools":[]})";
+}
+
+const char *const kReading = "我上一句之后老余接着说了下去，算接住了";
+
+// 第二拍：群友又说一句，她这一轮按 judge 的计划（这里是不说）
+void secondBeat(Harness &harness)
+{
+    harness.now += 60;
+    harness.feed(8823, "对啊我也觉得", harness.now);
+    harness.service->runTurn(8823);
+}
+} // namespace
+
+// 她开口的那一轮记下决策；下一轮 judge 写了 reaction_to_last，就记成那次决策的反馈
+//（source=in_the_moment，读法与本轮决策 id 进 evidence），不多调一次模型
+TEST(EngagementInTheMomentTest, NextTurnReadingIsFiledOnTheTurnSheSpoke)
+{
+    int judgeCalls = 0;
+    std::string judgeOutput = planWithTools("inherit", "[]", "follow", "one", R"("m-1")");
+    affect::JudgePolicy judge(
+        [&judgeCalls, &judgeOutput](const std::string &, const std::string &)
+        {
+            ++judgeCalls;
+            return judgeOutput;
+        },
+        "judge-model");
+    EnforcedHarness enforced("", &judge);
+    Harness &harness = enforced.harness;
+    lullWithCandidate(harness, {sayResponse("是挺好听")});
+    ASSERT_EQ(harness.sender->texts.size(), 1U);
+    const std::string spoke = enforced.store.recentDecisions(1).front().decisionId;
+    EXPECT_EQ(harness.service->sessionOf(8823)->lastSpeechDecisionId, spoke);
+    EXPECT_EQ(enforced.store.feedbackCount(spoke), 0U) << "第一轮还没有“之前”";
+
+    judgeOutput = silentPlanWithReaction(kReading);
+    secondBeat(harness);
+    EXPECT_EQ(judgeCalls, 2) << "两轮各一次判定，没有多出来的调用";
+    EXPECT_EQ(harness.agentContracts.size(), 1U) << "第二轮计划沉默，主模型没被请求";
+    const std::string observed = enforced.store.recentDecisions(1).front().decisionId;
+    ASSERT_NE(observed, spoke);
+    const auto rows = enforced.store.feedbackFor(spoke);
+    ASSERT_EQ(rows.size(), 1U);
+    EXPECT_EQ(rows.front().source, "in_the_moment");
+    EXPECT_EQ(rows.front().status, "known");
+    EXPECT_DOUBLE_EQ(rows.front().confidence, 0.0);
+    EXPECT_EQ(nlohmann::json::parse(rows.front().evidenceJson),
+              (nlohmann::json{{"reading", kReading}, {"observed_in", observed}}));
+    EXPECT_EQ(rows.front().evidenceJson.find("对啊我也觉得"), std::string::npos) << "没有群友原文";
+    EXPECT_EQ(enforced.store.feedbackCount(observed), 0U);
+    EXPECT_EQ(harness.service->sessionOf(8823)->lastSpeechDecisionId, spoke)
+        << "这一轮没开口，“上一句”还是那一句";
+
+    // 第三拍又写了一次读法：同一句话的又一条“后来怎样”
+    judgeOutput = silentPlanWithReaction("老余后来也没再接，我那句就停在那了");
+    secondBeat(harness);
+    EXPECT_EQ(enforced.store.feedbackFor(spoke).size(), 2U);
+}
+
+// 影子期（enforce=false）同样记：当场察觉只是归档判定器写下的读法，不改变她的回复
+TEST(EngagementInTheMomentTest, ShadowPeriodFilesTheReadingToo)
+{
+    Harness harness;
+    affect::DecisionStore store(harness.directory.path() + "/affect.db");
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
+    std::string judgeOutput = planWithTools("inherit", "[]", "follow", "one", R"("m-1")");
+    affect::JudgePolicy judge([&judgeOutput](const std::string &, const std::string &) { return judgeOutput; },
+                              "judge-model");
+    harness.service->setDecisionRecorder(&recorder);
+    harness.service->setPolicy(&judge);
+    lullWithCandidate(harness, {sayResponse("是挺好听")});
+    const std::string spoke = store.recentDecisions(1).front().decisionId;
+
+    judgeOutput = silentPlanWithReaction(kReading);
+    harness.turnResponses.push_back(passResponse());
+    secondBeat(harness);
+    ASSERT_EQ(store.feedbackFor(spoke).size(), 1U);
+    EXPECT_EQ(store.feedbackFor(spoke).front().source, "in_the_moment");
+}
+
+// 她经 @ 路径开口后，之后的反应是对那句 @ 回复的，不挂到会话轮的旧决策上；judge 没写读法也不记
+TEST(EngagementInTheMomentTest, AtAnswerOrEmptyReadingFilesNothing)
+{
+    std::string judgeOutput = planWithTools("inherit", "[]", "follow", "one", R"("m-1")");
+    affect::JudgePolicy judge([&judgeOutput](const std::string &, const std::string &) { return judgeOutput; },
+                              "judge-model");
+    EnforcedHarness enforced("", &judge);
+    Harness &harness = enforced.harness;
+    lullWithCandidate(harness, {sayResponse("是挺好听")});
+    const std::string spoke = enforced.store.recentDecisions(1).front().decisionId;
+
+    judgeOutput = silentPlanWithReaction("");
+    secondBeat(harness);
+    EXPECT_EQ(enforced.store.feedbackCount(spoke), 0U) << "没写读法";
+
+    harness.service->onAtAnswered(8823);
+    EXPECT_TRUE(harness.service->sessionOf(8823)->lastSpeechDecisionId.empty());
+    judgeOutput = silentPlanWithReaction(kReading);
+    secondBeat(harness);
+    EXPECT_EQ(enforced.store.feedbackCount(spoke), 0U) << "@ 回复之后的反应不归它";
+}

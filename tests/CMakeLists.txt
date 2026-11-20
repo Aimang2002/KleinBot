@@ -18,7 +18,6 @@ add_executable(kleinbot_tests
     EngagementTurnTests.cpp
     EventRoutingTests.cpp
     FactsCardTests.cpp
-    FeedbackTests.cpp
     FsUtilTests.cpp
     GlanceTests.cpp
     GroupAssetTests.cpp
@@ -29,6 +28,7 @@ add_executable(kleinbot_tests
     GroupListTests.cpp
     ImagePlaceholderTests.cpp
     InboundCoalescerTests.cpp
+    KnowledgeLedgerTests.cpp
     LiveTests.cpp
     MemoryRecallTests.cpp
     ModelCatalogTests.cpp

@@ -65,6 +65,8 @@ public:
     std::size_t feedbackCount(const std::string &decisionId) const;
     // 某决策的全部反馈（created_at 升序）；评测/反思与测试读回用
     std::vector<FeedbackRecord> feedbackFor(const std::string &decisionId) const;
+    // 某条反馈是否存在（认识账本核对依据 feedback:<id> 用，经历层 E2）
+    bool feedbackExists(const std::string &feedbackId) const;
 
 private:
     const std::string path;

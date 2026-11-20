@@ -3,6 +3,7 @@
 #include "../Affect/DecisionRecord.h"
 #include "../Affect/DecisionRecorder.h"
 #include "../Affect/FactsCard.h"
+#include "../Affect/InTheMoment.h"
 #include "../Affect/JudgePolicy.h"
 #include "../Affect/PlanTask.h"
 #include "../Affect/ReplyCheck.h"
@@ -360,6 +361,7 @@ void EngagementService::onAtAnswered(std::uint64_t groupId)
     session.lastSpeakTs = now;
     session.followUpTurnsUsed = 0;
     session.lastMessageAtSelf = false;
+    session.lastSpeechDecisionId.clear();
 }
 
 void EngagementService::leaveTopic(std::uint64_t groupId, bool stepBack, const std::string &reason)
@@ -775,6 +777,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
     std::string topicLine; // 提名字入场轮：提到她的那句（激活时的触发句）
     TurnKind kind = TurnKind::FollowUp;
     std::int64_t startTs = 0;
+    std::string previousSpeechDecision; // 当场察觉：她上一句话的决策 id（锁内快照）
     affect::SituationCard card; // 会话统计在锁内快照，只有非基线策略才用
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -807,6 +810,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
             session.recentTurnTs.begin(), session.recentTurnTs.end(),
             [snapshotNow](std::int64_t at) { return snapshotNow - at < kLullFuseWindow; }));
         startTs = session.startTs;
+        previousSpeechDecision = session.lastSpeechDecisionId;
         digest = session.digest;
         compressedUpToTs = session.compressedUpToTs;
         recallAvailable = session.recallUsed < kRecallBudget;
@@ -1241,6 +1245,21 @@ void EngagementService::runTurn(std::uint64_t groupId)
                                              *activePolicy, card)
                 : affect::makeBaselineDecision(decisionSource, groupId, 0, std::string(), action);
         decisionId = decisionRecorder->recordDecision(std::move(decision));
+    }
+    // 当场察觉（经历层 E2，ADR-028）：本轮计划 v2 写了她对上一句之后大家反应的读法，就记成上一句
+    // 那次决策的反馈（source=in_the_moment）。不加调用，只归档判定器已写下的派生文字；影子期同样记
+    if (!decisionId.empty() && policyDecides)
+    {
+        if (std::optional<affect::FeedbackRecord> feedback =
+                affect::inTheMomentFeedback(previousSpeechDecision, decisionId, planned.plan))
+            decisionRecorder->recordFeedback(std::move(*feedback));
+    }
+    if (!decisionId.empty() && deliverPending)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = sessions.find(groupId);
+        if (it != sessions.end() && it->second.startTs == startTs)
+            it->second.lastSpeechDecisionId = decisionId;
     }
 
     // 执行记录：queued 只代表已交给出站队列；协议端答复到达后由回执（R0.2）把它

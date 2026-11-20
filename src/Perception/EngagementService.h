@@ -113,6 +113,10 @@ struct EngagementSession
     bool entryPending = false;       // 提名字激活后的入场轮待执行（@ 激活无入场轮）
     bool coldPending = false;        // 冷启动入场轮待执行（热度尖峰自决）
     bool coldInitiated = false;      // 本会话由冷启动开启（结束冷却更久）
+    // 当场察觉（经历层 E2，ADR-028）：她在本会话里最近一次开口的会话轮决策 id（记录器开着才有）。
+    // 下一轮判定写下 reaction_to_last 时，那条读法记成这次决策的反馈（source=in_the_moment）；
+    // 她经 @ 路径开口后清空——之后的反应是对那句 @ 回复的，不归这次决策
+    std::string lastSpeechDecisionId;
     std::string endReason;
 };
 

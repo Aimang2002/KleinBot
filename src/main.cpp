@@ -41,6 +41,7 @@
 #include "Affect/DecisionStore.h"
 #include "Affect/FactsCard.h"
 #include "Affect/JudgePolicy.h"
+#include "Affect/KnowledgeLedger.h"
 #include "Affect/SwitchingPolicy.h"
 #include "Persistence/ReminderStore.h"
 #include "Reminder/ReminderService.h"
@@ -66,8 +67,7 @@
 #include "Action/GetCurrentModelAction.h"
 #include "Action/AdminControlAction.h"
 #include "Command/AdminCommand.h"
-#include "Command/FeedbackCommand.h"
-#include "Action/RecordFeedbackAction.h"
+#include "Action/KnowledgeAction.h"
 #include "Command/GeneratePictureCommand.h"
 #include "Command/HelpCommand.h"
 #include "Command/ModelListCommand.h"
@@ -433,6 +433,13 @@ int main(int argc, char **argv)
 		userSession.ensureUserExists(settings.bot.managerId);
 	// 语音合成先于注册表构造、后于它析构：send_voice 工具持它的引用
 	Voice voice(liveSettings.voice, &running);
+	// 认识账本（经历层 E2，ADR-028）：与决策库同一个文件、独立连接，延迟打开——第一次在 affect.enabled
+	// 为真时调用账本工具才打开建表。三个工具只在管理员私聊里开放、affect 关着时不出现；记不记由她判断。
+	// E2 里账本只经这三个工具读写，不进判定器与表达请求（取用是 E4）。先于注册表构造、后于它析构
+	affect::KnowledgeLedger knowledgeLedger(dbPath);
+	RememberGuidanceAction rememberGuidanceAction(knowledgeLedger, liveSettings.affect);
+	ReviewGuidanceAction reviewGuidanceAction(knowledgeLedger, liveSettings.affect);
+	ForgetGuidanceAction forgetGuidanceAction(knowledgeLedger, liveSettings.affect);
 	ToolRegistry tools;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
@@ -514,6 +521,9 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<ActionTool>(setReminderAction));
 	tools.registerTool(std::make_unique<ActionTool>(listRemindersAction));
 	tools.registerTool(std::make_unique<ActionTool>(cancelReminderAction));
+	tools.registerTool(std::make_unique<ActionTool>(rememberGuidanceAction));
+	tools.registerTool(std::make_unique<ActionTool>(reviewGuidanceAction));
+	tools.registerTool(std::make_unique<ActionTool>(forgetGuidanceAction));
 	std::string registeredTools;
 	for (const std::string &toolName : tools.registeredNames())
 	{
@@ -622,10 +632,6 @@ int main(int argc, char **argv)
 	commandRegistry.registryCommand(std::make_unique<SwitchModelCommand>(userSession, models));
 	commandRegistry.registryCommand(std::make_unique<RemoveContextCommand>(userSession));
 	commandRegistry.registryCommand(std::make_unique<AdminCommand>(adminControlAction));
-	// 人工反馈 #好/#坏（R0.3，所有人可用）：affect.enabled 当前为假时命令回"未启用"
-	RecordFeedbackAction recordFeedbackAction(&decisionStore, &decisionRecorder,
-											  settings.bot.managerId);
-	commandRegistry.registryCommand(std::make_unique<FeedbackCommand>(recordFeedbackAction));
 	// 观察通道状态与群列表（唯一真值在数据库，见 GroupListService）：
 	// 总开关与监控群集都是运行时状态，面板改动即时生效、无需重启；
 	// 状态服务恒构造（群列表选择器在功能关闭时也要可用）

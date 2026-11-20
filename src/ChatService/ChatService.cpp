@@ -74,8 +74,10 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
     // 计划收窄（R1.c）：工具表、使用规则与下方工具循环的开放名单用同一份过滤结果
     //（规则不提没开放的工具，免得诱导调用后被拒、白耗一趟工具轮）
     // 可用工具（Tool::available，如联网工具的启用开关）在这里取一次，工具表与使用规则用同一份
-    // 工具适用场合（Tool::offeredIn）：群里被 @ 时才有 leave_topic 这类只在群里有意义的工具
-    std::vector<std::string> offeredToolNames = this->tools.namesIn(venueOf(sharedScopeId));
+    // 工具适用场合（Tool::offeredIn）：群里被 @ 时才有 leave_topic 这类只在群里有意义的工具；
+    // 管理员私聊里才有认识账本的工具（ADR-028）
+    std::vector<std::string> offeredToolNames =
+        this->tools.namesIn(venueOf(sharedScopeId, user_id, managerId));
     if (constraints != nullptr)
         offeredToolNames = filterToolNames(offeredToolNames, constraints->toolPolicy,
                                            constraints->allowedTools);
@@ -142,12 +144,12 @@ ChatReply ChatService::reply(uint64_t user_id, const std::string &text,
     { return this->dock.RequestChat(bundle.model, bundle.model_name, bundle.request); };
     hooks.permitted = [this, user_id](const Tool &tool)
     { return !tool.requiresAdmin() || user_id == managerId; };
-    if (constraints != nullptr)
-        hooks.offered = [&offeredToolNames](const std::string &name)
-        {
-            return std::find(offeredToolNames.begin(), offeredToolNames.end(), name) !=
-                   offeredToolNames.end();
-        };
+    // 开放名单恒与工具表同一份：模型点了这一场合没给它的工具（如群里点认识账本）按“未开放”拒绝
+    hooks.offered = [&offeredToolNames](const std::string &name)
+    {
+        return std::find(offeredToolNames.begin(), offeredToolNames.end(), name) !=
+               offeredToolNames.end();
+    };
     hooks.onRoundLimit = [this, &bundle](std::vector<ChatMessage> &history)
     {
         // 到达轮次上限不丢弃证据：让模型基于已有结果收尾作答

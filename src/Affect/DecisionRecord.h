@@ -45,8 +45,13 @@ struct FeedbackRecord
     std::string feedbackId;
     std::string decisionId;
     std::int64_t createdAt = 0;
-    std::string source; // explicit_reply / mention / manual_admin / manual_user / none
-                        // （manual_* 为 #好/#坏 人工反馈，按标注人分管理员与网友，R0.3）
+    std::string source; // explicit_reply / mention / manual_admin / manual_user / none /
+                        // in_the_moment / self_reflection / teaching
+                        // （manual_* 为 #好/#坏 人工反馈，按标注人分管理员与网友，R0.3；命令已在 E2 去掉，
+                        //  旧行照旧可读；
+                        //  in_the_moment = 当场察觉：下一轮判定写的 reaction_to_last，挂到她说那句的决策上；
+                        //  self_reflection = 回想时写的读法（E3）；teaching = 部署者教导引出的读法（E3 起用）。
+                        //  后三个是经历层 E2 新增的取值，ADR-028，不改表结构）
     std::string status;
     double confidence = 0.0;
     std::string evidenceJson = "{}";

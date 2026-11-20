@@ -18,6 +18,10 @@ public:
     }
     bool requiresAdmin() const override { return action.descriptor().requires_admin; }
     bool available() const override { return action.available(); }
+    bool offeredIn(ToolVenue venue) const override
+    {
+        return !action.managerPrivateOnly() || venue == ToolVenue::ManagerPrivate;
+    }
     std::string usageGuidance(GuidanceScene scene, const GuidanceContext &context) const override
     {
         return action.usageGuidance(scene, context);

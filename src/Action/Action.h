@@ -41,6 +41,9 @@ public:
                                  const ActionContext &context) = 0;
     // 暴露为工具时当前是否可用（经 ActionTool::available 转出，语义同 Tool::available）
     virtual bool available() const { return true; }
+    // 暴露为工具时是否只在管理员私聊里开放（经 ActionTool::offeredIn 转出，语义同 Tool::offeredIn）：
+    // 部署者专用、不该出现在群里或别人私聊里的工具（认识账本，ADR-028）
+    virtual bool managerPrivateOnly() const { return false; }
     // 暴露为工具时的使用规则（经 ActionTool::usageGuidance 转出，语义同 Tool::usageGuidance）
     virtual std::string usageGuidance(GuidanceScene, const GuidanceContext &) const { return {}; }
 };

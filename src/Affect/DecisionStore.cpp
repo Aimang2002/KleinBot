@@ -618,4 +618,19 @@ std::size_t DecisionStore::feedbackCount(const std::string &decisionId) const
     sqlite3_finalize(statement);
     return count;
 }
+bool DecisionStore::feedbackExists(const std::string &feedbackId) const
+{
+    if (!isOpen() || feedbackId.empty())
+        return false;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM affect_feedback WHERE feedback_id=?1;", -1,
+                           &statement, nullptr) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(statement, 1, feedbackId.c_str(), -1, SQLITE_TRANSIENT);
+    const bool found = sqlite3_step(statement) == SQLITE_ROW;
+    sqlite3_finalize(statement);
+    return found;
+}
 } // namespace affect

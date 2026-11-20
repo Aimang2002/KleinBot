@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include "Action/KnowledgeAction.h"
+#include "Affect/KnowledgeLedger.h"
 #include "Application/ContextDigest.h"
 #include "Application/RecallContextInjection.h"
 #include "ChatService/ChatService.h"
@@ -7,6 +9,7 @@
 #include "ModelApiCaller/Dock.hpp"
 #include "Perception/EngagementService.h"
 #include "Persistence/ConversationStore.h"
+#include "Tool/ActionTool.h"
 #include "Tool/ToolRegistry.h"
 #include "UserSession/UserSessionService.h"
 #include "utils/TextTokenize.h"
@@ -136,6 +139,55 @@ private:
     bool toolCallFirst;
     std::function<void()> duringFirstCall;
 };
+
+// 每次回复的第一次请求都点同一个工具（最后一条是 user 消息时），工具结果回来后答“好的”；
+// 记下每次请求（看工具表）
+class ToolCallingChatPort final : public LLMPort
+{
+public:
+    ToolCallingChatPort(std::vector<ChatRequest> *captured, std::string tool, std::string arguments)
+        : captured(captured), tool(std::move(tool)), arguments(std::move(arguments))
+    {
+    }
+
+    ChatResponse request_chat(const ChatModel &, const std::string &, const ChatRequest &request) override
+    {
+        captured->push_back(request);
+        ChatResponse response;
+        response.code = 200;
+        if (!request.history.empty() && request.history.back().role == "user")
+        {
+            response.finish_reason = "tool_calls";
+            response.tool_calls.push_back({"call-1", tool, arguments});
+            return response;
+        }
+        response.content = "好的";
+        response.finish_reason = "stop";
+        return response;
+    }
+    VisionResponse request_vision(const ChatModel &, const std::string &, const std::string &,
+                                  const std::string &) override
+    {
+        return {};
+    }
+    ImageResponse request_image(const ChatModel &, const std::string &, const std::string &) override
+    {
+        return {};
+    }
+
+private:
+    std::vector<ChatRequest> *captured;
+    std::string tool;
+    std::string arguments;
+};
+
+bool offersTool(const ChatRequest &request, const std::string &name)
+{
+    for (const std::string &schema : request.tools)
+        if (schema.find("\"" + name + "\"") != std::string::npos)
+            return true;
+    return false;
+}
 
 // ChatService 私聊链路夹具：Fake 主模型 + 关闭的长期记忆 + 空工具表 + 临时库
 struct PrivateChatFixture
@@ -404,4 +456,41 @@ TEST(ChatServiceLiveConfigTest, BuildOnceFallsBackToTheCurrentDefaultModel)
     ASSERT_EQ(models.size(), 2U);
     EXPECT_EQ(models[0], "test-model");
     EXPECT_EQ(models[1], "next-model");
+}
+
+// 认识账本的工具（经历层 E2，ADR-028）只进管理员私聊的工具表：别人的私聊、群里（哪怕是管理员 @ 她）
+// 都没有，模型点了也按“未开放”拒绝、账本不打开；管理员私聊里点了就记下，结果回灌后她自己回复
+TEST(ChatServiceToolVenueTest, KnowledgeToolsReachOnlyTheManagersPrivateChat)
+{
+    PrivateChatFixture fixture; // 管理员是 1
+    Live<AffectOptions> affectOptions{AffectOptions{true}};
+    affect::KnowledgeLedger ledger(fixture.directory.path() + "/affect.db");
+    RememberGuidanceAction remember(ledger, affectOptions);
+    fixture.tools.registerTool(std::make_unique<ActionTool>(remember));
+    std::vector<ChatRequest> requests;
+    fixture.dock.registerStandard("Fake", std::make_unique<ToolCallingChatPort>(
+                                              &requests, "remember_guidance", R"({"text":"晚上少说话"})"));
+
+    EXPECT_EQ(fixture.chat.reply(10, "你好").text, "好的");
+    ASSERT_EQ(requests.size(), 2U);
+    EXPECT_FALSE(offersTool(requests[0], "remember_guidance")) << "别人的私聊";
+    EXPECT_NE(requests[1].history.back().content.find("未知工具"), std::string::npos);
+    EXPECT_FALSE(ledger.isOpen());
+
+    EXPECT_EQ(fixture.chat.reply(1, "你好", std::nullopt, {}, {}, 882926802).text, "好的");
+    ASSERT_EQ(requests.size(), 4U);
+    EXPECT_FALSE(offersTool(requests[2], "remember_guidance")) << "管理员在群里 @ 她";
+    EXPECT_FALSE(ledger.isOpen());
+
+    EXPECT_EQ(fixture.chat.reply(1, "以后晚上少说点").text, "好的") << "结果不原样发出";
+    ASSERT_EQ(requests.size(), 6U);
+    EXPECT_TRUE(offersTool(requests[4], "remember_guidance")) << "管理员私聊";
+    EXPECT_NE(requests[5].history.back().content.find("记下了（#1｜全局）"), std::string::npos);
+    ASSERT_TRUE(ledger.isOpen());
+    EXPECT_EQ(ledger.find(1)->text, "晚上少说话");
+
+    affectOptions.set(AffectOptions{});
+    EXPECT_EQ(fixture.chat.reply(1, "再说一次").text, "好的");
+    ASSERT_EQ(requests.size(), 8U);
+    EXPECT_FALSE(offersTool(requests[6], "remember_guidance")) << "affect 关着不出现";
 }
