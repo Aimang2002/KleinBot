@@ -22,6 +22,7 @@
 #include "Tool/Tool.h"
 #include "Tool/ToolRegistry.h"
 #include "utils/Live.h"
+#include "utils/LocalDate.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1909,6 +1910,8 @@ TEST(EngagementColdTest, DailyCapLimitsColdEvaluations)
     Harness harness;
     ColdFlow flow(harness);
     flow.setMembers(100);
+    // 从当天本地 08:00 起走：整段不跨零点，当日帽不会中途重置
+    flow.now = static_cast<std::int64_t>(localDayStart(static_cast<std::time_t>(flow.now))) + 8 * 3600;
     flow.warm(3, 4);
 
     // 3 次冷启动评估：默认 pass → 自决不加入 → 冷却 2h
@@ -1924,6 +1927,39 @@ TEST(EngagementColdTest, DailyCapLimitsColdEvaluations)
     // 第 4 次：当日帽拦截，不再发起评估
     flow.spike(12);
     EXPECT_EQ(harness.agentHistories.size(), callsAfterCap) << "当日帽应拦截第 4 次";
+}
+
+TEST(EngagementColdTest, DailyCapResetsAtLocalMidnightNotRolling24h)
+{
+    Harness harness;
+    ColdFlow flow(harness);
+    flow.setMembers(100);
+    const std::int64_t dayStart =
+        static_cast<std::int64_t>(localDayStart(static_cast<std::time_t>(flow.now)));
+    flow.now = dayStart + 2 * 3600; // 当天 02:00 起
+    flow.warm(3, 4);                 // 武装 + 基线，到 05:0x
+
+    // 当天上午用完 3 次评估
+    for (int round = 0; round < 3; ++round)
+    {
+        const std::size_t before = harness.agentHistories.size();
+        flow.spike(12);
+        ASSERT_GT(harness.agentHistories.size(), before) << "第 " << round + 1 << " 次应评估";
+        flow.now += 2 * 60 * 60; // 跨过冷启动冷却
+    }
+    const std::size_t afterCap = harness.agentHistories.size();
+    ASSERT_LT(flow.now, dayStart + 23 * 3600) << "前置：三次评估都落在当天";
+
+    // 当天 23:50：离第一次评估不到 24 小时，额度仍是用完的
+    flow.now = dayStart + 24 * 3600 - 10 * 60;
+    flow.spike(12);
+    EXPECT_EQ(harness.agentHistories.size(), afterCap) << "零点前当日帽仍生效";
+
+    // 过了本地零点：离第一次评估同样不到 24 小时，但额度按日历日重置
+    //（旧实现从上次重置起算滚动 24 小时，这里会继续拦）
+    flow.now = dayStart + 24 * 3600 + 2 * 60;
+    flow.spike(12);
+    EXPECT_GT(harness.agentHistories.size(), afterCap) << "本地零点后额度应重置";
 }
 
 TEST(EngagementColdTest, ColdPassDecidesNotToJoinAndCooldownApplies)
@@ -2008,7 +2044,8 @@ TEST(EngagementColdTest, DailyCapSurvivesRestart)
     const Live<BotIdentity> liveBot{bot};
     const std::uint64_t group = 77502;
 
-    std::int64_t now = 2'000'000;
+    // 从某天本地 08:00 起走：整段不跨零点
+    std::int64_t now = static_cast<std::int64_t>(localDayStart(2'000'000)) + 8 * 3600;
     auto store1 = std::make_unique<GroupContextStore>(dbPath);
     Live<AffectOptions> affect{AffectOptions{}};
     EngagementService first(liveBot, store1.get(), affect, nullptr, [&now] { return now; });

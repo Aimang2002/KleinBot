@@ -285,7 +285,7 @@ void EngagementService::onGroupMessage(const GroupMessageRecord &record, bool at
     if (cold.armedTs == 0)
     {
         cold.armedTs = now;
-        cold.dayAnchor = now;
+        cold.dayAnchor = static_cast<std::int64_t>(localDayStart(static_cast<std::time_t>(now)));
         cold.emaTs = now;
         persistColdLocked(record.groupId);
     }
@@ -541,10 +541,13 @@ bool EngagementService::coldCheckLocked(std::uint64_t groupId, ColdState &cold,
     if (now - cold.lastCheck < kColdCheckInterval)
         return false;
     cold.lastCheck = now;
-    // 日界重置
-    if (now - cold.dayAnchor >= 86400)
+    // 日界重置：按运行机器的本地零点，不是从上次重置起算的滚动 24 小时
+    //（2026-11-21 真机：锚点落在 14:04，前一天傍晚的三次评估把第二天中午的额度吃光，
+    // 最热闹的群一整个下午没拿到评估机会）
+    const auto dayStart = static_cast<std::int64_t>(localDayStart(static_cast<std::time_t>(now)));
+    if (cold.dayAnchor < dayStart)
     {
-        cold.dayAnchor = now;
+        cold.dayAnchor = dayStart;
         cold.coldToday = 0;
         persistColdLocked(groupId);
     }

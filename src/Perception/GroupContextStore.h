@@ -42,7 +42,7 @@ struct EngagementColdRow
 {
     double hourlyEma = -1.0;        // 每小时消息数 EMA；-1 = 未学习
     std::int64_t armedTs = 0;       // 武装期起算（首条消息）
-    std::int64_t dayAnchor = 0;     // 当日帽的日界锚点
+    std::int64_t dayAnchor = 0;     // 当日帽的日界锚点（当天本地零点）
     int coldToday = 0;              // 今日冷启动评估次数
     std::int64_t cooldownUntil = 0; // 冷启动禁入截止
 };

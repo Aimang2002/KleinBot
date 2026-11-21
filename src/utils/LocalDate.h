@@ -14,4 +14,7 @@ std::string currentLocalDateIso();
 // 运行机器的本地小时（0–23）：决策层情境卡的时段字段
 int currentLocalHour();
 
+// 某时刻所在本地日历日的零点（当天 00:00:00 的时间戳）：冷启动当日帽按这个日界重置
+std::time_t localDayStart(std::time_t value);
+
 #endif // LOCAL_DATE_H

@@ -271,8 +271,8 @@ private:
         std::int64_t emaTs = 0;          // 上次 EMA 采样时刻
         std::int64_t armedTs = 0;        // 首条消息时刻（武装期起算）
         std::int64_t lastCheck = 0;      // 上次冷启动检查（60s 节流）
-        std::int64_t dayAnchor = 0;      // 日界锚点
-        int coldToday = 0;               // 今日冷启动评估次数
+        std::int64_t dayAnchor = 0;      // 日界锚点：当天本地零点的时间戳
+        int coldToday = 0;               // 今日（本地日历日）冷启动评估次数
     };
 
     // 冷启动：基线学习 + 热度尖峰检测 + 频控（锁内调用，pump 每 3s 触发、
