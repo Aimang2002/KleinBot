@@ -364,7 +364,16 @@ TEST(ReflectionTest, ModelSilenceLeavesCursorAloneAndGarbageAdvancesIt)
     const affect::ReflectionReport silent = harness.service.runNow(kGroup, true);
     EXPECT_TRUE(silent.ran);
     EXPECT_EQ(silent.skipped, "模型没有返回");
-    EXPECT_EQ(harness.service.progressOf(kGroup).cursor, 0);
+    // 游标只落到 24 小时地板，经历还在；自动回想退避 30 分钟，手动照常
+    EXPECT_EQ(harness.service.progressOf(kGroup).cursor,
+              harness.now - affect::ReflectionRules::kLookbackSeconds);
+    EXPECT_EQ(harness.service.progressOf(kGroup).retryAfter,
+              harness.now + affect::ReflectionRules::kRetrySeconds);
+    EXPECT_TRUE(harness.service.dueGroups(harness.now).empty()) << "退避中不自动试";
+    EXPECT_TRUE(harness.service.dueGroups(harness.now + affect::ReflectionRules::kRetrySeconds - 1).empty());
+    EXPECT_EQ(harness.service.dueGroups(harness.now + affect::ReflectionRules::kRetrySeconds),
+              std::vector<std::uint64_t>{kGroup});
+    EXPECT_EQ(harness.service.requestNow(kGroup), 1u) << "手动不受退避限制";
 
     harness.reply = "这不是 JSON";
     const affect::ReflectionReport garbage = harness.service.runNow(kGroup, true);
@@ -467,6 +476,24 @@ TEST(ReflectionTest, EarlyTriggerWhenBufferPilesUpAfterTheExperience)
     EXPECT_EQ(harness.service.dueGroups(harness.now), std::vector<std::uint64_t>{kGroup});
 }
 
+// 游标地板：24 小时前的决策没有现场可看，不回想、不从头翻旧账（2026-11-22 真机：第一次回想拿了 10 月底的决策）
+TEST(ReflectionTest, CursorNeverLooksBackMoreThanADay)
+{
+    Harness harness;
+    harness.speak("上个月说的", harness.now - 3 * 24 * kHour);
+    harness.speak("前天说的", harness.now - 2 * 24 * kHour);
+    const std::string recent = harness.speak("今天说的", harness.now - kHour);
+    harness.reply = okOutput(recent);
+    const affect::ReflectionReport report = harness.service.runNow(kGroup, true);
+    EXPECT_TRUE(report.ran);
+    EXPECT_EQ(report.experiences, 1u);
+    ASSERT_EQ(harness.users.size(), 1u);
+    EXPECT_EQ(harness.users.front().find("上个月说的"), std::string::npos);
+    EXPECT_EQ(harness.users.front().find("前天说的"), std::string::npos);
+    EXPECT_NE(harness.users.front().find("今天说的"), std::string::npos);
+    EXPECT_EQ(harness.service.progressOf(kGroup).cursor, harness.now - kHour);
+}
+
 TEST(ReflectionTest, AffectOffOrNoWorkerDoesNothing)
 {
     Harness harness;
@@ -479,7 +506,7 @@ TEST(ReflectionTest, AffectOffOrNoWorkerDoesNothing)
     harness.workerAvailable = false;
     const affect::ReflectionReport report = harness.service.runNow(kGroup, true);
     EXPECT_EQ(report.skipped, "模型未接入");
-    EXPECT_EQ(harness.service.progressOf(kGroup).cursor, 0);
+    EXPECT_EQ(harness.service.progressOf(kGroup).cursor, 0) << "没跑就不写进度";
 }
 
 TEST(ReflectionTest, ManualRequestRunsOnTheWorkerThread)

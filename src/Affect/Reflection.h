@@ -36,7 +36,9 @@ struct ReflectionRules
     static constexpr std::size_t kEarlyTriggerMessages = 200;  // 最早一次未回想经历之后群缓冲已积这么多条就提前回想（300 的三分之二）
     static constexpr std::size_t kMaxReadings = 16;            // 模型一次最多给的读法条数（多的丢弃）
     static constexpr std::size_t kMaxReadingCodepoints = 120;  // 读法一句的上限（与计划 v2 的派生字段一致）
-    static constexpr long kTimeoutMs = 60000;                  // 模型调用超时：后台任务，可以等久一点
+    static constexpr long kTimeoutMs = 120000;                 // 模型调用超时：后台任务，可以等久一点（2026-11-22 真机 60 秒不够）
+    static constexpr std::int64_t kLookbackSeconds = 24 * 3600; // 游标不早于这么久之前：群缓冲只留 24 小时，更早的经历没有现场可看
+    static constexpr std::int64_t kRetrySeconds = 30 * 60;     // 模型没返回后的退避：没有它会每分钟再来一次长调用（2026-11-22 真机）
 };
 
 // 一条现场（已经格式化成一行的群聊材料，和它的原文——原文只用来挡照抄，不进 prompt 以外的地方）

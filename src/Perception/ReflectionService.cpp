@@ -179,6 +179,7 @@ ReflectionProgress ReflectionService::loadProgress(std::uint64_t groupId) const
             progress.lastRun = value.value("last_run", std::int64_t{0});
             progress.day = value.value("day", std::int64_t{0});
             progress.runsToday = value.value("runs_today", 0);
+            progress.retryAfter = value.value("retry_after", std::int64_t{0});
         }
     }
     catch (const std::exception &)
@@ -193,13 +194,20 @@ bool ReflectionService::saveProgress(std::uint64_t groupId, const ReflectionProg
     const nlohmann::json value = {{"cursor", progress.cursor},
                                   {"last_run", progress.lastRun},
                                   {"day", progress.day},
-                                  {"runs_today", progress.runsToday}};
+                                  {"runs_today", progress.runsToday},
+                                  {"retry_after", progress.retryAfter}};
     return ledger.writeMeta(metaKey(groupId), value.dump());
 }
 
 ReflectionProgress ReflectionService::progressOf(std::uint64_t groupId) const
 {
     return loadProgress(groupId);
+}
+
+// 游标地板：不早于 24 小时前（群缓冲的保留期）。更早的决策没有现场可看，也不该让第一次回想从头翻旧账
+static std::int64_t flooredCursor(std::int64_t cursor, std::int64_t now)
+{
+    return std::max(cursor, now - ReflectionRules::kLookbackSeconds);
 }
 
 std::vector<ReflectionExperience> ReflectionService::pendingExperiences(
@@ -266,6 +274,9 @@ std::vector<std::uint64_t> ReflectionService::dueGroups(std::int64_t now)
         const int runsToday = progress.day == today ? progress.runsToday : 0;
         if (runsToday >= ReflectionRules::kDailyCap)
             continue;
+        if (now < progress.retryAfter)
+            continue; // 上次模型没返回：退避中
+        progress.cursor = flooredCursor(progress.cursor, now);
         std::int64_t scanned = 0;
         const std::vector<ReflectionExperience> pending =
             pendingExperiences(groupId, progress.cursor, now, 1, scanned);
@@ -309,6 +320,7 @@ ReflectionReport ReflectionService::runNow(std::uint64_t groupId, bool manual)
     }
     const std::int64_t now = clock();
     ReflectionProgress progress = loadProgress(groupId);
+    progress.cursor = flooredCursor(progress.cursor, now);
     std::int64_t scanned = 0;
     std::vector<ReflectionExperience> experiences =
         pendingExperiences(groupId, progress.cursor, now, ReflectionRules::kExperiencesPerRun, scanned);
@@ -421,9 +433,11 @@ ReflectionReport ReflectionService::runNow(std::uint64_t groupId, bool manual)
     report.ran = true;
     if (raw.empty())
     {
-        // 超时、取消或失败：这次不算，游标不动，下次重来
+        // 超时、取消或失败：这次不算，游标不动；自动回想退避 30 分钟再试（手动不受限）
         LOG_WARNING("回想：群 " + std::to_string(groupId) + " 模型没有返回（" + report.modelLabel + "，" +
-                    std::to_string(report.latencyMs) + " ms），这次不算");
+                    std::to_string(report.latencyMs) + " ms），这次不算，30 分钟后再试");
+        progress.retryAfter = now + ReflectionRules::kRetrySeconds;
+        saveProgress(groupId, progress);
         report.skipped = "模型没有返回";
         return report;
     }
@@ -504,6 +518,7 @@ ReflectionReport ReflectionService::runNow(std::uint64_t groupId, bool manual)
     if (!manual)
         ++progress.runsToday;
     progress.lastRun = now;
+    progress.retryAfter = 0;
     progress.cursor = scanned;
     saveProgress(groupId, progress);
 
