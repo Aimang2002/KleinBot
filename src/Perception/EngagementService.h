@@ -35,15 +35,16 @@
  * 在场账本（ADR-024，2026-11-16）：每群一份 affect::GroupPresence，是两条发言路径
  * （Message 的 @ 回复、这里的会话轮）共用的唯一事实来源。触发规则管“什么时候看一眼”
  *（模型调用开销），账本管“能不能主动开口”（发言份额）：
- *   - 没人叫她的轮次（追问窗口、lull、冷启动）只在账本允许主动开口时才提交；
- *     被叫到的轮次（点名、引用回复、提名字入场）与 @ 回复是应答义务，不受份额限制；
+ *   - 发言份额只记账、写进情境卡交给判定器（2026-11-21 部署者定规：入场出场由她定，程序只留底层
+ *     护栏与资源预算；此前份额用完就不提交没人叫她的轮次）；她自己请求的退场期内不提交；
+ *     被叫到的轮次（点名、引用回复、提名字入场）与 @ 回复是应答义务；
  *   - 她说出口的每一句都按“应答 / 主动”记进账本：会话轮在定案处记，@ 回复经
  *     onAtAnswered 记——她自己说话永远不会让份额变多；
  *   - 离场是两条路径共用的同一个动作（会话轮的 leave_topic 动词、@ 回复路径的
  *     leave_topic 工具，都落到 leaveTopic）。带 step_back 即暂时退开：结束跟进，
  *     退场期内不主动开口、点名与冷启动不再开会话；被 @ 仍由 @ 路径照常回答。
- * 硬后盖不依赖模型自觉：轮次上限、
- * 会话时长、群内不活跃时长任一触顶强制结束。
+ * 硬后盖只有资源预算：会话消息量上限、群内不活跃时长任一触顶强制结束；连续沉默不再收场
+ *（2026-11-21）。冷启动的当日帽与冷却同日去掉，只留“同一波热度只看一眼”。
  *
  * 结束不是删除：会话（含话题行）保留 2 小时；保留期内同群新激活 =
  * 清旧建新（旧上下文让位），2h 无续接由 pump 清扫。进程重启即失
@@ -272,7 +273,8 @@ private:
         std::int64_t armedTs = 0;        // 首条消息时刻（武装期起算）
         std::int64_t lastCheck = 0;      // 上次冷启动检查（60s 节流）
         std::int64_t dayAnchor = 0;      // 日界锚点：当天本地零点的时间戳
-        int coldToday = 0;               // 今日（本地日历日）冷启动评估次数
+        int coldToday = 0;               // 今日（本地日历日）冷启动评估次数：只计数进日志，不再限制
+        std::int64_t lastEvaluation = 0; // 上次冷启动评估时刻：同一波热度只看一眼（纯内存）
     };
 
     // 冷启动：基线学习 + 热度尖峰检测 + 频控（锁内调用，pump 每 3s 触发、
@@ -289,7 +291,6 @@ private:
     mutable std::mutex mutex;
     std::map<std::uint64_t, EngagementSession> sessions;
     std::map<std::uint64_t, ColdState> colds;
-    std::map<std::uint64_t, std::int64_t> coldCooldownUntil; // 冷启动禁入截止
     std::map<std::uint64_t, std::deque<std::int64_t>> nameActivationHistory; // 激活预算记账
     std::map<std::uint64_t, affect::GroupPresence> presences; // 在场账本（ADR-024），会话锁保护
     MainAgent mainAgent;

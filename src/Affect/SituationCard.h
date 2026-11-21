@@ -27,6 +27,12 @@ struct SituationCard
     int newMessagesSinceTurn = 0;
     int messagesSeen = 0;
     int followUpTurnsUsed = 0;
+    // 在场账本（ADR-024；2026-11-21 起只记账不做门）：最近 10 分钟她主动说了几句、应答了几句、
+    // 别人说了几句、几个人在说——要不要再主动开口由她看着这些数定。@ 路径没有会话账本，恒 0
+    int unpromptedInWindow = 0;
+    int answersInWindow = 0;
+    int othersMessagesInWindow = 0;
+    int otherSpeakersInWindow = 0;
     std::int64_t secondsSinceLastTurn = -1;   // -1 = 本会话尚无轮次
     std::int64_t secondsSinceLastSpeech = -1; // -1 = 本会话她尚未开口
     int lullTurnsThisHour = 0;

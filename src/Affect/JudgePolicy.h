@@ -23,7 +23,8 @@ namespace affect
 // 成功时 fallbackReason 可能带提示（逗号分隔）：allowed_tools_empty、reply_to_unknown
 //（reply_to 不在可回应的消息里，已置空）、occasion_quotes_material / reaction_quotes_material
 //（occasion / reaction_to_last 照抄原文，已清空，计划照常生效）。
-// 动作空间按触发类型划定（allowedActions，唯一定义处）：被 @ 只能 reply；有人叫她/接
+// 动作空间按触发类型划定（allowedActions，唯一定义处）：被 @ 可以 reply 或 no_reply（她有拒绝的权利，
+// 2026-11-22）；有人叫她/接
 // 她的话只能 group_say（交给她本人）；只有冷场与冷启动可建议 no_reply / leave_topic。
 class JudgePolicy : public DecisionPolicy
 {

@@ -633,4 +633,70 @@ bool DecisionStore::feedbackExists(const std::string &feedbackId) const
     sqlite3_finalize(statement);
     return found;
 }
+
+std::vector<std::uint64_t> DecisionStore::decisionGroups() const
+{
+    std::vector<std::uint64_t> result;
+    if (!isOpen())
+        return result;
+    std::lock_guard<std::mutex> lock(mutex);
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT DISTINCT group_id FROM affect_decisions WHERE group_id<>0"
+                           " ORDER BY group_id ASC;",
+                           -1, &statement, nullptr) != SQLITE_OK)
+        return result;
+    while (sqlite3_step(statement) == SQLITE_ROW)
+        result.push_back(static_cast<std::uint64_t>(sqlite3_column_int64(statement, 0)));
+    sqlite3_finalize(statement);
+    return result;
+}
+
+std::vector<DecisionRecord> DecisionStore::decisionsForGroup(std::uint64_t groupId, std::int64_t after,
+                                                             std::int64_t until, std::size_t limit) const
+{
+    std::vector<DecisionRecord> result;
+    if (!isOpen() || limit == 0 || groupId == 0)
+        return result;
+    std::lock_guard<std::mutex> lock(mutex);
+    const char *sql =
+        "SELECT decision_id, created_at, source, group_id, user_id, trigger_message_id,"
+        " plan_json, policy_version, plan_version, state_json, fallback_reason"
+        " FROM affect_decisions WHERE group_id=?1 AND created_at>?2 AND created_at<=?3"
+        " ORDER BY created_at ASC, decision_id ASC LIMIT ?4;";
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
+        return result;
+    sqlite3_bind_int64(statement, 1, static_cast<sqlite3_int64>(groupId));
+    sqlite3_bind_int64(statement, 2, static_cast<sqlite3_int64>(after));
+    sqlite3_bind_int64(statement, 3, static_cast<sqlite3_int64>(until));
+    sqlite3_bind_int64(statement, 4, static_cast<sqlite3_int64>(limit));
+    while (sqlite3_step(statement) == SQLITE_ROW)
+    {
+        if (std::optional<DecisionRecord> record = readDecision(statement))
+            result.push_back(std::move(*record));
+    }
+    sqlite3_finalize(statement);
+    return result;
+}
+
+std::vector<ExecutionRecord> DecisionStore::executionsFor(const std::string &decisionId) const
+{
+    std::vector<ExecutionRecord> result;
+    if (!isOpen() || decisionId.empty())
+        return result;
+    std::lock_guard<std::mutex> lock(mutex);
+    const char *sql =
+        "SELECT execution_id, decision_id, created_at, status, actual_text,"
+        " outbound_message_id, deviation_reason"
+        " FROM affect_executions WHERE decision_id=?1 ORDER BY created_at ASC, execution_id ASC;";
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
+        return result;
+    sqlite3_bind_text(statement, 1, decisionId.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(statement) == SQLITE_ROW)
+        result.push_back(readExecution(statement));
+    sqlite3_finalize(statement);
+    return result;
+}
 } // namespace affect

@@ -224,6 +224,11 @@ public:
     // E3 的回想）；按种类与在场的人过滤、阈值、上限与排序都在 selectKnowledge 里
     std::vector<RecalledKnowledge> recallPool(std::uint64_t groupId) const;
 
+    // 回想进度（经历层 E3，ADR-030）：存在同一文件的 perception_meta 表（键 affect.reflection.<群号>），
+    // 不新增表。未打开时读返回空串、写返回 false
+    std::string readMeta(const std::string &key) const;
+    bool writeMeta(const std::string &key, const std::string &value);
+
 private:
     std::int64_t now() const { return clock(); }
 

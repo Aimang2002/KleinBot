@@ -92,7 +92,9 @@ TEST(SituationCardTest, JsonContainsOnlyDerivedFields)
     const std::set<std::string> expectedKeys{
         "source", "trigger_kind", "group_id", "user_id", "recent_summary", "mood_line",
         "turn_count", "consecutive_passes", "new_messages_since_turn", "messages_seen",
-        "follow_up_turns_used", "seconds_since_last_turn", "seconds_since_last_speech",
+        "follow_up_turns_used", "unprompted_in_window", "answers_in_window",
+        "others_messages_in_window", "other_speakers_in_window", "seconds_since_last_turn",
+        "seconds_since_last_speech",
         "lull_turns_this_hour", "lull_hourly_cap", "judge_calls_this_hour", "judge_calls_cap",
         "local_hour", "is_quiet_hours", "available_tools", "playbook", "journal_tail",
         "plan_summary"};
@@ -239,20 +241,26 @@ TEST(JudgePolicyTest, UnsupportedTriggerSkipsWorker)
     EXPECT_EQ(worker.calls, 0);
 }
 
-TEST(JudgePolicyTest, AtReplyOnlyAllowsReply)
+// 被 @ 她也有拒绝的权利（2026-11-22）：reply 与 no_reply 都收，别的动作仍越界回退
+TEST(JudgePolicyTest, AtReplyAllowsReplyOrDeclining)
 {
     EXPECT_EQ(JudgePolicy::allowedActions(cardFor("at_reply", "at")),
-              std::vector<std::string>{"reply"});
+              (std::vector<std::string>{"reply", "no_reply"}));
     FakeWorker worker{planJson("no_reply", "none")};
     JudgePolicy policy(worker.seam(), "m");
     std::string reason;
-    const BehaviorPlan plan = decideWith(policy, cardFor("at_reply", "at"), "m", reason);
-    EXPECT_EQ(reason, "judge_action_not_allowed");
-    EXPECT_EQ(plan.action, "reply"); // @ 必回
+    const BehaviorPlan declined = decideWith(policy, cardFor("at_reply", "at"), "m", reason);
+    EXPECT_TRUE(reason.empty()) << reason;
+    EXPECT_EQ(declined.action, "no_reply");
 
     worker.reply = planJson("reply");
     EXPECT_EQ(decideWith(policy, cardFor("at_reply", "at"), "m", reason).action, "reply");
     EXPECT_TRUE(reason.empty());
+
+    worker.reply = planJson("leave_topic");
+    const BehaviorPlan leaving = decideWith(policy, cardFor("at_reply", "at"), "m", reason);
+    EXPECT_EQ(reason, "judge_action_not_allowed");
+    EXPECT_EQ(leaving.action, "reply"); // 越界回退基线
 }
 
 TEST(JudgePolicyTest, AddressedTurnsOnlyAllowGroupSay)

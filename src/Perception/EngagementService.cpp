@@ -46,7 +46,7 @@ constexpr double kRecallFloor = 4.0;              // 召回相关性门槛（复
 constexpr int kMaxTurnsPerSession = 20;           // 单会话轮次统计（不再作硬帽，日志观测用）
 constexpr std::int64_t kMaxSessionMessages = 300; // 单会话强制收场：群消息量上限
 constexpr std::int64_t kInactiveSeconds = 10 * 60;    // 群内无新消息收场
-constexpr int kPassLimit = 3;                     // 连续 pass 收场
+// 连续沉默不再收场（2026-11-21 部署者定规：跟不跟这个话题由她定）；consecutivePasses 只计数进情境卡
 constexpr std::int64_t kLullSeconds = 4;          // 新消息后的静默判定（趁话题正热插话）
 constexpr int kNewMessagesForTurn = 5;            // lull 轮次的新消息门槛（回得太勤是群友第一反感）
 constexpr std::int64_t kTurnCooldown = 75;        // 跨轮次节流（2026-09-18 真机反馈：20s 太勤）
@@ -70,9 +70,10 @@ constexpr double kSpikeRatio = 3.0;                  // 桶计数 ≥ 基线×3 
 constexpr double kSpikeFloor = 6.0;                  // 绝对地板（防死群噪声）
 constexpr double kMemberFloorRatio = 0.03;           // 人数地板：人数 × 3%
 constexpr double kMemberPriorDaily = 0.2;            // 冷启动先验：人数 × 0.2 条/天
-constexpr int kColdDailyCap = 3;                     // 冷启动评估：每群每天上限
-constexpr std::int64_t kColdCooldown = 2 * 60 * 60;  // 冷启动会话结束后冷却
-constexpr std::int64_t kAnyEndCooldown = 60 * 60;    // 任意会话结束后冷却
+// 2026-11-21 部署者定规：入场、出场由她定，程序只留底层护栏与资源预算——冷启动的当日帽（每天 3 次）
+// 与两种冷却（冷启动会话结束后 2 小时、任意会话结束后 1 小时）都去掉了。coldToday 只计数进日志。
+// 同一波热度只看一眼（上次评估还在 kSpikeBucketSeconds 内就不再评估）是资源预算：没有它，她谢绝之后
+// 同一个 10 分钟桶会每 60 秒再触发一次判定调用
 constexpr std::int64_t kArmSeconds = 2 * 60 * 60;    // 武装期：观察满 2 小时才启用
 constexpr std::size_t kColdWindowMessages = 15;      // 冷启动入场材料条数
 constexpr std::size_t kReplyCandidates = 8;          // 计划 v2 的可回应消息：最近几条群友消息
@@ -268,8 +269,6 @@ EngagementService::EngagementService(const Live<BotIdentity> &bot, GroupContextS
         cold.dayAnchor = row.dayAnchor;
         cold.coldToday = row.coldToday;
         cold.emaTs = row.armedTs;
-        if (row.cooldownUntil > 0)
-            coldCooldownUntil[groupId] = row.cooldownUntil;
     }
     if (!colds.empty())
         LOG_INFO("冷启动基线状态已从库恢复：" + std::to_string(colds.size()) + " 个群");
@@ -449,16 +448,15 @@ void EngagementService::pump(std::int64_t now)
                 continue;
             }
 
-            // 没人叫她的轮次（追问窗口、lull）只在发言份额还有时才看（ADR-024）：
-            // 份额只随别人说话恢复，她自己开口不会让它变多。下面两条触发规则管的是
-            // “什么时候看一眼”（模型调用开销），份额管的是“能不能主动开口”
-            const bool mayVolunteer = presenceLocked(session.groupId).mayVolunteer(now);
+            // 没人叫她的轮次（追问窗口、lull）：发言份额只记账、写进情境卡交给她判（2026-11-21 起不做门）；
+            // 只有她自己请求的退场期内不提交。下面两条触发规则管的是“什么时候看一眼”（模型调用开销）
+            const bool withdrawn = presenceLocked(session.groupId).withdrawn(now);
 
             // 追问窗口：她开口后 120s 内，群友接了话（哪怕 1 条、不引用不点名）且归于
             // 安静，就给她一轮——她问"lulu是谁？"，别人答了，她得能看到。只是资源预算：
             // 每次开口至多 2 轮、不计 lull 每小时帽、不受跨轮节流；接不接由她在轮内决定。
             // 已有待执行的点名/入场轮时不重复提交；本拍追问轮已提交则跳过 lull
-            if (mayVolunteer && session.lastSpeakTs > 0 &&
+            if (!withdrawn && session.lastSpeakTs > 0 &&
                 now - session.lastSpeakTs <= kFollowUpWindowSeconds &&
                 session.newMessagesSinceTurn >= 1 &&
                 now - session.lastActivityTs >= kLullSeconds &&
@@ -481,7 +479,7 @@ void EngagementService::pump(std::int64_t now)
             while (!session.recentTurnTs.empty() &&
                    now - session.recentTurnTs.front() >= kLullFuseWindow)
                 session.recentTurnTs.pop_front();
-            if (mayVolunteer && session.newMessagesSinceTurn >= kNewMessagesForTurn &&
+            if (!withdrawn && session.newMessagesSinceTurn >= kNewMessagesForTurn &&
                 now - session.lastActivityTs >= kLullSeconds &&
                 now - session.lastTurnTs >= kTurnCooldown &&
                 session.recentTurnTs.size() < kLullHourlyCap)
@@ -499,8 +497,8 @@ void EngagementService::pump(std::int64_t now)
             auto it = sessions.find(groupId);
             if (it != sessions.end() && it->second.state == EngagementState::Active)
                 continue;
-            // 冷启动是没人叫她的主动加入：退场期内或份额用完时不评估（也不耗当日评估次数）
-            if (!presenceLocked(groupId).mayVolunteer(now))
+            // 冷启动是没人叫她的主动加入：她自己请求的退场期内不评估；份额只记账，不做门
+            if (presenceLocked(groupId).withdrawn(now))
                 continue;
             if (coldCheckLocked(groupId, cold, now))
                 coldTriggers.push_back(groupId);
@@ -551,10 +549,8 @@ bool EngagementService::coldCheckLocked(std::uint64_t groupId, ColdState &cold,
         cold.coldToday = 0;
         persistColdLocked(groupId);
     }
-    if (cold.coldToday >= kColdDailyCap)
-        return false;
-    auto cooldownIt = coldCooldownUntil.find(groupId);
-    if (cooldownIt != coldCooldownUntil.end() && now < cooldownIt->second)
+    // 同一波热度只看一眼（资源预算）：上次评估还在本桶窗口内就不再评估
+    if (cold.lastEvaluation > 0 && now - cold.lastEvaluation < kSpikeBucketSeconds)
         return false;
 
     // 阈值模型：人数给地板与先验，EMA 管学习
@@ -571,6 +567,7 @@ bool EngagementService::coldCheckLocked(std::uint64_t groupId, ColdState &cold,
         return false;
 
     cold.coldToday += 1;
+    cold.lastEvaluation = now;
     persistColdLocked(groupId);
     LOG_INFO("冷启动尖峰命中：群 " + std::to_string(groupId) + "，10 分钟 " +
              std::to_string(cold.recent.size()) + " 条 ≥ 阈值 " +
@@ -591,8 +588,7 @@ void EngagementService::persistColdLocked(std::uint64_t groupId)
     row.armedTs = it->second.armedTs;
     row.dayAnchor = it->second.dayAnchor;
     row.coldToday = it->second.coldToday;
-    auto cooldown = coldCooldownUntil.find(groupId);
-    row.cooldownUntil = cooldown != coldCooldownUntil.end() ? cooldown->second : 0;
+    row.cooldownUntil = 0; // 冷却已去掉（2026-11-21）；列保留，写 0
     store->saveEngagementCold(groupId, row);
 }
 
@@ -832,6 +828,14 @@ void EngagementService::runTurn(std::uint64_t groupId)
         card.newMessagesSinceTurn = session.newMessagesSinceTurn;
         card.messagesSeen = session.messagesSeen;
         card.followUpTurnsUsed = session.followUpTurnsUsed;
+        {
+            // 在场账本只记账（2026-11-21 起不做门）：数字交给判定器，要不要再主动开口由她定
+            const affect::PresenceView presence = presenceLocked(groupId).view(snapshotNow);
+            card.unpromptedInWindow = presence.unprompted;
+            card.answersInWindow = presence.answers;
+            card.othersMessagesInWindow = presence.othersMessages;
+            card.otherSpeakersInWindow = presence.otherSpeakers;
+        }
         card.secondsSinceLastTurn = session.lastTurnTs > 0 ? snapshotNow - session.lastTurnTs : -1;
         card.secondsSinceLastSpeech =
             session.lastSpeakTs > 0 ? snapshotNow - session.lastSpeakTs : -1;
@@ -1207,10 +1211,8 @@ void EngagementService::runTurn(std::uint64_t groupId)
         {
             if (utils::trim(turn.text).empty())
             {
-                // group_say 带了空文本：按沉默处理
+                // group_say 带了空文本：按沉默处理（只计数，不收场）
                 session.consecutivePasses += 1;
-                if (session.consecutivePasses >= kPassLimit)
-                    endSessionLocked(session, now, "连续沉默", false);
                 break;
             }
             deliverPending = true;
@@ -1259,12 +1261,10 @@ void EngagementService::runTurn(std::uint64_t groupId)
                                  false);
                 break;
             }
+            // 连续沉默不再强制收场（2026-11-21）：会话只因群内沉寂、消息量上限或她自己离场结束
             session.consecutivePasses += 1;
-            if (session.consecutivePasses >= kPassLimit)
-                endSessionLocked(session, now, "连续沉默", false);
-            else
-                LOG_INFO("会话轮沉默：群 " + std::to_string(groupId) + "（连续 " +
-                         std::to_string(session.consecutivePasses) + " 拍）");
+            LOG_INFO("会话轮沉默：群 " + std::to_string(groupId) + "（连续 " +
+                     std::to_string(session.consecutivePasses) + " 拍）");
             break;
         }
     }
@@ -1419,10 +1419,7 @@ void EngagementService::endSessionLocked(EngagementSession &session, std::int64_
     session.state = EngagementState::Ended;
     session.endTs = now;
     session.endReason = forced ? "forced: " + reason : reason;
-    // 会话结束 → 冷启动冷却（冷启动开启的冷却更久；刚结束就冷启动最讨嫌）
-    coldCooldownUntil[session.groupId] =
-        now + (session.coldInitiated ? kColdCooldown : kAnyEndCooldown);
-    persistColdLocked(session.groupId);
+    // 会话结束不再给冷启动上冷却（2026-11-21）：再进不进由她看现场定
     LOG_INFO("话题会话结束（" + std::string(forced ? "强制" : "自然") + "）：群 " +
              std::to_string(session.groupId) + "，原因：" + reason + "，保留 2 小时");
 }

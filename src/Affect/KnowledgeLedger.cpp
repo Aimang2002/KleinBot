@@ -376,7 +376,11 @@ bool KnowledgeLedger::open()
         "CREATE INDEX IF NOT EXISTS idx_affect_knowledge_history_entry"
         " ON affect_knowledge_history(knowledge_id, id);"
         "CREATE INDEX IF NOT EXISTS idx_affect_knowledge_history_run"
-        " ON affect_knowledge_history(run_id);";
+        " ON affect_knowledge_history(run_id);"
+        // 回想进度（E3）：与观察通道同一张键值表（同一 DDL，幂等），不新增表
+        "CREATE TABLE IF NOT EXISTS perception_meta ("
+        " key TEXT PRIMARY KEY,"
+        " value TEXT NOT NULL);";
     if (!exec(db, ddl))
     {
         sqlite3_close(db);
@@ -886,6 +890,32 @@ std::vector<KnowledgeEntry> KnowledgeLedger::candidatesFor(std::uint64_t groupId
     for (auto &item : kept)
         result.push_back(std::move(item.second));
     return result;
+}
+
+std::string KnowledgeLedger::readMeta(const std::string &key) const
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    if (db == nullptr)
+        return {};
+    Statement statement(db, "SELECT value FROM perception_meta WHERE key=?1;");
+    if (!statement || !statement.text(1, key) || sqlite3_step(statement.handle) != SQLITE_ROW)
+        return {};
+    return statement.columnText(0);
+}
+
+bool KnowledgeLedger::writeMeta(const std::string &key, const std::string &value)
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    if (db == nullptr)
+        return false;
+    Statement statement(db, "INSERT INTO perception_meta(key, value) VALUES (?1, ?2)"
+                            " ON CONFLICT(key) DO UPDATE SET value = excluded.value;");
+    if (!statement || !statement.text(1, key) || !statement.text(2, value))
+        return false;
+    const bool ok = sqlite3_step(statement.handle) == SQLITE_DONE;
+    if (!ok)
+        LOG_ERROR("认识账本：进度写入失败：" + std::string(sqlite3_errmsg(db)));
+    return ok;
 }
 
 std::vector<RecalledKnowledge> KnowledgeLedger::recallPool(std::uint64_t groupId) const

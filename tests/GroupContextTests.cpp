@@ -386,7 +386,9 @@ TEST(GroupContextServiceTest, SuppressionMarkerAndContract)
     const char *contract = GroupContextService::groupConversationContract();
     EXPECT_NE(std::string(contract).find("插话"), std::string::npos);
     EXPECT_NE(std::string(contract).find("[不回应]"), std::string::npos);
-    EXPECT_NE(std::string(contract).find("不许沉默"), std::string::npos);
+    // 2026-11-22 部署者定规：内置契约只讲机制，不教她少说、不禁她沉默
+    EXPECT_EQ(std::string(contract).find("不许沉默"), std::string::npos);
+    EXPECT_EQ(std::string(contract).find("尽量少说话"), std::string::npos);
 }
 
 TEST(GroupContextStoreTest, EngagementColdRoundtripAndReopen)

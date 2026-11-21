@@ -68,6 +68,15 @@ public:
     // 某条反馈是否存在（认识账本核对依据 feedback:<id> 用，经历层 E2）
     bool feedbackExists(const std::string &feedbackId) const;
 
+    // 回想（经历层 E3，ADR-030）的读接口：
+    // 有过决策的群（group_id ≠ 0，去重、升序）
+    std::vector<std::uint64_t> decisionGroups() const;
+    // 某群 created_at 在 (after, until] 内的决策，按时间升序，至多 limit 条
+    std::vector<DecisionRecord> decisionsForGroup(std::uint64_t groupId, std::int64_t after,
+                                                  std::int64_t until, std::size_t limit) const;
+    // 某决策的全部执行记录（created_at 升序）
+    std::vector<ExecutionRecord> executionsFor(const std::string &decisionId) const;
+
 private:
     const std::string path;
     sqlite3 *db = nullptr;      // 只在 open() 里由空变非空一次，之后到析构不变

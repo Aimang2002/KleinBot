@@ -340,20 +340,23 @@ TEST(EngagementSessionTest, TurnSpeakDeliversRecordsAndCounts)
     EXPECT_TRUE(foundSelf);
 }
 
-TEST(EngagementSessionTest, ThreeConsecutivePassesEndSession)
+// 2026-11-21 部署者定规：跟不跟由她定——连续沉默只计数进情境卡，不再强制收场；
+// 会话只因群内沉寂、消息量上限或她自己离场结束
+TEST(EngagementSessionTest, ConsecutivePassesNoLongerEndSession)
 {
     Harness harness;
     harness.service->onAtActivated(8823, "话题");
     harness.feed(8823, "现场消息", harness.now);
-    harness.turnResponses.push_back(passResponse());
-    harness.turnResponses.push_back(passResponse());
-    harness.turnResponses.push_back(passResponse());
-    harness.service->runTurn(8823);
-    harness.service->runTurn(8823);
+    for (int index = 0; index < 4; ++index)
+        harness.turnResponses.push_back(passResponse());
+    for (int index = 0; index < 4; ++index)
+        harness.service->runTurn(8823);
     EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Active);
-    harness.service->runTurn(8823);
+    EXPECT_EQ(harness.service->sessionOf(8823)->consecutivePasses, 4);
+    harness.now += 10 * 60;
+    harness.service->pump(harness.now);
     EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
-    EXPECT_EQ(harness.service->sessionOf(8823)->endReason, "连续沉默");
+    EXPECT_EQ(harness.service->sessionOf(8823)->endReason, "话题沉寂");
 }
 
 // 主动轮没调工具、直接写了一段文字（线上见过"（没有说话，继续留意后续）"）：不是她说出口的话。
@@ -376,14 +379,14 @@ TEST(EngagementSessionTest, BareTextTurnStaysSilent)
     EXPECT_EQ(session->turnCount, 0);
     EXPECT_EQ(session->lastSpeakTs, 0) << "没开口，不开追问窗口";
 
-    // 连续三拍都没调工具（哪怕写的像一句正常的话）：与连续沉默一样收场
+    // 连续三拍都没调工具（哪怕写的像一句正常的话）：与沉默一样只计数，会话不因此收场（2026-11-21）
     harness.turnResponses.push_back(bareTextResponse("（等对方回答，这一拍不出声）"));
     harness.turnResponses.push_back(bareTextResponse("那我说一句"));
     harness.service->runTurn(8823);
     harness.service->runTurn(8823);
     EXPECT_TRUE(harness.sender->deliveries.empty());
-    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Ended);
-    EXPECT_EQ(harness.service->sessionOf(8823)->endReason, "连续沉默");
+    EXPECT_EQ(harness.service->sessionOf(8823)->state, EngagementState::Active);
+    EXPECT_EQ(harness.service->sessionOf(8823)->consecutivePasses, 3);
 
     // 提名字入场轮：裸文本 = 她没接，与沉默一样直接收场
     harness.now += 5;
@@ -784,8 +787,8 @@ TEST(EngagementSessionTest, AtAnswerResetsPassCounterAndBeat)
 
 // ===== 在场账本（ADR-024）：发言份额、两条路径共用的离场 =====
 
-// 没人叫她的轮次只在份额还有时才看：她自己开口不会让份额变多，别人继续说话才恢复
-TEST(EngagementPresenceTest, UnpromptedLooksWaitForTheShareToRecover)
+// 份额只记账不做门（2026-11-21）：她开口之后追问窗口照常给她一轮，账本里的数字交给判定器
+TEST(EngagementPresenceTest, ShareIsBookkeepingNotAGate)
 {
     Harness harness;
     harness.service->onAtActivated(8823, "话题");
@@ -800,20 +803,18 @@ TEST(EngagementPresenceTest, UnpromptedLooksWaitForTheShareToRecover)
     EXPECT_EQ(harness.service->presenceOf(8823).unprompted, 1);
     harness.submittedTurns.clear();
 
-    // 追问窗口里又有人说话：份额已用完，不看（此前她一开口追问预算就归零，会接着看、接着说）
+    // 追问窗口里又有人说话：账本上她的主动份额已经用完，但那只是账，不是门——照常给她一轮，
+    // 要不要再说由她看着情境卡里的数定
     harness.now += 2;
     harness.feedFrom(8823, 1, "甲又说", harness.now);
     harness.now += 5;
     harness.service->pump(harness.now);
-    EXPECT_TRUE(harness.submittedTurns.empty()) << "份额用完，没人叫她就不看";
-    EXPECT_FALSE(harness.service->presenceOf(8823).mayVolunteer);
-
-    // 别人继续说到平均每人 2 条（共 6 条）：份额恢复，追问窗口照常给她一轮
-    harness.feedFrom(8823, 2, "乙又说", harness.now);
-    harness.feedFrom(8823, 3, "丙又说", harness.now + 1);
-    harness.now += 6;
-    harness.service->pump(harness.now);
-    ASSERT_EQ(harness.submittedTurns.size(), 1U);
+    ASSERT_EQ(harness.submittedTurns.size(), 1U) << "份额只记账，不拦轮次";
+    const affect::PresenceView presence = harness.service->presenceOf(8823);
+    EXPECT_FALSE(presence.mayVolunteer) << "账本的算法没变，只是不再做门";
+    EXPECT_EQ(presence.unprompted, 1);
+    EXPECT_EQ(presence.othersMessages, 4);
+    EXPECT_EQ(presence.otherSpeakers, 3);
 }
 
 // 2026-11-16 10:50：群友 @ 她“你退下吧”，她在 @ 回复里答应了，但这句回复重开了追问窗口、
@@ -837,7 +838,9 @@ TEST(EngagementPresenceTest, AnsweringAnAtNoLongerFeedsHerUnpromptedSpeech)
     harness.feedFrom(8823, 2, "哈哈", harness.now);
     harness.now += 5;
     harness.service->pump(harness.now);
-    EXPECT_TRUE(harness.submittedTurns.empty()) << "@ 回复打开了追问窗口，但份额没有变多";
+    // 2026-11-21 起份额不做门：追问轮照常提交；“你退下吧”之后要不要再说，由她看现场与账本的数定，
+    // 真被请走时她有 step_back。账本里应答与主动仍分开记
+    EXPECT_EQ(harness.submittedTurns.size(), 1U);
     const affect::PresenceView presence = harness.service->presenceOf(8823);
     EXPECT_EQ(presence.answers, 1);
     EXPECT_EQ(presence.unprompted, 1);
@@ -937,11 +940,31 @@ TEST(EngagementPresenceTest, AtPathLeaveToolIsGroupOnlyAndReachesTheSameLeave)
     EXPECT_TRUE(harness.service->presenceOf(8823).withdrawn);
 }
 
-// 2026-11-16 10:47–10:53 的节奏回放（不含原文）：4 个群友约 6 分钟 25 条，她每次被给机会都开口。
-// 当时她说了 20 多条；现在至多说到其他人平均每人的条数
-TEST(EngagementPresenceTest, IncidentReplayNoLongerFloodsTheGroup)
+namespace
+{
+// 定义在下面的决策记录测试段里（同一个匿名命名空间）
+std::string judgeReply(const std::string &action);
+} // namespace
+
+// 2026-11-16 10:47–10:53 的事故回放（不含原文）：4 个群友约 6 分钟 25 条，她每次被给机会都开口。
+// 此前靠发言份额做门压到 6 条；2026-11-21 部署者定规后份额只记账——程序不拦，账本里的数写进情境卡，
+// 要不要再说由判定器替她定。这里只验证数字确实到了判定器手里
+TEST(EngagementPresenceTest, IncidentReplayHandsTheShareToTheJudge)
 {
     Harness harness;
+    affect::DecisionStore store(harness.directory.path() + "/affect.db");
+    affect::DecisionRecorder recorder(store, affectEnabled(), [&harness] { return harness.now; });
+    std::vector<std::string> judgePrompts;
+    affect::JudgePolicy judge(
+        [&judgePrompts](const std::string &, const std::string &user)
+        {
+            judgePrompts.push_back(user);
+            return judgeReply("group_say");
+        },
+        "judge-model");
+    harness.service->setDecisionRecorder(&recorder);
+    harness.service->setPolicy(&judge);
+
     harness.service->onAtActivated(8823, "说一段语音");
     harness.service->onAtAnswered(8823);
     const std::vector<std::uint64_t> speakers = {1, 1, 4, 1, 4, 1, 4, 1, 2, 1, 1, 4, 1,
@@ -961,9 +984,15 @@ TEST(EngagementPresenceTest, IncidentReplayNoLongerFloodsTheGroup)
     }
     const std::size_t said = harness.sender->texts.size();
     RecordProperty("said", static_cast<int>(said));
-    EXPECT_LE(said, 7U) << "25 条 / 4 人：至多约 6 条";
-    EXPECT_GE(said, 3U) << "她仍能参与，只是不再刷屏";
+    EXPECT_GE(said, 3U) << "程序不再拦：每次被给机会她都说了";
     EXPECT_EQ(harness.service->presenceOf(8823).unprompted, static_cast<int>(said));
+    ASSERT_FALSE(judgePrompts.empty());
+    // 最后一轮的情境卡里有账本的数：她主动说了 said-1 句（本轮之前）、应答 1 句、别人 25 条、4 个人
+    const std::string &last = judgePrompts.back();
+    EXPECT_NE(last.find("\"unprompted_in_window\": " + std::to_string(said - 1)), std::string::npos) << last;
+    EXPECT_NE(last.find("\"answers_in_window\": 1"), std::string::npos);
+    EXPECT_NE(last.find("\"others_messages_in_window\": 25"), std::string::npos);
+    EXPECT_NE(last.find("\"other_speakers_in_window\": 4"), std::string::npos);
 }
 
 // ===== 用语音说（2026-11-16）：会话轮的 send_voice 动词 =====
@@ -1905,64 +1934,9 @@ TEST(EngagementColdTest, MemberFloorBlocksSmallBurstsInHugeGroups)
         << "大群的人数地板应抬高触发门槛";
 }
 
-TEST(EngagementColdTest, DailyCapLimitsColdEvaluations)
-{
-    Harness harness;
-    ColdFlow flow(harness);
-    flow.setMembers(100);
-    // 从当天本地 08:00 起走：整段不跨零点，当日帽不会中途重置
-    flow.now = static_cast<std::int64_t>(localDayStart(static_cast<std::time_t>(flow.now))) + 8 * 3600;
-    flow.warm(3, 4);
-
-    // 3 次冷启动评估：默认 pass → 自决不加入 → 冷却 2h
-    for (int round = 0; round < 3; ++round)
-    {
-        const std::size_t before = harness.agentHistories.size();
-        flow.spike(12);
-        ASSERT_GT(harness.agentHistories.size(), before) << "第 " << round + 1 << " 次应评估";
-        flow.now += 2 * 60 * 60; // 跨过冷启动冷却
-    }
-    const std::size_t callsAfterCap = harness.agentHistories.size();
-
-    // 第 4 次：当日帽拦截，不再发起评估
-    flow.spike(12);
-    EXPECT_EQ(harness.agentHistories.size(), callsAfterCap) << "当日帽应拦截第 4 次";
-}
-
-TEST(EngagementColdTest, DailyCapResetsAtLocalMidnightNotRolling24h)
-{
-    Harness harness;
-    ColdFlow flow(harness);
-    flow.setMembers(100);
-    const std::int64_t dayStart =
-        static_cast<std::int64_t>(localDayStart(static_cast<std::time_t>(flow.now)));
-    flow.now = dayStart + 2 * 3600; // 当天 02:00 起
-    flow.warm(3, 4);                 // 武装 + 基线，到 05:0x
-
-    // 当天上午用完 3 次评估
-    for (int round = 0; round < 3; ++round)
-    {
-        const std::size_t before = harness.agentHistories.size();
-        flow.spike(12);
-        ASSERT_GT(harness.agentHistories.size(), before) << "第 " << round + 1 << " 次应评估";
-        flow.now += 2 * 60 * 60; // 跨过冷启动冷却
-    }
-    const std::size_t afterCap = harness.agentHistories.size();
-    ASSERT_LT(flow.now, dayStart + 23 * 3600) << "前置：三次评估都落在当天";
-
-    // 当天 23:50：离第一次评估不到 24 小时，额度仍是用完的
-    flow.now = dayStart + 24 * 3600 - 10 * 60;
-    flow.spike(12);
-    EXPECT_EQ(harness.agentHistories.size(), afterCap) << "零点前当日帽仍生效";
-
-    // 过了本地零点：离第一次评估同样不到 24 小时，但额度按日历日重置
-    //（旧实现从上次重置起算滚动 24 小时，这里会继续拦）
-    flow.now = dayStart + 24 * 3600 + 2 * 60;
-    flow.spike(12);
-    EXPECT_GT(harness.agentHistories.size(), afterCap) << "本地零点后额度应重置";
-}
-
-TEST(EngagementColdTest, ColdPassDecidesNotToJoinAndCooldownApplies)
+// 2026-11-21 部署者定规：冷启动没有冷却、没有当日帽——她谢绝之后下一波热度照常再评估；
+// 唯一的预算是同一波热度只看一眼（10 分钟桶内不重复评估）
+TEST(EngagementColdTest, ColdPassDecidesNotToJoinAndNextSpikeIsEvaluatedAgain)
 {
     Harness harness;
     ColdFlow flow(harness);
@@ -1976,11 +1950,19 @@ TEST(EngagementColdTest, ColdPassDecidesNotToJoinAndCooldownApplies)
     EXPECT_EQ(session->state, EngagementState::Ended);
     EXPECT_NE(session->endReason.find("冷启动自决"), std::string::npos);
 
-    // 冷却期（2 小时）内再尖峰不再评估
-    const std::size_t before = harness.agentHistories.size();
-    flow.now += 10 * 60;
-    flow.spike(12);
-    EXPECT_EQ(harness.agentHistories.size(), before) << "冷却期内不应再评估";
+    // 同一波热度（10 分钟桶内）不再评估：资源预算
+    const std::size_t afterFirst = harness.agentHistories.size();
+    flow.spike(3);
+    EXPECT_EQ(harness.agentHistories.size(), afterFirst) << "同一波热度只看一眼";
+
+    // 10 分钟后的下一波：照常评估，没有冷却，也没有当日帽
+    for (int round = 0; round < 5; ++round)
+    {
+        const std::size_t before = harness.agentHistories.size();
+        flow.now += 10 * 60;
+        flow.spike(12);
+        EXPECT_GT(harness.agentHistories.size(), before) << "第 " << round + 2 << " 波应评估";
+    }
 }
 
 TEST(EngagementColdTest, LearningStateSurvivesRestart)
@@ -2032,68 +2014,6 @@ TEST(EngagementColdTest, LearningStateSurvivesRestart)
     second.pump(now);
     ASSERT_FALSE(submitted.empty()) << "重启后武装期不应重置";
     EXPECT_EQ(submitted.front(), group);
-}
-
-TEST(EngagementColdTest, DailyCapSurvivesRestart)
-{
-    TemporaryDirectory temporaryDirectory;
-    const std::string dbPath = temporaryDirectory.path() + "/c.db";
-    BotIdentity bot;
-    bot.id = 987654321;
-    bot.name = "Klein";
-    const Live<BotIdentity> liveBot{bot};
-    const std::uint64_t group = 77502;
-
-    // 从某天本地 08:00 起走：整段不跨零点
-    std::int64_t now = static_cast<std::int64_t>(localDayStart(2'000'000)) + 8 * 3600;
-    auto store1 = std::make_unique<GroupContextStore>(dbPath);
-    Live<AffectOptions> affect{AffectOptions{}};
-    EngagementService first(liveBot, store1.get(), affect, nullptr, [&now] { return now; });
-    first.setMemberProvider([](std::uint64_t) { return 100L; });
-
-    auto feedBurst = [&](GroupContextStore &store, EngagementService &service, int count)
-    {
-        for (int i = 0; i < count; ++i)
-        {
-            now += 8;
-            auto rec = record(group, 42, "小白", "聊爆" + std::to_string(now + i), now);
-            store.append(rec);
-            service.onGroupMessage(rec, false);
-        }
-        now += 61;
-        service.pump(now);
-    };
-
-    // 武装 + 学习
-    for (int hour = 0; hour < 3; ++hour)
-        for (int i = 0; i < 4; ++i)
-        {
-            now += 900;
-            auto rec = record(group, 42, "小白", "日常" + std::to_string(hour * 4 + i), now);
-            store1->append(rec);
-            first.onGroupMessage(rec, false);
-        }
-    now += 120;
-
-    // 消耗当日帽：3 次冷启动评估，每次后跨过 2h 冷却
-    for (int round = 0; round < 3; ++round)
-    {
-        feedBurst(*store1, first, 12);
-        now += 2 * 60 * 60;
-    }
-    store1.reset(); // "重启"
-
-    // 重启后当日帽仍在（不再有 3 次机会）
-    auto store2 = std::make_unique<GroupContextStore>(dbPath);
-    EngagementService second(liveBot, store2.get(), affect, nullptr, [&now] { return now; });
-    second.setMemberProvider([](std::uint64_t) { return 100L; });
-    std::vector<std::uint64_t> submitted;
-    second.setSubmitTurn([&](std::uint64_t g) { submitted.push_back(g); });
-
-    now += 61;
-    second.pump(now); // 静默期检查
-    feedBurst(*store2, second, 12);
-    EXPECT_TRUE(submitted.empty()) << "当日帽应跨重启生效";
 }
 
 // M1 影子记录：主动接话与沉默都产出一决策一执行，动作不变。

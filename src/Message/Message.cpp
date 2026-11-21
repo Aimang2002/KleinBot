@@ -281,6 +281,19 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 				current_data.user_id, triggerMessageId, "reply");
 			decisionId = this->decisionRecorder->recordDecision(std::move(decision));
 		}
+		// 她有拒绝的权利（2026-11-22 部署者定规）：被 @ 时判定器可以选 no_reply。生效期就不请求表达模型、
+		// 不发任何东西，执行记录 skipped（这条 @ 不写进她与对方的私聊会话；群缓冲里照样有）。想不想答由她
+		//（判定器 + 她学到的认识）定，内置提示里没有“你可以不回答”这类话；回想时这也是一次经历
+		if (enforcedPolicy && plannedAction == "no_reply")
+		{
+			affect::ExecutionRecord declined;
+			declined.executionId = affect::DecisionRecorder::newExecutionId();
+			declined.decisionId = decisionId;
+			declined.status = "skipped";
+			this->decisionRecorder->recordExecution(declined);
+			LOG_INFO("被 @ 时她决定不回应（群 " + std::to_string(current_data.group_id) + "）");
+			return;
+		}
 
 		// 私聊 LLM 调用前触发"正在输入"（能力位门控在 TypingIndicator 内部，fire-and-forget）
 		if (typingIndicator != nullptr && current_data.message_type != "group")

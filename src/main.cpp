@@ -48,6 +48,7 @@
 #include "Perception/PerceptionChannel.h"
 #include "Perception/PerceptionStore.h"
 #include "Perception/GroupContextStore.h"
+#include "Perception/ReflectionService.h"
 #include "Perception/GroupContextService.h"
 #include "Perception/EngagementService.h"
 #include "Perception/GlanceService.h"
@@ -68,6 +69,7 @@
 #include "Action/AdminControlAction.h"
 #include "Command/AdminCommand.h"
 #include "Action/KnowledgeAction.h"
+#include "Action/ReflectAction.h"
 #include "Command/GeneratePictureCommand.h"
 #include "Command/HelpCommand.h"
 #include "Command/ModelListCommand.h"
@@ -142,6 +144,7 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 				   GroupListService *groupList,
 				   GroupContextService &groupContextService,
 				   EngagementService &engagement, ImageAssetStore &groupAssets,
+				   affect::ReflectionService &reflection,
 				   uint64_t managerId, const std::atomic<bool> &running)
 {
 	while (running.load())
@@ -200,6 +203,8 @@ void pollingThread(ChatService &chatService, MessageSenderPort &sender,
 			groupList->poll(static_cast<std::int64_t>(now));
 		// 话题会话 pump（意志层 v2）：硬后盖 + 保留期清扫 + lull 轮次触发
 		engagement.pump(nowSeconds());
+		// 回想（经历层 E3）：60s 节流，到期的群入队，模型调用在回想服务自己的线程上
+		reflection.pump(nowSeconds());
 
 		sleepWhileRunning(running, std::chrono::seconds(3));
 	}
@@ -256,6 +261,7 @@ void workingThread(Message &messageClass, EventRouter &eventRouter,
 
 void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWorkers,
 					 GlanceService &glanceService, MemoryService &memoryService,
+					 affect::ReflectionService &reflectionService,
 					 std::thread &timingThread, std::thread &transportThread,
 					 std::thread &panelThread, std::thread &pushThread)
 {
@@ -271,6 +277,10 @@ void resourceCleanup(std::atomic<bool> &running, KeyedTaskScheduler &messageWork
 	LOG_INFO("正在等待长期记忆服务退出...");
 	memoryService.shutdown();
 	LOG_INFO("长期记忆服务已退出");
+	// 回想（经历层 E3）：丢弃排队的群，进行中的模型调用已随 running=false 取消
+	LOG_INFO("正在等待回想服务退出...");
+	reflectionService.shutdown();
+	LOG_INFO("回想服务已退出");
 
 	if (timingThread.joinable())
 	{
@@ -440,6 +450,8 @@ int main(int argc, char **argv)
 	RememberGuidanceAction rememberGuidanceAction(knowledgeLedger, liveSettings.affect);
 	ReviewGuidanceAction reviewGuidanceAction(knowledgeLedger, liveSettings.affect);
 	ForgetGuidanceAction forgetGuidanceAction(knowledgeLedger, liveSettings.affect);
+	// 手动回想（经历层 E3，ADR-030）：同样只在管理员私聊里开放；回想服务在下面接线后 bind
+	ReflectAction reflectAction(liveSettings.affect);
 	ToolRegistry tools;
 	ComputerStatus adminComputerStatus;
 	GetCurrentModelAction getCurrentModelAction([&userSession](uint64_t userId)
@@ -524,6 +536,7 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<ActionTool>(rememberGuidanceAction));
 	tools.registerTool(std::make_unique<ActionTool>(reviewGuidanceAction));
 	tools.registerTool(std::make_unique<ActionTool>(forgetGuidanceAction));
+	tools.registerTool(std::make_unique<ActionTool>(reflectAction));
 	std::string registeredTools;
 	for (const std::string &toolName : tools.registeredNames())
 	{
@@ -748,6 +761,30 @@ int main(int argc, char **argv)
 					return entry.memberCount;
 			return 0;
 		});
+	// 回想（经历层 E3，ADR-030）：她事后把最近的经历想一遍，读法记成反馈、认识的增改进账本。
+	// 模型用 memory.model（“整理记忆”的模型，不新增配置键）：注册了就用它，否则 worker 端点，worker 也
+	// 没配时 buildOnceWith 回退默认对话模型；每次回想开头按当前配置解析一次。人格与事实与判定器同一来源。
+	// 构造在决策库、记录器、账本、群内容库之后，先于它们析构；线程在 pollingThread 之前起、
+	// resourceCleanup 里先于 pollingThread 收
+	affect::ReflectionService reflectionService(
+		decisionStore, decisionRecorder, knowledgeLedger, groupContextStore.get(), liveSettings.affect,
+		liveSettings.bot,
+		[&liveSettings, &models, &chatService]() -> affect::ReflectionService::Target
+		{
+			const LabeledEndpoint target = resolveLabeledEndpoint(
+				liveSettings.memory.get()->model, *liveSettings.workerModel.get(),
+				liveSettings.chat.get()->defaultModel, models);
+			return {[&chatService, endpoint = target.endpoint](const std::string &systemPrompt,
+															   const std::string &userPrompt)
+					{
+						return chatService.buildOnceWith(endpoint, systemPrompt, userPrompt,
+														 affect::ReflectionRules::kTimeoutMs);
+					},
+					target.modelLabel};
+		});
+	reflectionService.setSoulSource([&deployerSoul]() { return deployerSoul.read(); });
+	reflectionService.setFactsSource([&deployerFacts]() { return deployerFacts.read(); });
+	reflectAction.bind(&reflectionService);
 	// 群聊开关、语音总开关、affect.enforce 都持活值（ADR-023）；MessageOptions 里的 bot
 	// 身份保持运行值（决定 9）
 	Message messageClass(dock, userSession, chatService, messageSender, imageAssetStore,
@@ -794,7 +831,8 @@ int main(int argc, char **argv)
 		"，最大 " + std::to_string(settings.messageExecution.maxWorkerThreads) +
 		"，队列容量 " + std::to_string(settings.messageExecution.maxPendingMessages));
 	glanceService.start();
-	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), groupListService.get(), std::ref(groupContextService), std::ref(engagementService), std::ref(groupImageAssets), settings.bot.managerId, std::cref(running));
+	reflectionService.start();
+	std::thread timingThread(pollingThread, std::ref(chatService), std::ref(messageSender), std::ref(reminderService), std::ref(capabilityBroker), std::ref(perceptionChannel), groupContextStore.get(), groupListService.get(), std::ref(groupContextService), std::ref(engagementService), std::ref(groupImageAssets), std::ref(reflectionService), settings.bot.managerId, std::cref(running));
 
 	std::thread transportThread;
 	switch (transportConfig.mode)
@@ -907,8 +945,8 @@ int main(int argc, char **argv)
 			LOG_INFO("退出时丢弃连发桶中尚未处理的私聊消息 " + std::to_string(dropped) + " 条");
 	}
 
-	resourceCleanup(running, messageWorkers, glanceService, memoryService, timingThread,
-					transportThread, panelThread, pushThread);
+	resourceCleanup(running, messageWorkers, glanceService, memoryService, reflectionService,
+					timingThread, transportThread, panelThread, pushThread);
 	Log::getInstance().shutdown();
 
 	return 0;
