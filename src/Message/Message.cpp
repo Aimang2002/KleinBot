@@ -22,6 +22,7 @@
 #include "../Application/ShadowDecision.h"
 #include "../utils/LocalDate.h"
 #include "Message.h"
+#include "../Memory/PersonCard.h"
 #include "../Application/NonTextLabels.h"
 #include <algorithm>
 #include <ctime>
@@ -186,6 +187,11 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 				"\n\n[系统注] 对方刚加上你好友，这是TA发来的第一句话：先自然回应对方说的内容，"
 				"再顺带用一两句话把自己介绍给对方，不要生硬地报身份。";
 		}
+		// 人物卡（ADR-032）：私聊里对方的卡片——QQ 号、昵称、是不是部署者由程序给出，其余是她自己记下的。
+		// 稳定文本，进 system（卡片改了才变一次）；长期记忆关着或没接线时不加，请求逐字不变
+		if (current_data.message_type != "group" && this->personCards != nullptr)
+			situationNote += this->personCards->privateSection(current_data.user_id,
+				current_data.nickname, std::time(nullptr), current_data.message_id);
 		// 群聊收敛契约（T7b）：行为约束归 system（D13 分工）；静态常量保证
 		// 管理员群聊请求的 system 前缀逐字稳定，不影响供应商缓存命中
 		if (current_data.message_type == "group")
@@ -225,6 +231,24 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 			: affect::KnowledgeCard{};
 		std::string tailNote = facts.sceneNote.empty() ? burstNote
 			: (burstNote.empty() ? facts.sceneNote : burstNote + "\n" + facts.sceneNote);
+		// 人物卡（ADR-032）：@ 她的人当场建卡；在场的人（触发句发送者 + 群背景里入选的群友）各一行，
+		// 接在现场事实之后、她的认识之前（本轮 user 侧，绝不进 system）；判定器看同一份
+		std::string peopleLines;
+		if (isGroup && this->personCards != nullptr && this->personCards->enabled())
+		{
+			this->personCards->ensure(current_data.user_id, std::time(nullptr), current_data.message_id);
+			std::vector<PersonPresent> people;
+			people.push_back({current_data.user_id,
+				!current_data.card.empty() ? current_data.card : current_data.nickname});
+			if (this->groupContext != nullptr)
+				for (const auto &[id, nickname] :
+					 this->groupContext->nicknamesOf(current_data.group_id, presentPeople))
+					people.push_back({id, nickname});
+			peopleLines = this->personCards->groupLines(people);
+			const std::string section = PersonCards::groupSection(peopleLines);
+			if (!section.empty())
+				tailNote += (tailNote.empty() ? "" : "\n") + section;
+		}
 		if (!knowledge.replySection.empty())
 			tailNote += (tailNote.empty() ? "" : "\n") + knowledge.replySection;
 		const std::string triggerMessageId = !current_data.message_id_raw.empty()
@@ -240,6 +264,7 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 				this->chatService.toolNamesIn(ToolVenue::Group), currentLocalHour());
 			card.knowledgeSection = knowledge.judgeSection;
 			card.knowledgeIds = knowledge.judgeIds;
+			card.peopleSection = peopleLines;
 			return card;
 		};
 		const std::string judgeMaterial = policyDecides

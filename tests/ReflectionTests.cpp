@@ -245,7 +245,7 @@ TEST(ReflectionTest, PromptCarriesExperienceAftermathKnowledgeAndPeople)
     EXPECT_EQ(prompt.find("Klein（QQ"), std::string::npos);
     // 她没参与的群聊：经历现场之后的那句
     EXPECT_NE(prompt.find("她没参与的一段群聊：\n"), std::string::npos);
-    EXPECT_NE(prompt.find("阿芒: 克莱茵今天状态不错"), std::string::npos);
+    EXPECT_NE(prompt.find("阿芒（部署者）: 克莱茵今天状态不错"), std::string::npos);
     // system 只讲机制
     EXPECT_NE(harness.systems.front().find("只输出一个 JSON 对象"), std::string::npos);
 }

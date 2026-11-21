@@ -21,6 +21,8 @@ inline constexpr const char *KleinGetCurrentModelToolName = "get_current_model";
 // 用语音说一句话（2026-11-16）：对话路径的工具与话题会话轮的定案动词同名同义；
 // 只在管理员开着语音、语音服务可用时开放，用不用由她按对方是否明确要求决定
 inline constexpr const char *KleinSendVoiceToolName = "send_voice";
+// 写人物卡（ADR-032）
+inline constexpr const char *KleinUpdatePersonCardToolName = "update_person_card";
 inline constexpr const char *KleinAdminControlToolName = "admin_control";
 
 // 离场（ADR-024）：两条群发言路径共用的同一个动作——话题会话轮的定案动词与被 @ 回复时的

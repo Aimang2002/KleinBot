@@ -77,6 +77,10 @@ public:
 	// 每条消息仍各自一次回复（N 进 N 出），不改回复条数、分段与语音路径
 	void handleMessage(const InboundMessage &current_data, const std::string &burstNote = {});
 
+	// 人物卡（ADR-032）：可空 = 不带。私聊里对方的卡片进 system（稳定文本）；群聊 @ 回复里在场的人
+	// 各一行并入本轮尾注。cards 由组合根持有、须比本对象活得久；启动线程前设置一次
+	void setPersonCards(class PersonCards *cards) { this->personCards = cards; }
+
 	// 这条消息会不会被当作 #命令 处理（只匹配不执行）。组合根据此把命令消息排除在
 	// 群内容缓冲与话题会话之外——命令往来是协议层对话，不是群聊内容（2026-10-28 修复：
 	// 群里 "@她 #坏" 曾被会话当成点名而多回一句）
@@ -162,6 +166,7 @@ private:
     const Live<AffectOptions> &affectOptions; // enforce：false = 影子期，计划只进记录
     const affect::DeployerFacts *deployerFacts = nullptr; // 可空：事实卡（经历层 E0）
     affect::KnowledgeLedger *knowledgeLedger = nullptr;    // 可空：取用（ADR-029）
+    class PersonCards *personCards = nullptr;              // 可空：人物卡（ADR-032）
     // 可空：群资产库（ADR-019）。群聊的当前图片进这里（24h），不进发送者个人库；
     // 工具经 ToolContext.shared_scope_id 先查它
     ImageAssetStore *sharedAssets = nullptr;

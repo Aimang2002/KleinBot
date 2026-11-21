@@ -22,6 +22,7 @@
 #include "../Memory/TextRecall.h"
 #include "../Tool/ToolArgumentParser.h"
 #include "../Tool/ToolContext.h"
+#include "../Memory/PersonCard.h"
 #include "../Tool/ToolRegistry.h"
 #include "../utils/TextTokenize.h"
 #include "../utils/UniqueId.h"
@@ -894,12 +895,29 @@ void EngagementService::runTurn(std::uint64_t groupId)
     // 取用（经历层，ADR-029）：同样只在 affect 开着且接了账本时有，没有条目时为空、请求逐字不变。
     // 认识段与现场事实同一处（材料与现场事实之后、提问语之前），本轮 user 侧，绝不进 system；
     // judge 的那一份（上限不同）经 card 交给它，放在它 prompt 的尾部
-    const affect::KnowledgeCard knowledge = affect::knowledgeCardFor(
-        affectNow->enabled, knowledgeLedger, {groupId, presentPeopleOf(records, context.shownSeqs)});
+    const std::vector<std::uint64_t> presentPeople = presentPeopleOf(records, context.shownSeqs);
+    const affect::KnowledgeCard knowledge =
+        affect::knowledgeCardFor(affectNow->enabled, knowledgeLedger, {groupId, presentPeople});
+    // 人物卡（ADR-032）：在场的人（与取用同一批）各一行——谁是部署者、她自己记下的称呼。长期记忆关着、
+    // 没接线或没人有内容时为空，请求逐字不变。放在她的认识之前，同在本轮 user 侧
+    std::string peopleLines;
+    if (personCards != nullptr && personCards->enabled())
+    {
+        std::map<std::uint64_t, std::string> nicknames; // 缓冲里最近一次的昵称快照
+        for (const GroupMessageRecord &record : records)
+            if (!record.isSelf && record.userId != 0)
+                nicknames[record.userId] = record.nickname;
+        std::vector<PersonPresent> people;
+        for (const std::uint64_t id : presentPeople)
+            people.push_back({id, nicknames[id]});
+        peopleLines = personCards->groupLines(people);
+    }
+    std::string turnExtras = PersonCards::groupSection(peopleLines);
+    if (!knowledge.replySection.empty())
+        turnExtras += (turnExtras.empty() ? "" : "\n") + knowledge.replySection;
     const std::string knowledgeLines =
-        knowledge.replySection.empty()
-            ? std::string()
-            : (sceneLine.empty() ? std::string() : std::string("\n")) + knowledge.replySection;
+        turnExtras.empty() ? std::string()
+                           : (sceneLine.empty() ? std::string() : std::string("\n")) + turnExtras;
     std::vector<ChatMessage> history;
     history.push_back({"user", context.material + sceneLine + knowledgeLines + ask});
     std::vector<std::string> schemas = {kSaySchema, kLeaveSchema};
@@ -964,6 +982,7 @@ void EngagementService::runTurn(std::uint64_t groupId)
                                    offeredToolNames.end());
         card.knowledgeSection = knowledge.judgeSection;
         card.knowledgeIds = knowledge.judgeIds;
+        card.peopleSection = peopleLines;
         candidates = replyCandidatesOf(records);
         planned = activePolicy->decideFor(card, context.material, candidates);
     }

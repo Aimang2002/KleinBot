@@ -6,6 +6,7 @@
 #include "../Persistence/ConversationStore.h"
 #include "MemoryOptions.h"
 #include "../utils/Live.h"
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -44,6 +45,13 @@ public:
     // 记忆库可用且当前 memory.enabled 为真
     bool isEnabled() const { return storeOpen && config.get()->enabled; }
 
+    // 人物卡（ADR-032）：卡片存在事实表里（谓词前缀 card.），读写经记忆库自己的锁。代数在卡片可能变了的
+    // 时候前进（写槽位、按人清除、按来源回滚），PersonCards 的缓存据此失效。批量提取不写这个前缀
+    std::vector<std::pair<std::string, std::string>> cardSlots(uint64_t user_id);
+    bool setCardSlot(uint64_t user_id, const std::string &predicate, const std::string &value,
+                     const std::string &canonicalText, int64_t sourceId);
+    std::uint64_t cardGeneration() const { return cardGen.load(); }
+
 private:
     struct PendingBatch
     {
@@ -65,6 +73,7 @@ private:
     MemoryExtractor extractor;
     const Live<MemoryOptions> &config;
     bool storeOpen = false; // 记忆库是否可用（构造时定，决定是否起后台线程）
+    std::atomic<std::uint64_t> cardGen{0}; // 人物卡代数（见 cardGeneration）
 
     std::thread worker;
     std::mutex queueMutex;

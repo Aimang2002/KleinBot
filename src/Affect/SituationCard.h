@@ -50,6 +50,9 @@ struct SituationCard
     // 不进 toJson——card JSON 原样进 judge prompt，认识段另放在 prompt 尾部；编号由 makePolicyDecision
     // 写进 state_json 的 knowledge_ids（只有编号，正文在账本里）
     std::string knowledgeSection;
+    // 人物卡（ADR-032）：在场的人各一行（PersonCards::groupLines，可空）。同样不进 toJson，
+    // 在 judge prompt 里排在她的认识之前
+    std::string peopleSection;
     std::vector<std::int64_t> knowledgeIds;
 
     nlohmann::json toJson() const;

@@ -81,6 +81,7 @@ class DeployerFacts;
 class KnowledgeLedger;
 }
 class ToolRegistry;
+class PersonCards;
 
 enum class EngagementState
 {
@@ -187,6 +188,9 @@ public:
     // 现场的人（材料窗口里的发言者 + 回复候选）的认识：judge 的 prompt 尾部一份，表达请求在现场事实
     // 那一行之后、提问语之前一份；编号写进决策记录的 state_json。ledger 由组合根持有、须比本服务活得久
     void setKnowledgeLedger(affect::KnowledgeLedger *ledger) { this->knowledgeLedger = ledger; }
+    // 人物卡（ADR-032）：可空 = 不带。非空且长期记忆开着时，在场的人（与取用同一批人）各一行，放在现场
+    // 事实之后、她的认识之前（本轮 user 侧）；判定器看同一份。cards 由组合根持有、须比本服务活得久
+    void setPersonCards(PersonCards *cards) { this->personCards = cards; }
     // 会话轮可用的注册表工具（如 inspect_image / generate_image / send_image /
     // klein_web_search / klein_web_fetch；契约追加开放工具自带的 GroupTurn 使用规则）：
     // tools 由组合根持有、须比本服务活得久；allowedNames 当场过滤——未注册或
@@ -303,6 +307,7 @@ private:
     affect::DecisionPolicy *policy = nullptr;
     const affect::DeployerFacts *deployerFacts = nullptr;
     affect::KnowledgeLedger *knowledgeLedger = nullptr;
+    PersonCards *personCards = nullptr;
     const ToolRegistry *tools = nullptr;
     std::vector<std::string> turnToolNames; // setTools 过滤后的会话轮注册表工具名
 };

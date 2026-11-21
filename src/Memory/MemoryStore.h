@@ -6,6 +6,7 @@
 #include <mutex>
 #include <sqlite3.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 class MemoryStore
@@ -29,6 +30,13 @@ public:
     std::vector<StructuredFactQuery> planFactQueries(uint64_t user_id,
                                                     const std::string &text,
                                                     std::size_t limit = 5);
+
+    // 人物卡（ADR-032）：卡片的槽位存成事实表里 subject_key='user:self'、谓词以 card. 开头的当前事实，
+    // 历史、按来源回滚、按人清除都沿用事实表的；不建新表、不加列。
+    // cardSlots：某人当前有效的卡片事实（谓词 → 值）；setCardSlot：写一个槽位，value 为空 = 清掉
+    std::vector<std::pair<std::string, std::string>> cardSlots(uint64_t user_id);
+    bool setCardSlot(uint64_t user_id, const std::string &predicate, const std::string &value,
+                     const std::string &canonicalText, int64_t sourceId);
 
 private:
     void upsertStructuredFact(const MemoryItem &item, int64_t now);

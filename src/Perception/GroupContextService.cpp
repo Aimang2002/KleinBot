@@ -331,3 +331,22 @@ const char *GroupContextService::groupConversationContract()
     return "\n\n[系统注] 这是QQ群聊，你的回应是群里的一次插话，不是一对一对话；不 @ 任何人。"
            "只输出 [不回应] 四个字时，系统静默不发。";
 }
+
+std::vector<std::pair<std::uint64_t, std::string>> GroupContextService::nicknamesOf(
+    std::uint64_t groupId, const std::vector<std::uint64_t> &ids) const
+{
+    std::vector<std::pair<std::uint64_t, std::string>> result;
+    if (store == nullptr || ids.empty())
+        return result;
+    std::map<std::uint64_t, std::string> latest;
+    for (const GroupMessageRecord &record : store->snapshot(groupId))
+        if (!record.isSelf && record.userId != 0)
+            latest[record.userId] = record.nickname;
+    for (const std::uint64_t id : ids)
+    {
+        const auto it = latest.find(id);
+        if (it != latest.end())
+            result.emplace_back(id, it->second);
+    }
+    return result;
+}

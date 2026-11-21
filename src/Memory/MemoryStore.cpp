@@ -887,3 +887,60 @@ std::vector<StructuredFactQuery> MemoryStore::planFactQueries(
     }
     return result;
 }
+
+std::vector<std::pair<std::string, std::string>> MemoryStore::cardSlots(uint64_t user_id)
+{
+    std::lock_guard<std::mutex> lock(dbMutex);
+    std::vector<std::pair<std::string, std::string>> result;
+    if (db == nullptr)
+        return result;
+    const char *sql =
+        "SELECT predicate, value_text FROM memory_current_facts "
+        "WHERE user_id=? AND subject_key='user:self' AND active=1 AND predicate LIKE 'card.%' "
+        "ORDER BY predicate;";
+    sqlite3_stmt *stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return result;
+    sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(user_id));
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        const unsigned char *predicate = sqlite3_column_text(stmt, 0);
+        const unsigned char *value = sqlite3_column_text(stmt, 1);
+        if (predicate != nullptr && value != nullptr)
+            result.emplace_back(reinterpret_cast<const char *>(predicate),
+                                reinterpret_cast<const char *>(value));
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+bool MemoryStore::setCardSlot(uint64_t user_id, const std::string &predicate, const std::string &value,
+                              const std::string &canonicalText, int64_t sourceId)
+{
+    std::lock_guard<std::mutex> lock(dbMutex);
+    if (db == nullptr || user_id == 0 || predicate.empty())
+        return false;
+    if (value.empty())
+    {
+        // 清掉：当前事实停用、历史关闭（与用户撤销一条事实同一路径）
+        deactivateStructuredFact(user_id, predicate, sourceId, "retracted");
+        return true;
+    }
+    MemoryItem item;
+    item.user_id = user_id;
+    item.memory_key = predicate; // 卡片事实的 memory_key 就是谓词：清除时按它找
+    item.memory_type = "profile";
+    item.canonical_text = canonicalText.empty() ? value : canonicalText;
+    item.search_text = item.canonical_text;
+    item.subject_key = "user:self";
+    item.subject_type = "user";
+    item.subject_name = "用户本人";
+    item.predicate = predicate;
+    item.value_text = value;
+    item.importance = 1.0;
+    item.confidence = 1.0;
+    item.source_start_id = sourceId;
+    item.source_end_id = sourceId;
+    upsertStructuredFact(item, static_cast<int64_t>(std::time(nullptr)));
+    return true;
+}

@@ -1,4 +1,5 @@
 #include "MemoryService.h"
+#include "PersonCard.h"
 #include "../Log/Log.h"
 #include "MemoryQueryPlanner.h"
 #include <algorithm>
@@ -265,6 +266,7 @@ void MemoryService::clearUser(uint64_t user_id)
         pending.erase(user_id);
     }
     store.clearUser(user_id);
+    ++cardGen; // 这个人的卡片一起清掉了
 }
 
 void MemoryService::removeBySourceFrom(uint64_t user_id, int64_t firstSourceId)
@@ -275,6 +277,7 @@ void MemoryService::removeBySourceFrom(uint64_t user_id, int64_t firstSourceId)
         pending.erase(user_id);
     }
     store.deactivateBySourceFrom(user_id, firstSourceId);
+    ++cardGen; // 按来源回滚可能撤回了卡片上的改动
 }
 
 void MemoryService::shutdown()
@@ -336,6 +339,10 @@ void MemoryService::processBatch(uint64_t user_id, PendingBatch batch, const std
     {
         if (!isEpochCurrent(user_id, batch.epoch))
             return;
+        // 人物卡的谓词是保留的（ADR-032）：卡片只由 update_person_card 与程序写，批量提取不碰
+        if (isPersonCardPredicate(mutation.item.predicate) ||
+            isPersonCardPredicate(mutation.item.memory_key))
+            continue;
         if (mutation.action == "delete")
             store.deactivate(user_id, mutation.item.memory_key);
         else
@@ -350,4 +357,21 @@ bool MemoryService::isEpochCurrent(uint64_t user_id, uint64_t epoch)
 {
     std::lock_guard<std::mutex> lock(queueMutex);
     return userEpoch[user_id] == epoch && !stopping;
+}
+
+std::vector<std::pair<std::string, std::string>> MemoryService::cardSlots(uint64_t user_id)
+{
+    if (!storeOpen)
+        return {};
+    return store.cardSlots(user_id);
+}
+
+bool MemoryService::setCardSlot(uint64_t user_id, const std::string &predicate, const std::string &value,
+                                const std::string &canonicalText, int64_t sourceId)
+{
+    if (!storeOpen)
+        return false;
+    const bool ok = store.setCardSlot(user_id, predicate, value, canonicalText, sourceId);
+    ++cardGen;
+    return ok;
 }

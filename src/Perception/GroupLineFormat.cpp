@@ -178,8 +178,11 @@ std::string groupClock(std::int64_t timestamp)
 std::string formatGroupLine(const BotIdentity &bot, const GroupMessageRecord &record,
                             const GroupReplyIndex &replies)
 {
+    // 部署者由 bot.manager_id 认出（ADR-032）：和“（你）”同一机制，只是告诉她这一行是谁说的
+    const bool deployer = !record.isSelf && bot.managerId != 0 && record.userId == bot.managerId;
     std::string line = "[" + groupClock(record.timestamp) + "] " +
-                       (record.isSelf ? bot.name + "（你）" : record.nickname);
+                       (record.isSelf ? bot.name + "（你）"
+                                      : record.nickname + (deployer ? "（部署者）" : ""));
     if (!record.replyToMessageId.empty())
     {
         if (const GroupReplyIndex::Target *target = replies.find(record.replyToMessageId))

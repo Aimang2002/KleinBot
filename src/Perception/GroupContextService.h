@@ -31,6 +31,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 class EngagementService;
@@ -79,6 +80,10 @@ public:
     // speakers 非空时写入入选记录里的群友（不含她自己，去重升序）——取用（ADR-029）的“现场的人”
     std::string assemble(std::uint64_t groupId, const std::string &triggerText,
                          std::vector<std::uint64_t> *speakers = nullptr) const;
+
+    // 这些人在群缓冲里最近一次的昵称快照（人物卡，ADR-032）；缓冲里没有的人不返回
+    std::vector<std::pair<std::uint64_t, std::string>> nicknamesOf(
+        std::uint64_t groupId, const std::vector<std::uint64_t> &ids) const;
 
     // @ 硬激活转发（Message 处理群 @ 时调用）：回答走既有回复路径，
     // 会话的开启/合并由 EngagementService 决定

@@ -69,6 +69,7 @@
 #include "Action/AdminControlAction.h"
 #include "Command/AdminCommand.h"
 #include "Action/KnowledgeAction.h"
+#include "Action/PersonCardAction.h"
 #include "Action/ReflectAction.h"
 #include "Command/GeneratePictureCommand.h"
 #include "Command/HelpCommand.h"
@@ -95,6 +96,7 @@
 #include "Persistence/ConversationStore.h"
 #include "Asset/ImageAssetStore.h"
 #include "Memory/MemoryService.h"
+#include "Memory/PersonCard.h"
 #include "utils/KeyedTaskScheduler.h"
 #include "KleinVersion.h"
 
@@ -438,6 +440,18 @@ int main(int argc, char **argv)
 	// 召回查不查长期记忆（ADR-023 稳定外壳）
 	MemoryService memoryService(dbPath, conversationStore, dock, models, liveSettings.memory);
 	userSession.setMemoryService(&memoryService);
+	// 人物卡（ADR-032）：卡片存在长期记忆的事实表里（谓词前缀 card.），这里只是带缓存的读写与渲染。
+	// 长期记忆不可用或 memory.enabled 为假时什么都不加、写卡片工具不出现。先于注册表构造、后于它析构
+	PersonCards personCards(
+		PersonCardBackend{
+			[&memoryService] { return memoryService.isEnabled(); },
+			[&memoryService](std::uint64_t userId) { return memoryService.cardSlots(userId); },
+			[&memoryService](std::uint64_t userId, const std::string &predicate, const std::string &value,
+							 const std::string &canonical, std::int64_t sourceId)
+			{ return memoryService.setCardSlot(userId, predicate, value, canonical, sourceId); },
+			[&memoryService] { return memoryService.cardGeneration(); }},
+		liveSettings.bot);
+	UpdatePersonCardAction updatePersonCardAction(personCards);
 	userSession.setImageAssetStore(&imageAssetStore);
 	if (settings.bot.managerId != 0)
 		userSession.ensureUserExists(settings.bot.managerId);
@@ -537,6 +551,7 @@ int main(int argc, char **argv)
 	tools.registerTool(std::make_unique<ActionTool>(reviewGuidanceAction));
 	tools.registerTool(std::make_unique<ActionTool>(forgetGuidanceAction));
 	tools.registerTool(std::make_unique<ActionTool>(reflectAction));
+	tools.registerTool(std::make_unique<ActionTool>(updatePersonCardAction));
 	std::string registeredTools;
 	for (const std::string &toolName : tools.registeredNames())
 	{
@@ -715,6 +730,7 @@ int main(int argc, char **argv)
 	engagementService.setDeployerFacts(&deployerFacts);
 	// 取用（经历层，ADR-029）：与账本工具共用同一个账本；affect.enabled 为真时群聊两条路径与 judge 读它
 	engagementService.setKnowledgeLedger(&knowledgeLedger);
+	engagementService.setPersonCards(&personCards);
 	groupContextService.setEngagement(&engagementService);
 	// @ 回复路径的 leave_topic 与会话轮的离场动词落到同一处（ADR-024）
 	leaveTopicTool.bind([&engagementService](std::uint64_t groupId, bool stepBack,
@@ -747,7 +763,8 @@ int main(int argc, char **argv)
 	// 可经 klein_web_search/klein_web_fetch 查（2026-10-31：先看懂再开口）；联网工具始终注册，
 	// 关着时那一轮不开放（Tool::available）。管理员工具由 setTools 过滤
 	engagementService.setTools(&tools, {KleinInspectImageToolName, KleinGenerateImageToolName, KleinSendImageToolName,
-		KleinWebSearchToolName, KleinWebFetchToolName, KleinSendVoiceToolName});
+		KleinWebSearchToolName, KleinWebFetchToolName, KleinSendVoiceToolName,
+		KleinUpdatePersonCardToolName});
 	// 工具出站图入群缓冲：占位符与 @ 路径（Message::dispatch）一致
 	engagementService.setOutboundRecorder(
 		[&groupContextService](std::uint64_t groupId, const OutboundMessage &message,
@@ -792,6 +809,7 @@ int main(int argc, char **argv)
 		liveSettings.affect, &typingIndicator, &perceptionChannel,
 		&groupContextService, &decisionRecorder, &groupImageAssets, &decisionPolicy,
 		&deployerFacts, &knowledgeLedger);
+	messageClass.setPersonCards(&personCards);
 	// notice/request 事件路由（v2.4.1 T4）+ 好友申请通报（T6）：
 	// handler 在 worker 内执行（事件按 user_id 占 lane），生命周期由 main 作用域保证
 	FriendRequestNotifier friendRequestNotifier(messageSender, activeApiChannel,
