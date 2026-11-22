@@ -11,8 +11,11 @@
   <title>克莱茵 · 配置面板</title>
   <style>
     /* ============ 克莱茵 · 配置面板 ============
-       一本整理好的实验记录：深色底、薄荷绿只标当前位置、焦点与状态；
-       不用辉光、网格与位移动效，颜色一律取自下面的设计变量。 */
+       一本整理好的实验记录：深色底、薄荷绿只标当前位置、焦点与状态，颜色一律取自下面的设计变量。
+       版式（2026-11-22 改）：导航 + 内容作为一个整体在视口里居中，不再贴着左缘；
+       背景是活的——实验室坐标网格、跟着指针亮起的一小圈薄荷绿网格、两团缓慢漂移的光晕
+       （部署者早先版本的做法，11-16 重做时去掉、这次加回并补了漂移）；内容面本身不动：
+       卡片不透明，顶栏、导航、保存栏是压在背景上的半透明面板。系统设了“减少动态效果”时背景静止。 */
 
     :root {
       color-scheme: dark;
@@ -23,6 +26,16 @@
       --bg-3: #232d28;
       --field: #101613;
       --hover-veil: rgba(255, 255, 255, .06);
+      /* 压在动态背景上的半透明面板（顶栏、导航、保存栏） */
+      --glass: rgba(24, 31, 27, .72);
+      --glass-strong: rgba(24, 31, 27, .88);
+      --glass-blur: 14px;
+      /* 背景网格与光晕 */
+      --grid-size: 36px;
+      --grid-line: rgba(220, 240, 230, .05);
+      --grid-live: rgba(78, 217, 160, .16);
+      --glow-mint: rgba(78, 217, 160, .17);
+      --glow-teal: rgba(86, 170, 200, .12);
       --scrim: rgba(8, 10, 9, .72);
       /* 文字 */
       --text: #e9f2ed;
@@ -85,7 +98,7 @@
       --bw: 1px;
       --shadow-pop: 0 8px 24px rgba(0, 0, 0, .45);
       --shadow-dialog: 0 16px 48px rgba(0, 0, 0, .55);
-      /* 动效：只做颜色与透明度过渡 */
+      /* 动效：内容面只做颜色与透明度过渡；位移只出现在背景的光晕上 */
       --dur-fast: 120ms;
       --dur-base: 180ms;
       --ease: cubic-bezier(.2, 0, 0, 1);
@@ -95,6 +108,10 @@
       --header-h: 56px;
       --nav-w: 232px;
       --content-max: 880px;
+      /* 导航 + 间隔 + 内容列 + 两侧留白：整个骨架按这个宽度居中 */
+      --frame-gap: var(--sp-6);
+      --frame-pad: var(--sp-6);
+      --frame-max: calc(var(--nav-w) + var(--frame-gap) + var(--content-max) + 2 * var(--frame-pad));
       --label-w: 220px;
       --savebar-h: 56px;
       --z-header: 20;
@@ -137,6 +154,105 @@
       font-size: var(--fs-14);
       line-height: var(--lh);
       font-weight: var(--fw-regular);
+    }
+
+    /* ============ 动态背景 ============
+       三层，都在内容之下、不接收指针：
+       1. 实验室坐标网格，极淡，向页面下方渐隐；
+       2. 聚光层：同一张网格的薄荷绿版本，只在指针周围一小圈里显出来（JS 写 --mx / --my）；
+       3. 两团光晕，各自沿很慢的轨迹来回漂（几十秒一趟），不用模糊滤镜，只移 transform。 */
+    .backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .backdrop::before,
+    .backdrop::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-size: var(--grid-size) var(--grid-size);
+    }
+
+    .backdrop::before {
+      background-image:
+        linear-gradient(var(--grid-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+      -webkit-mask-image: radial-gradient(ellipse 110% 85% at 50% 0%, #000 25%, transparent 90%);
+      mask-image: radial-gradient(ellipse 110% 85% at 50% 0%, #000 25%, transparent 90%);
+    }
+
+    .backdrop::after {
+      background-image:
+        linear-gradient(var(--grid-live) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-live) 1px, transparent 1px);
+      -webkit-mask-image: radial-gradient(circle 180px at var(--mx, 50%) var(--my, 40%),
+          rgba(0, 0, 0, .9), rgba(0, 0, 0, .4) 55%, transparent);
+      mask-image: radial-gradient(circle 180px at var(--mx, 50%) var(--my, 40%),
+          rgba(0, 0, 0, .9), rgba(0, 0, 0, .4) 55%, transparent);
+      opacity: 0;
+      transition: opacity 350ms var(--ease);
+    }
+
+    .backdrop.is-live::after {
+      opacity: 1;
+    }
+
+    .glow {
+      position: absolute;
+      border-radius: 50%;
+      will-change: transform;
+    }
+
+    .glow-a {
+      top: -32vh;
+      right: -12vw;
+      width: 70vw;
+      height: 80vh;
+      background: radial-gradient(closest-side, var(--glow-mint), transparent);
+      animation: glow-drift-a 48s ease-in-out infinite alternate;
+    }
+
+    .glow-b {
+      bottom: -40vh;
+      left: -18vw;
+      width: 64vw;
+      height: 84vh;
+      background: radial-gradient(closest-side, var(--glow-teal), transparent);
+      animation: glow-drift-b 64s ease-in-out infinite alternate;
+    }
+
+    @keyframes glow-drift-a {
+      from {
+        transform: translate3d(0, 0, 0) scale(1);
+      }
+
+      to {
+        transform: translate3d(-22vw, 14vh, 0) scale(1.18);
+      }
+    }
+
+    @keyframes glow-drift-b {
+      from {
+        transform: translate3d(0, 0, 0) scale(1.1);
+      }
+
+      to {
+        transform: translate3d(26vw, -18vh, 0) scale(.92);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .glow {
+        animation: none;
+      }
+
+      .backdrop::after {
+        display: none;
+      }
     }
 
     ::selection {
@@ -341,13 +457,23 @@
       position: sticky;
       top: 0;
       z-index: var(--z-header);
+      height: var(--header-h);
+      background: var(--glass);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+      backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+      border-bottom: var(--bw) solid var(--line);
+    }
+
+    /* 顶栏内容与下面的骨架同宽同心：头像对齐导航左缘，按钮对齐内容列右缘 */
+    .topbar-inner {
       display: flex;
       align-items: center;
       gap: var(--sp-4);
-      height: var(--header-h);
-      padding: 0 var(--sp-6);
-      background: var(--bg-1);
-      border-bottom: var(--bw) solid var(--line);
+      width: 100%;
+      max-width: var(--frame-max);
+      height: 100%;
+      margin: 0 auto;
+      padding: 0 var(--frame-pad);
     }
 
     .brand {
@@ -389,24 +515,35 @@
       display: none;
     }
 
-    /* ============ 骨架：左导航 + 内容列 ============ */
+    /* ============ 骨架：导航 + 内容列，作为一个整体在视口里居中 ============ */
 
     .shell {
+      position: relative;
+      z-index: 1;
       display: flex;
+      gap: var(--frame-gap);
+      max-width: var(--frame-max);
       min-height: calc(100vh - var(--header-h));
+      margin: 0 auto;
+      padding: 0 var(--frame-pad);
     }
 
+    /* 导航是浮在背景上的一块半透明面板，随页面滚动吸在顶栏下方 */
     #sideNav {
       flex: none;
       width: var(--nav-w);
       position: sticky;
-      top: var(--header-h);
+      top: calc(var(--header-h) + var(--sp-6));
       align-self: flex-start;
-      height: calc(100vh - var(--header-h));
+      max-height: calc(100vh - var(--header-h) - 2 * var(--sp-6));
+      margin: var(--sp-6) 0;
       overflow-y: auto;
-      padding: var(--sp-5) var(--sp-3) var(--sp-6);
-      background: var(--bg-1);
-      border-right: var(--bw) solid var(--line);
+      padding: var(--sp-4) var(--sp-3) var(--sp-5);
+      background: var(--glass);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+      backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+      border: var(--bw) solid var(--line);
+      border-radius: var(--r-l);
     }
 
     .nav-busy {
@@ -567,11 +704,11 @@
       outline: none;
     }
 
+    /* 宽度由骨架定（内容列至多 --content-max），这里只留上下留白：顶部与导航面板的上缘对齐 */
     .content-inner {
       flex: 1;
       width: 100%;
-      max-width: calc(var(--content-max) + 2 * var(--sp-8));
-      padding: var(--sp-8) var(--sp-8) var(--sp-10);
+      padding: var(--sp-6) 0 var(--sp-10);
     }
 
     /* ============ 页头 ============ */
@@ -1449,22 +1586,26 @@
 
     /* ============ 保存栏 ============ */
 
+    /* 与内容列同宽，浮在底部上方一点：按钮落在卡片右缘下方 */
     .savebar {
       position: sticky;
-      bottom: 0;
+      bottom: var(--sp-4);
       z-index: var(--z-savebar);
-      background: var(--bg-1);
-      border-top: var(--bw) solid var(--line);
+      margin-bottom: var(--sp-4);
+      background: var(--glass-strong);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+      backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+      border: var(--bw) solid var(--line-2);
+      border-radius: var(--r-l);
+      box-shadow: var(--shadow-pop);
     }
 
-    /* 内层与内容列同宽，按钮落在卡片右缘下方 */
     .savebar-inner {
       display: flex;
       align-items: center;
       gap: var(--sp-4);
-      max-width: calc(var(--content-max) + 2 * var(--sp-8));
       min-height: var(--savebar-h);
-      padding: var(--sp-2) var(--sp-8);
+      padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-5);
     }
 
     .savebar-status {
@@ -1489,7 +1630,7 @@
     #toasts {
       position: fixed;
       right: var(--sp-6);
-      bottom: calc(var(--savebar-h) + var(--sp-4));
+      bottom: calc(var(--savebar-h) + var(--sp-10));
       z-index: var(--z-toast);
       display: flex;
       flex-direction: column;
@@ -1638,7 +1779,9 @@
         gap: var(--sp-3);
         height: 44px;
         padding: 0 var(--sp-4);
-        background: var(--bg-1);
+        background: var(--glass-strong);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+        backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
         border-bottom: var(--bw) solid var(--line);
       }
 
@@ -1667,8 +1810,11 @@
 
       .shell {
         display: block;
+        max-width: none;
+        padding: 0;
       }
 
+      /* 窄屏的导航是从分区条下方展开的通栏浮层：不透明，免得盖在内容上看不清 */
       #sideNav {
         display: none;
         position: fixed;
@@ -1677,10 +1823,14 @@
         right: 0;
         z-index: var(--z-popover);
         width: auto;
-        height: auto;
         max-height: calc(100vh - var(--header-h) - 44px);
-        border-right: 0;
+        margin: 0;
+        background: var(--bg-1);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        border: 0;
         border-bottom: var(--bw) solid var(--line-2);
+        border-radius: 0;
         box-shadow: var(--shadow-pop);
       }
 
@@ -1692,16 +1842,20 @@
         padding: var(--sp-6) var(--sp-4) var(--sp-8);
       }
 
+      .savebar {
+        margin: 0 var(--sp-4) var(--sp-4);
+      }
+
       .savebar-inner {
-        padding: var(--sp-2) var(--sp-4);
+        padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+      }
+
+      .topbar-inner {
+        padding: 0 var(--sp-4);
       }
     }
 
     @media (max-width: 639px) {
-      .topbar {
-        padding: 0 var(--sp-4);
-      }
-
       .brand-sub,
       .topbar .btn .btn-text {
         display: none;
@@ -1755,12 +1909,18 @@
         padding-bottom: calc(var(--savebar-h) + var(--sp-8) + env(safe-area-inset-bottom));
       }
 
+      /* 手机上保存栏贴底通栏 */
       .savebar {
         position: fixed;
         left: 0;
         right: 0;
         bottom: 0;
+        margin: 0;
         padding-bottom: env(safe-area-inset-bottom);
+        border: 0;
+        border-top: var(--bw) solid var(--line);
+        border-radius: 0;
+        box-shadow: none;
       }
 
       .savebar-status {
@@ -1796,6 +1956,10 @@
 </head>
 
 <body>
+  <div class="backdrop" id="backdrop" aria-hidden="true">
+    <span class="glow glow-a"></span>
+    <span class="glow glow-b"></span>
+  </div>
   <svg class="sprite" xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" focusable="false"
     style="position:absolute;width:0;height:0;overflow:hidden">
     <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" /><path d="M13.5 2.5v3h-3" /></symbol>
@@ -1812,16 +1976,18 @@
   </svg>
   <a class="skip-link" href="#main">跳到内容</a>
   <header class="topbar">
-    <div class="brand">
-      <span class="avatar" role="img" aria-label="克莱茵的头像"></span>
-      <span class="brand-name">克莱茵</span>
-      <span class="brand-sub">配置面板</span>
-    </div>
-    <div class="topbar-actions">
-      <button id="logout" class="btn btn-secondary" type="button" aria-label="清除本地令牌">
-        <svg class="icon" aria-hidden="true"><use href="#i-logout" /></svg>
-        <span class="btn-text">清除本地令牌</span>
-      </button>
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="avatar" role="img" aria-label="克莱茵的头像"></span>
+        <span class="brand-name">克莱茵</span>
+        <span class="brand-sub">配置面板</span>
+      </div>
+      <div class="topbar-actions">
+        <button id="logout" class="btn btn-secondary" type="button" aria-label="清除本地令牌">
+          <svg class="icon" aria-hidden="true"><use href="#i-logout" /></svg>
+          <span class="btn-text">清除本地令牌</span>
+        </button>
+      </div>
     </div>
   </header>
   <div class="navbar-toggle">
@@ -5275,6 +5441,38 @@
     $("login").addEventListener("close", () => {
       if (loginRequired) setTimeout(showLogin, 0);
     });
+
+    /* ---------- 背景网格聚光 ---------- */
+
+    // 指针坐标写进 CSS 变量，点亮背景层里指针周围一小圈薄荷绿网格；rAF 合帧，避免高频改样式。
+    // 只在有精确指针的设备上启用；系统设了“减少动态效果”时不启用（聚光层在 CSS 里也已隐藏）
+    (() => {
+      const backdrop = $("backdrop");
+      if (!backdrop || !window.matchMedia) return;
+      if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      let frame = 0;
+      let x = 0;
+      let y = 0;
+      window.addEventListener("pointermove", (event) => {
+        if (event.pointerType && event.pointerType !== "mouse") return;
+        x = event.clientX;
+        y = event.clientY;
+        if (frame) return;
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          backdrop.style.setProperty("--mx", x + "px");
+          backdrop.style.setProperty("--my", y + "px");
+          backdrop.classList.add("is-live");
+        });
+      }, { passive: true });
+      const dim = () => {
+        if (frame) { cancelAnimationFrame(frame); frame = 0; }
+        backdrop.classList.remove("is-live");
+      };
+      document.documentElement.addEventListener("mouseleave", dim);
+      window.addEventListener("blur", dim);
+    })();
 
     // 读不到令牌时直接显示登录框
     if (token()) {
