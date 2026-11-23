@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include "Network/CurlRequestControl.h"
+#include "Network/HttpApiChannel.h"
+#include "../Library/httplib/httplib.h"
 #include "Action/WebFetchAction.h"
 #include "ModelApiCaller/AnthropicStandard/AnthropicStandard.h"
 #include "ModelApiCaller/OpenAIStandard/OpenAIStandard.h"
@@ -18,6 +20,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <cstdlib>
+#include <optional>
 
 namespace
 {
@@ -326,4 +330,112 @@ TEST(ProxyLiveConfigTest, ModelSearchAndFetchUseReplacedProxyOnNextRequest)
     sendAll();
     EXPECT_EQ(proxyA.lines(), expected) << "换代理之后不再经过旧代理";
     EXPECT_EQ(proxyB.lines(), expected);
+}
+
+namespace
+{
+// 把代理相关的环境变量临时指向一个没人监听的端口，析构时恢复原值
+class DeadProxyEnvironment
+{
+public:
+    DeadProxyEnvironment()
+    {
+        for (const char *name : kNames)
+        {
+            const char *value = std::getenv(name);
+            saved.emplace_back(name, value ? std::optional<std::string>(value) : std::nullopt);
+            if (std::string(name).find("no_proxy") != std::string::npos ||
+                std::string(name).find("NO_PROXY") != std::string::npos)
+                setenv(name, "localhost,127.0.0.0/8,::1", 1); // libcurl 7.81 不认的网段写法，与真机一致
+            else
+                setenv(name, "http://127.0.0.1:9", 1); // discard 端口，本机没人监听
+        }
+    }
+    ~DeadProxyEnvironment()
+    {
+        for (const auto &[name, value] : saved)
+        {
+            if (value)
+                setenv(name.c_str(), value->c_str(), 1);
+            else
+                unsetenv(name.c_str());
+        }
+    }
+
+private:
+    static constexpr const char *kNames[] = {"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY",
+                                             "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"};
+    std::vector<std::pair<std::string, std::optional<std::string>>> saved;
+};
+
+// 本机假协议端：POST /get_status 回一个成功的 OneBot 响应
+struct LocalOneBot
+{
+    httplib::Server server;
+    std::thread thread;
+    int port = 0;
+    std::atomic<int> hits{0};
+
+    LocalOneBot()
+    {
+        server.Post("/get_status", [this](const httplib::Request &, httplib::Response &response)
+                    {
+                        ++hits;
+                        response.set_content(R"({"status":"ok","retcode":0,"data":{"online":true}})",
+                                             "application/json");
+                    });
+        port = server.bind_to_any_port("127.0.0.1");
+        thread = std::thread([this] { server.listen_after_bind(); });
+        server.wait_until_ready();
+    }
+    ~LocalOneBot()
+    {
+        server.stop();
+        if (thread.joinable())
+            thread.join();
+    }
+};
+} // namespace
+
+// 2026-11-23 真机：终端带着 http_proxy=127.0.0.1:10808、no_proxy=…127.0.0.0/8，代理没开，
+// 机器人调 127.0.0.1:4000 一直“Couldn't connect to server”。协议端通道必须无视环境代理
+TEST(OneBotChannelProxyTest, HttpApiChannelIgnoresEnvironmentProxy)
+{
+    LocalOneBot onebot;
+    ASSERT_GT(onebot.port, 0);
+    DeadProxyEnvironment environment;
+    HttpApiChannel channel("http://127.0.0.1:" + std::to_string(onebot.port), "", 2000, 2000);
+    const OneBotApiResult result = channel.call("get_status", nlohmann::json::object(),
+                                                std::chrono::milliseconds(2000));
+    EXPECT_FALSE(result.networkError);
+    EXPECT_EQ(result.status, "ok");
+    EXPECT_EQ(onebot.hits.load(), 1);
+}
+
+// 对照：同样的环境下不加 bypassProxy 的普通请求会被交给死代理（证明测试环境确实复现了问题）
+TEST(OneBotChannelProxyTest, PlainCurlWouldFollowTheDeadProxy)
+{
+    LocalOneBot onebot;
+    ASSERT_GT(onebot.port, 0);
+    DeadProxyEnvironment environment;
+    const std::string url = "http://127.0.0.1:" + std::to_string(onebot.port) + "/get_status";
+    const auto perform = [&url](bool bypass)
+    {
+        std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), curl_easy_cleanup);
+        curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, "{}");
+        curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS, 2000L);
+        curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, 2000L);
+        curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, discardResponse);
+        if (bypass)
+            CurlRequestControl::bypassProxy(curl.get());
+        return curl_easy_perform(curl.get());
+    };
+    const CURLcode plain = perform(false);
+    const int hitsAfterPlain = onebot.hits.load();
+    EXPECT_EQ(perform(true), CURLE_OK);
+    EXPECT_EQ(onebot.hits.load(), hitsAfterPlain + 1);
+    // libcurl 认得 127.0.0.0/8 的版本会直连成功，那时这条对照不成立，不算失败
+    if (plain != CURLE_OK)
+        EXPECT_EQ(hitsAfterPlain, 0);
 }

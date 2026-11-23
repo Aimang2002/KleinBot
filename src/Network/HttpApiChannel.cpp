@@ -1,4 +1,5 @@
 #include "HttpApiChannel.h"
+#include "CurlRequestControl.h"
 #include "../Log/Log.h"
 
 #include <curl/curl.h>
@@ -74,6 +75,7 @@ OneBotApiResult HttpApiChannel::call(const std::string &action, nlohmann::json p
                                   .count())));
 
     curl_easy_setopt(curl.get(), CURLOPT_URL, actionUrl(apiBaseUrl, action).c_str());
+    CurlRequestControl::bypassProxy(curl.get()); // 本机协议端：不经任何代理
     curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, headers.get());
     curl_easy_setopt(curl.get(), CURLOPT_POST, 1L);
     curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, requestBody.c_str());

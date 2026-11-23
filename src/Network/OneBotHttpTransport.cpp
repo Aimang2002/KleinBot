@@ -1,4 +1,5 @@
 #include "OneBotHttpTransport.h"
+#include "CurlRequestControl.h"
 
 #include "BearerAuth.h"
 #include "VoiceAttachmentCleanup.h"
@@ -180,6 +181,7 @@ void OneBotHttpTransport::runApiSender(
 
             const std::string url = actionUrl(config.http.apiBaseUrl, action.action);
             curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+            CurlRequestControl::bypassProxy(curl.get()); // 本机协议端：不经任何代理
             curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, headers.get());
             curl_easy_setopt(curl.get(), CURLOPT_POST, 1L);
             curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, requestBody.c_str());

@@ -44,3 +44,9 @@ const char *CurlRequestControl::failureMessage(CURLcode result)
         ? "模型请求超时，请稍后重试。"
         : "无法连接模型服务，请稍后重试。";
 }
+
+void CurlRequestControl::bypassProxy(CURL *curl)
+{
+    // 空串 = 明确不用代理，环境变量里的代理也不读（libcurl 文档：CURLOPT_PROXY 设为 "" 时禁用代理）
+    curl_easy_setopt(curl, CURLOPT_PROXY, "");
+}
