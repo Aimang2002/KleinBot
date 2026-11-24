@@ -47,8 +47,11 @@ public:
     // 就算照抄原文（这两项要落库，原文不得落库）
     static constexpr std::size_t kQuoteRunCodepoints = 8;
     // judge 调用的 HTTP 超时：卡住时快速失败回退基线（适配器默认 300 秒会把同群
-    // 会话轮拖住 5 分钟）。组合根经 makeWorkerSeam 传给 buildOnceWith
-    static constexpr long kTimeoutMs = 15000;
+    // 会话轮拖住 5 分钟）。组合根经 makeWorkerSeam 传给 buildOnceWith。
+    // 2026-11-24 由 15 秒放宽到 60 秒：线上 102 次调用中位数 8.1 秒、p90 14.1 秒，其中 9 次
+    // 撞上 15 秒被掐掉、回退基线——上限切在正常耗时的分布里，而不是只兜卡死的请求。
+    // 部署者定为一分钟：模型耗时不由我们控制，从被截断的数据推不出更紧的上限
+    static constexpr long kTimeoutMs = 60000;
 
     // clock 返回 unix 秒（预算窗口用）；空 = 系统时钟。
     // 组合根用 resolver：每次决策按当前配置解析调用目标（ADR-023，配置实时生效）

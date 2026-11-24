@@ -299,7 +299,7 @@ std::string ChatService::buildOnceWith(const ModelEndpointOptions &worker,
     if (response.code != 200)
     {
         // 504 是适配器把 libcurl 的超时映射出来的本地码，不是供应商回的：调用方给了短超时
-        //（判定器 15 秒、回想 120 秒）到点掐掉是预期内的快速失败，调用方自己兜底（回退基线 / 退避重试），
+        //（判定器 60 秒、回想 120 秒）到点掐掉是预期内的快速失败，调用方自己兜底（回退基线 / 退避重试），
         // 记 WARNING 就够；ERROR 留给 503 与真正的 4xx/5xx（2026-11-22 部署者：ERROR 出现就该是要看的事）
         const std::string message =
             "ChatService::buildOnceWith 调用 LLM 失败：" + std::to_string(response.code);
