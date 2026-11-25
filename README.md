@@ -441,6 +441,8 @@ Klein 完整保存原始对话，并在后台从多轮对话中提取用户资�
 
 ## 开发与测试
 
+想参与贡献，先看 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ```bash
 # Linux Debug + 测试
 cmake --preset linux-debug

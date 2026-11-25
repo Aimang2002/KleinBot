@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      # 版本分支，形如 2.4.2
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+# 只读权限即可：CI 只检出与构建，不写仓库
+permissions:
+  contents: read
+
+# 同一分支（或同一 PR）的新推送取消仍在进行的旧运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-debug:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      # 默认浅克隆（fetch-depth: 1）即可：版本头只需要 git rev-parse HEAD
+      - uses: actions/checkout@v4
+
+      # Linux 预设不打包依赖（KLEINBOT_USE_BUNDLED_DEPS=OFF），全部取自系统包：
+      #   g++ / make / cmake  编译器、Unix Makefiles 生成器、CMake ≥ 3.21（22.04 为 3.22）
+      #   git                 生成版本头（RefreshVersion.cmake）
+      #   libboost-dev        Boost 头文件（Asio/Beast，仅头文件）
+      #   libcurl4-openssl-dev / libsqlite3-dev  find_package(CURL / SQLite3) REQUIRED
+      #   libgtest-dev        缺了 configure 只告警、不建测试，CI 会“零测试通过”
+      #   python3             注册三项 Python 契约测试，缺了同样静默少测
+      #   tzdata              部分测试把 TZ 设为 Asia/Shanghai，没有时区数据会按 UTC 算而失败
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ make cmake git \
+            libboost-dev libcurl4-openssl-dev libsqlite3-dev \
+            libgtest-dev python3 tzdata
+
+      - name: Configure
+        run: cmake --preset linux-debug
+
+      - name: Build
+        run: cmake --build --preset linux-debug
+
+      # --no-tests=error：一项测试都没注册时让 ctest 失败，而不是返回 0
+      - name: Test
+        run: ctest --preset linux-debug --no-tests=error
+
+      # 防假通过：GTest 没被找到时 configure 只告警、GTest 用例一项都不注册，
+      # 因此要求注册的测试总数不低于保守下限（当前 738 项；Python 的 3 项靠上面显式安装 python3 保证）
+      - name: 检查测试数量
+        run: |
+          total=$(ctest --preset linux-debug -N | sed -n 's/^Total Tests: //p')
+          echo "注册的测试总数：${total}"
+          test "${total:-0}" -ge 700
+
+      # 配置自检：示例配置必须能通过校验（退出码 0），且不得出现“未知字段”告警
+      - name: 示例配置自检
+        run: |
+          cp config.example.json "$RUNNER_TEMP/check.json"
+          ./build/linux-debug/KleinBot_debug --config "$RUNNER_TEMP/check.json" --check-config \
+            | tee "$RUNNER_TEMP/check-config.log"
+          if grep -q '未知字段' "$RUNNER_TEMP/check-config.log"; then
+            echo "config.example.json 含未知字段"
+            exit 1
+          fi
