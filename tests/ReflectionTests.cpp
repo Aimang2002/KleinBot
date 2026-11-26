@@ -11,6 +11,7 @@
 #include "Perception/ReflectionService.h"
 #include "utils/LocalDate.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -66,6 +67,7 @@ struct Harness
     std::vector<std::string> users;
     std::string reply; // 模型回什么
     bool workerAvailable = true;
+    std::function<void()> duringCall; // 模型调用期间做什么（测试“正在回想”用；空 = 立即返回）
     affect::ReflectionService service{store,
                                       recorder,
                                       ledger,
@@ -78,6 +80,8 @@ struct Harness
                                               return {};
                                           return {[this](const std::string &system, const std::string &user)
                                                   {
+                                                      if (duringCall)
+                                                          duringCall();
                                                       systems.push_back(system);
                                                       users.push_back(user);
                                                       return reply;
@@ -373,7 +377,7 @@ TEST(ReflectionTest, ModelSilenceLeavesCursorAloneAndGarbageAdvancesIt)
     EXPECT_TRUE(harness.service.dueGroups(harness.now + affect::ReflectionRules::kRetrySeconds - 1).empty());
     EXPECT_EQ(harness.service.dueGroups(harness.now + affect::ReflectionRules::kRetrySeconds),
               std::vector<std::uint64_t>{kGroup});
-    EXPECT_EQ(harness.service.requestNow(kGroup), 1u) << "手动不受退避限制";
+    EXPECT_EQ(harness.service.requestNow(kGroup).scheduled, 1u) << "手动不受退避限制";
 
     harness.reply = "这不是 JSON";
     const affect::ReflectionReport garbage = harness.service.runNow(kGroup, true);
@@ -453,7 +457,7 @@ TEST(ReflectionTest, AutomaticScheduleHonoursAftermathWindowIntervalAndDailyCap)
                                             {"runs_today", progress.runsToday}}
                                  .dump());
     EXPECT_TRUE(harness.service.dueGroups(harness.now).empty());
-    EXPECT_EQ(harness.service.requestNow(kGroup), 1u);
+    EXPECT_EQ(harness.service.requestNow(kGroup).scheduled, 1u);
     // 第二天零点过后帽子清零
     harness.now = static_cast<std::int64_t>(localDayStart(static_cast<std::time_t>(harness.now))) + 24 * kHour +
                   kMinute;
@@ -501,7 +505,8 @@ TEST(ReflectionTest, AffectOffOrNoWorkerDoesNothing)
     harness.affect.set(AffectOptions{false, "judge", false, ""});
     EXPECT_EQ(harness.service.runNow(kGroup, true).skipped, "affect 关着");
     EXPECT_TRUE(harness.service.dueGroups(harness.now).empty());
-    EXPECT_EQ(harness.service.requestNow(0), 0u);
+    EXPECT_EQ(harness.service.requestNow(0).scheduled, 0u);
+    EXPECT_TRUE(harness.service.requestNow(0).unavailable);
     harness.affect.set(AffectOptions{true, "judge", false, ""});
     harness.workerAvailable = false;
     const affect::ReflectionReport report = harness.service.runNow(kGroup, true);
@@ -516,12 +521,16 @@ TEST(ReflectionTest, ManualRequestRunsOnTheWorkerThread)
     harness.reply = okOutput(id);
     harness.service.start();
     harness.service.pump(harness.now); // 从没回想过：自动也到期，入队一次
-    EXPECT_EQ(harness.service.requestNow(kGroup), 0u); // 已排队，不重复
+    const affect::ReflectionRequest again = harness.service.requestNow(kGroup); // 已排队或正在回想，不重复
+    EXPECT_EQ(again.scheduled, 0u);
+    EXPECT_EQ(again.running + again.waiting, 1u);
     for (int tries = 0; tries < 200 && harness.ledger.query({}).empty(); ++tries)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     EXPECT_EQ(harness.ledger.query({}).size(), 1u);
     harness.service.shutdown();
-    EXPECT_EQ(harness.service.requestNow(kGroup), 0u); // 停了以后不再入队
+    const affect::ReflectionRequest stopped = harness.service.requestNow(kGroup); // 停了以后不再入队
+    EXPECT_EQ(stopped.scheduled, 0u);
+    EXPECT_TRUE(stopped.unavailable);
     EXPECT_EQ(harness.users.size(), 1u);
 }
 
@@ -549,6 +558,151 @@ TEST(ReflectionTest, ReflectNowToolSchedulesOnlyInManagerPrivateAndReportsCount)
     harness.affect.set(AffectOptions{false, "judge", false, ""});
     EXPECT_FALSE(action.available());
     EXPECT_EQ(action.execute(nlohmann::json::object(), context).content, "功能未开启");
+}
+
+// 手动与自动同一判据：只有 24 小时前旧决策的群不排队，工具如实回“没有待回想的经历”
+TEST(ReflectionTest, ManualRequestIgnoresDecisionsOlderThanTheFloorLikeTheSchedule)
+{
+    Harness harness;
+    harness.speak("前天说的", harness.now - 2 * 24 * kHour);
+    EXPECT_TRUE(harness.service.dueGroups(harness.now).empty());
+    const affect::ReflectionRequest request = harness.service.requestNow(kGroup);
+    EXPECT_EQ(request.scheduled, 0u);
+    EXPECT_EQ(request.running + request.waiting, 0u);
+    EXPECT_FALSE(request.unavailable);
+    EXPECT_EQ(harness.service.requestNow(0).scheduled, 0u);
+
+    ReflectAction action(harness.affect);
+    action.bind(&harness.service);
+    ActionContext context;
+    context.user_id = kManager;
+    const ActionResult one = action.execute(nlohmann::json{{"group", kGroup}}, context);
+    EXPECT_EQ(one.content.find("安排了"), std::string::npos) << one.content;
+    EXPECT_NE(one.content.find("没有待回想的经历"), std::string::npos) << one.content;
+    EXPECT_EQ(one.content.find("说过话"), std::string::npos) << "沉默也算经历，文案不再说“没说过话”";
+    const ActionResult all = action.execute(nlohmann::json::object(), context);
+    EXPECT_EQ(all.content, "眼下没有待回想的经历。");
+    EXPECT_EQ(harness.service.runNow(kGroup, true).skipped, "没有待回想的经历");
+}
+
+// 已排队 / 正在回想的群再请求：不重复入队，工具如实说是哪一种，不说“没有待回想的经历”
+TEST(ReflectionTest, ReflectNowReportsQueuedAndRunningHonestly)
+{
+    Harness harness;
+    const std::string id = harness.typicalExperience();
+    harness.reply = okOutput(id);
+    ReflectAction action(harness.affect);
+    action.bind(&harness.service);
+    ActionContext context;
+    context.user_id = kManager;
+
+    // 服务还没起：第一次排上，第二次是“已排上”
+    EXPECT_NE(action.execute(nlohmann::json{{"group", kGroup}}, context).content.find("安排了 1 个群"),
+              std::string::npos);
+    const ActionResult queued = action.execute(nlohmann::json{{"group", kGroup}}, context);
+    EXPECT_NE(queued.content.find("已经排上了"), std::string::npos) << queued.content;
+    EXPECT_EQ(queued.content.find("没有待回想"), std::string::npos) << queued.content;
+    EXPECT_EQ(harness.service.requestNow(kGroup).waiting, 1u);
+    const ActionResult everyQueued = action.execute(nlohmann::json::object(), context);
+    EXPECT_NE(everyQueued.content.find("没有新安排的群"), std::string::npos) << everyQueued.content;
+    EXPECT_NE(everyQueued.content.find("另有 1 个群已经在回想或排着队"), std::string::npos) << everyQueued.content;
+
+    // 起服务：模型调用挂住，期间再请求是“正在回想”
+    std::atomic<bool> inCall{false};
+    std::atomic<bool> release{false};
+    harness.duringCall = [&]
+    {
+        inCall = true;
+        while (!release)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    };
+    harness.service.start();
+    for (int tries = 0; tries < 400 && !inCall; ++tries)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    ASSERT_TRUE(inCall);
+    const affect::ReflectionRequest running = harness.service.requestNow(kGroup);
+    EXPECT_EQ(running.scheduled, 0u);
+    EXPECT_EQ(running.running, 1u);
+    EXPECT_EQ(running.waiting, 0u);
+    const ActionResult busy = action.execute(nlohmann::json{{"group", kGroup}}, context);
+    EXPECT_NE(busy.content.find("正在回想"), std::string::npos) << busy.content;
+    release = true;
+    for (int tries = 0; tries < 400 && harness.ledger.query({}).empty(); ++tries)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    harness.service.shutdown();
+    EXPECT_EQ(harness.ledger.query({}).size(), 1u);
+}
+
+// 游标按（时刻，决策号）推进：同一秒的决策多于一次回想的上限时，下一次接着看剩下的，一条不漏
+TEST(ReflectionTest, DecisionsInTheSameSecondBeyondOneRunAreNotSkipped)
+{
+    Harness harness;
+    const std::int64_t second = harness.now - kHour;
+    const std::size_t total = affect::ReflectionRules::kExperiencesPerRun + 3;
+    std::vector<std::string> ids;
+    for (std::size_t index = 0; index < total; ++index)
+        ids.push_back(harness.speak("同一秒第 " + std::to_string(index) + " 句", second));
+    harness.reply = nlohmann::json{{"readings", nlohmann::json::array()}, {"changes", nlohmann::json::array()}}.dump();
+
+    const affect::ReflectionReport first = harness.service.runNow(kGroup, true);
+    EXPECT_TRUE(first.ran);
+    EXPECT_EQ(first.experiences, affect::ReflectionRules::kExperiencesPerRun);
+    const affect::ReflectionProgress middle = harness.service.progressOf(kGroup);
+    EXPECT_EQ(middle.cursor, second);
+    EXPECT_FALSE(middle.cursorDecision.empty());
+    EXPECT_EQ(harness.service.dueGroups(harness.now + affect::ReflectionRules::kIntervalSeconds),
+              std::vector<std::uint64_t>{kGroup})
+        << "同一秒还剩的决策算待回想";
+    EXPECT_EQ(harness.service.requestNow(kGroup).scheduled, 1u);
+
+    const affect::ReflectionReport second_run = harness.service.runNow(kGroup, true);
+    EXPECT_TRUE(second_run.ran);
+    EXPECT_EQ(second_run.experiences, total - affect::ReflectionRules::kExperiencesPerRun);
+    EXPECT_EQ(harness.service.runNow(kGroup, true).skipped, "没有待回想的经历");
+
+    // 每个决策恰好在一次回想里出现
+    ASSERT_EQ(harness.users.size(), 2u);
+    for (const std::string &id : ids)
+    {
+        const std::string marker = "经历 decision:" + id + "（";
+        const bool inFirst = harness.users[0].find(marker) != std::string::npos;
+        const bool inSecond = harness.users[1].find(marker) != std::string::npos;
+        EXPECT_NE(inFirst, inSecond) << id;
+    }
+}
+
+// 旧进度没有 cursor_decision：按原来的“created_at > cursor”读，游标那一秒算看过了；之后写回带上新字段
+TEST(ReflectionTest, OldProgressWithoutCursorDecisionStillReads)
+{
+    Harness harness;
+    const std::int64_t second = harness.now - kHour;
+    harness.speak("那一秒说的", second);
+    harness.speak("那一秒又说的", second);
+    const std::string later = harness.speak("后来说的", second + kMinute);
+    harness.ledger.writeMeta("affect.reflection." + std::to_string(kGroup),
+                             nlohmann::json{{"cursor", second},
+                                            {"last_run", second},
+                                            {"day", 0},
+                                            {"runs_today", 0},
+                                            {"retry_after", 0}}
+                                 .dump());
+    const affect::ReflectionProgress old = harness.service.progressOf(kGroup);
+    EXPECT_EQ(old.cursor, second);
+    EXPECT_TRUE(old.cursorDecision.empty());
+    EXPECT_EQ(old.lastRun, second);
+
+    harness.reply = okOutput(later);
+    const affect::ReflectionReport report = harness.service.runNow(kGroup, true);
+    EXPECT_TRUE(report.ran);
+    EXPECT_EQ(report.experiences, 1u);
+    ASSERT_EQ(harness.users.size(), 1u);
+    EXPECT_NE(harness.users.front().find("经历 decision:" + later), std::string::npos);
+    const affect::ReflectionProgress saved = harness.service.progressOf(kGroup);
+    EXPECT_EQ(saved.cursor, second + kMinute);
+    EXPECT_EQ(saved.cursorDecision, later);
+    const nlohmann::json raw =
+        nlohmann::json::parse(harness.ledger.readMeta("affect.reflection." + std::to_string(kGroup)));
+    EXPECT_EQ(raw.value("cursor_decision", ""), later);
 }
 
 TEST(ReflectionParseTest, ToleratesFencesAndRejectsGarbage)

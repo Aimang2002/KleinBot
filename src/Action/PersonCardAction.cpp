@@ -88,10 +88,13 @@ ActionResult UpdatePersonCardAction::execute(const nlohmann::json &raw, const Ac
     const long long user = integerArgument(arguments, "user");
     const std::uint64_t target = user > 0 ? static_cast<std::uint64_t>(user) : context.user_id;
     const long long index = integerArgument(arguments, "index");
+    // 来源号：写的是这一轮说话人自己的卡，记这一轮的会话行 id（删掉这一轮时一起撤回）；写别人的卡记 0
+    //（那一轮不在这个人的会话里，这个人删自己的对话不该撤掉它）。见 PersonCard.h 文件头
+    const std::int64_t sourceId =
+        context.user_id != 0 && target == context.user_id ? context.user_message_id : 0;
     const PersonCards::WriteResult result =
         cards.write(target, stringArgument(arguments, "slot"), stringArgument(arguments, "value"),
-                    index < 0 ? 0 : static_cast<int>(std::min<long long>(index, 99)),
-                    context.user_message_id);
+                    index < 0 ? 0 : static_cast<int>(std::min<long long>(index, 99)), sourceId);
     if (!result.ok)
         return textResult("没改：" + result.error + "。");
     const std::string line =

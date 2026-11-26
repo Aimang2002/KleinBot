@@ -37,14 +37,15 @@ struct GroupMessageRecord
     std::string correlationId;
 };
 
-// 冷启动自学习状态（每群一行；EMA/武装期/当日帽/冷却截止的持久化形态）
+// 冷启动自学习状态（每群一行；EMA、武装期、当日计数的持久化形态。当日帽与冷却 2026-11-21 已去掉：
+// 当日计数只计数不限制，cooldownUntil 列保留、现在总写 0）
 struct EngagementColdRow
 {
     double hourlyEma = -1.0;        // 每小时消息数 EMA；-1 = 未学习
     std::int64_t armedTs = 0;       // 武装期起算（首条消息）
-    std::int64_t dayAnchor = 0;     // 当日帽的日界锚点（当天本地零点）
-    int coldToday = 0;              // 今日冷启动评估次数
-    std::int64_t cooldownUntil = 0; // 冷启动禁入截止
+    std::int64_t dayAnchor = 0;     // 当日计数的日界锚点（当天本地零点）
+    int coldToday = 0;              // 今日冷启动尖峰命中次数（只计数）
+    std::int64_t cooldownUntil = 0; // 原冷启动禁入截止；冷却已去掉，现在总写 0
 };
 
 class GroupContextStore

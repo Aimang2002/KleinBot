@@ -71,9 +71,12 @@ public:
     // 回想（经历层 E3，ADR-030）的读接口：
     // 有过决策的群（group_id ≠ 0，去重、升序）
     std::vector<std::uint64_t> decisionGroups() const;
-    // 某群 created_at 在 (after, until] 内的决策，按时间升序，至多 limit 条
+    // 某群 created_at 在 (after, until] 内的决策，按 (created_at, decision_id) 升序，至多 limit 条。
+    // afterDecisionId 非空时，created_at 恰为 after 且 decision_id 大于它的决策也算在内——秒级时刻并列时
+    // 接着上次读到的那一条往后读（回想游标用）；空 = 只看 created_at > after
     std::vector<DecisionRecord> decisionsForGroup(std::uint64_t groupId, std::int64_t after,
-                                                  std::int64_t until, std::size_t limit) const;
+                                                  std::int64_t until, std::size_t limit,
+                                                  const std::string &afterDecisionId = std::string()) const;
     // 某决策的全部执行记录（created_at 升序）
     std::vector<ExecutionRecord> executionsFor(const std::string &decisionId) const;
 

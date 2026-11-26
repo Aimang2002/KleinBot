@@ -191,7 +191,7 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		// 稳定文本，进 system（卡片改了才变一次）；长期记忆关着或没接线时不加，请求逐字不变
 		if (current_data.message_type != "group" && this->personCards != nullptr)
 			situationNote += this->personCards->privateSection(current_data.user_id,
-				current_data.nickname, std::time(nullptr), current_data.message_id);
+				current_data.nickname, std::time(nullptr));
 		// 群聊收敛契约（T7b）：行为约束归 system（D13 分工）；静态常量保证
 		// 管理员群聊请求的 system 前缀逐字稳定，不影响供应商缓存命中
 		if (current_data.message_type == "group")
@@ -236,7 +236,7 @@ void Message::handleMessage(const InboundMessage &current_data, const std::strin
 		std::string peopleLines;
 		if (isGroup && this->personCards != nullptr && this->personCards->enabled())
 		{
-			this->personCards->ensure(current_data.user_id, std::time(nullptr), current_data.message_id);
+			this->personCards->ensure(current_data.user_id, std::time(nullptr));
 			std::vector<PersonPresent> people;
 			people.push_back({current_data.user_id,
 				!current_data.card.empty() ? current_data.card : current_data.nickname});

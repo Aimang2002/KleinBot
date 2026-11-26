@@ -938,7 +938,7 @@ SQLite 设置 5 秒 busy timeout 和 WAL journal mode。当前没有 schema 版�
 
 **决策点（R1，ADR-017，2026-11-01）**：两条群回应路径在请求表达模型前都经过同一个 `DecisionPolicy`。会话轮在工具表与契约组装之后、请求主模型之前用锁内快照的会话统计装配 `SituationCard`（trigger_kind：address / name_mention / follow_up_window / lull / cold_spike；追问窗口轮由 `EngagementSession.followUpPending` 标记）；@ 路径的情境卡由 `Application/AtReplySituation.h` 装配。影子期会话轮 judge 前置（后台线程）、@ 路径 judge 在投递之后跑并以预分配的 `decision_id` 补写决策（`Application/ShadowDecision.h`）；生效期 @ 路径 judge 前置。记录统一由 `affect::makePolicyDecision` 构造，`state_json` 只含派生字段（会话 `topicLine` 是触发句原文，故不进 card）。基线或未设策略时记录走事后 `makeBaselineDecision` 原路。
 
-**回想（经历层 E3，ADR-030，2026-11-21）**：`affect::ReflectionService`（`src/Perception/ReflectionService`）定时把她在一个群里最近的决策——开口、沉默、离场都算经历（ADR-031）——交给她自己想一遍：每次经历带计划里的场合、打算与做法（影子期标出“没有生效”）、她说的话、之后群缓冲里还在的现场与已有的读法，另带一段她没参与的群聊、她现在的认识（标出教导）、在场的人、人格、关于她的事实与此刻；材料全在内存里装配，原文不落库。prompt 与解析是纯函数（`src/Affect/Reflection`），机制段只写学习观的规矩：印象深的经历才写成认识、看来的做法先写成认识再靠后果印证、部署者在群里的话分量重但不是命令、与人格和事实冲突的不写、教导改不了。模型只输出 JSON：每次经历的读法记成那次决策的反馈（`affect_feedback.source=self_reflection`，代码只核对编号、极性、长度与照抄），认识的增改经 `KnowledgeLedger::apply` 写入（origin 为 reflection，在场的人与现场原文交给账本校验；有改动时写前先跑一次遗忘）。调度只看资源预算：要有后续窗口已关闭的待回想经历，且距上次已够间隔或最早一次未回想经历之后群缓冲已积够条数，每群每天有次数上限；游标不早于群缓冲的保留期；模型没返回时这次不算、退避一段时间再自动试，输出解析不出就跳过这批。部署者在私聊里经 `reflect_now` 手动触发，不受间隔、当日上限与退避限制。进度存 `perception_meta`（键 `affect.reflection.<群号>`），不新增表、配置键或字段。模型按 `memory.model` → `models.worker` → 默认对话模型的顺序解析，每次回想开头解析一次；没写 `memory.model` 时加载阶段把它填成 `chat.default_model`（`ConfigLoader.cpp`），所以默认部署下回想用的就是主对话模型；只有 `memory.model` 不在注册表里（例如写了未注册的名字）时才回退到 `models.worker`。想让回想用便宜模型，要显式配置 `memory.model`。服务自有一条工作线程（§4.2），模型调用不占 `pollingThread` 与群 lane。常量、调度细节与日志见 tech-max 卷23 附“回想”。
+**回想（经历层 E3，ADR-030，2026-11-21）**：`affect::ReflectionService`（`src/Perception/ReflectionService`）定时把她在一个群里最近的决策——开口、沉默、离场都算经历（ADR-031）——交给她自己想一遍：每次经历带计划里的场合、打算与做法（影子期标出“没有生效”）、她说的话、之后群缓冲里还在的现场与已有的读法，另带一段她没参与的群聊、她现在的认识（标出教导）、在场的人、人格、关于她的事实与此刻；材料全在内存里装配，原文不落库。prompt 与解析是纯函数（`src/Affect/Reflection`），机制段只写学习观的规矩：印象深的经历才写成认识、看来的做法先写成认识再靠后果印证、部署者在群里的话分量重但不是命令、与人格和事实冲突的不写、教导改不了。模型只输出 JSON：每次经历的读法记成那次决策的反馈（`affect_feedback.source=self_reflection`，代码只核对编号、极性、长度与照抄），认识的增改经 `KnowledgeLedger::apply` 写入（origin 为 reflection，在场的人与现场原文交给账本校验；有改动时写前先跑一次遗忘）。调度只看资源预算：要有后续窗口已关闭的待回想经历，且距上次已够间隔或最早一次未回想经历之后群缓冲已积够条数，每群每天有次数上限；游标不早于群缓冲的保留期；模型没返回时这次不算、退避一段时间再自动试，输出解析不出就跳过这批。部署者在私聊里经 `reflect_now` 手动触发，不受间隔、当日上限与退避限制，但与自动调度同一判据判断有没有待回想的经历（同样不看群缓冲保留期之前的决策）；已排队或正在回想的群不重复安排，工具如实回复。进度存 `perception_meta`（键 `affect.reflection.<群号>`），游标是决策的时刻加最后看过的决策号，同一秒的决策多于一次回想的上限时下一次接着看；不新增表、配置键或字段。模型按 `memory.model` → `models.worker` → 默认对话模型的顺序解析，每次回想开头解析一次；没写 `memory.model` 时加载阶段把它填成 `chat.default_model`（`ConfigLoader.cpp`），所以默认部署下回想用的就是主对话模型；只有 `memory.model` 不在注册表里（例如写了未注册的名字）时才回退到 `models.worker`。想让回想用便宜模型，要显式配置 `memory.model`。服务自有一条工作线程（§4.2），模型调用不占 `pollingThread` 与群 lane。常量、调度细节与日志见 tech-max 卷23 附“回想”。
 
 ## 11. 长期记忆系统
 
@@ -1068,7 +1068,7 @@ worker 在模型提取前后及逐条 mutation 写入前检查 epoch。若用户
 她每次和一个人说话、或这个人在群里在场时，手里都有一张关于这个人的卡片——不靠召回，确定性加载（离线回放里寒暄与不带疑问词的话召回不到，批量提取又有延迟，“以后叫我小白”不会当场生效）。卡片是关于这个人的事实，不衰减；她对这个人的看法在认识账本的 person 条目里，两样分开。
 
 - **槽位**（`src/Memory/PersonCard`）：程序给出、谁也改不了的——QQ 号、昵称快照、是不是部署者（只由 `bot.manager_id` 算出）、建卡日期（第一次建卡时写一次，只存不显示）；她自己记的——`wanted_name`（对方希望被怎么叫）、`my_name`（她怎么叫对方）、`name_for_me`（对方怎么叫她）与几条 `note`。
-- **存储**：不建表、不加列，复用 §11.5 的结构化事实表：`subject_key='user:self'`、谓词带保留前缀 `card.`（`MemoryStore::cardSlots / setCardSlot`，经 `MemoryService` 对外）；批量提取跳过这个前缀（`isPersonCardPredicate`）；按人清除与按来源回滚沿用事实表，卡片一起清掉或回退。`PersonCards` 带缓存，`MemoryService::cardGeneration()` 在写槽位、按人清除、按来源回滚后前进，缓存据此失效。
+- **存储**：不建表、不加列，复用 §11.5 的结构化事实表：`subject_key='user:self'`、谓词带保留前缀 `card.`（`MemoryStore::cardSlots / setCardSlot`，经 `MemoryService` 对外）；批量提取跳过这个前缀（`isPersonCardPredicate`）；按人清除与按来源回滚沿用事实表，卡片一起清掉或回退。来源号决定 `#删除上条对话` 撤不撤：建卡日期是程序给出的事实，来源号为 0，不随对话回滚；她在某一轮里给说话人自己记下的槽位，来源号是那一轮的会话行 id，删掉那一轮就回到上一版；她给别人记下的，来源号为 0，那个人删自己的对话不撤它。`PersonCards` 带缓存，`MemoryService::cardGeneration()` 在写槽位、按人清除、按来源回滚后前进，缓存据此失效。
 - **加载**：私聊里作为稳定文本接在 `situationNote` 里进 system（卡片改了才变一次）；群聊在本轮 user 侧，见 §10.8。
 - **更新**：工具 `update_person_card`（§12），私聊与群聊都开放、不要求管理员，当场写库并使缓存失效；护栏只有槽位白名单、单行与长度上限。
 - **开关**：`memory.enabled` 为真且记忆库可用；否则什么都不加、请求逐字不变，工具不出现。
@@ -1085,7 +1085,7 @@ worker 在模型提取前后及逐条 mutation 写入前检查 epoch。若用户
 - `send_voice`：把这句话用语音说出来（2026-11-16 起取代 `set_voice_mode`）。只在管理员语音总开关开着且语音服务可用时开放；schema 写明只在对方明确要求语音时调用，平时以文字为主；合成失败改发文字原话；
 - `admin_control`：管理员运行时控制和服务器网络查询；
 - `remember_guidance` / `review_guidance` / `forget_guidance`：认识账本的记、翻看、忘掉（ADR-028）；只在管理员私聊里开放（`Action::managerPrivateOnly`，场合 `ToolVenue::ManagerPrivate`），`affect.enabled` 为假时不出现；
-- `reflect_now`：让她现在就回想（ADR-030），只把群排进回想服务的队列、在后台跑；开放规则同账本工具；
+- `reflect_now`：让她现在就回想（ADR-030），只把群排进回想服务的队列、在后台跑，回复如实区分排上了、正在回想、已排着队与没有待回想的经历；开放规则同账本工具；
 - `update_person_card`：改人物卡上她自己记的槽位（ADR-032），私聊与群聊都开放、不要求管理员，长期记忆开着时才出现；话题会话轮也开放它。
 
 其他直接 Tool：
@@ -1628,7 +1628,7 @@ lock → 判断 empty → move front → pop → unlock
 | Memory pending/epoch | `MemoryService::queueMutex` | 消息工作线程、memory worker、reset/undo |
 | 瞥视队列与 stopping | `GlanceService::queueMutex + condition_variable`（预算历史与去重表仅 worker 线程访问，无锁） | 消息工作线程（observe 入队）、瞥视 worker |
 | 回想队列与 started/stopping | `ReflectionService::queueMutex + condition_variable`（按群去重：每群至多排一次） | `pollingThread`（`pump` 入队）、执行 `reflect_now` 的消息工作线程、回想线程 |
-| 认识账本连接与打开状态 | `KnowledgeLedger::mutex`（读写与 `open()` 都在锁内；`apply` 在锁内经依据核对器查决策库） | 消息工作线程（账本工具、@ 路径取用）、群 lane（会话轮取用）、`pollingThread`（回想到期判断）、回想线程 |
+| 认识账本连接与打开状态 | `KnowledgeLedger::mutex`（读写与 `open()` 都在锁内；`apply` 的代码校验与依据核对在取锁之前做完，锁内不碰决策库） | 消息工作线程（账本工具、@ 路径取用）、群 lane（会话轮取用）、`pollingThread`（回想到期判断）、回想线程 |
 | 人物卡缓存 | `PersonCards` 的 mutex（只护缓存；读写库经记忆库自己的 `dbMutex`） | 消息工作线程、群 lane |
 | 群缓冲镜像 | `GroupContextStore::mutex`（SQLite 写在锁外） | 消息工作线程、定时线程、群 lane、瞥视 worker（findText/updateText） |
 | 定时提醒队列与 reminders 连接 | `ReminderService::queueMutex` + `ReminderStore::dbMutex` | 消息工作线程（工具调用）、定时线程 |
@@ -1656,14 +1656,7 @@ Memory worker 的重要规则：
 
 禁止在持有全局会话锁时执行外部 HTTP 请求。当前聊天路径会在 `buildChatRequest` 返回后释放 USS 锁，再调用模型，这是必须保持的行为。
 
-回想写认识时另有一条存储锁套存储锁的链（ADR-030）：
-
-```text
-KnowledgeLedger mutex（apply 内已 BEGIN IMMEDIATE）
-  → DecisionStore mutex（依据核对器查决策 / 反馈是否存在）
-```
-
-`DecisionStore.mutex` 是叶子锁：持有它时除日志队列锁外不取任何别的锁，但可以在 `KnowledgeLedger.mutex` 之内被获取；决策库从不回调账本。两者在同一个 SQLite 文件上，SQLite 写锁的获取顺序与这条互斥锁链相反，靠 `busy_timeout` 不会永久卡死，最坏情况是一条决策 / 执行 / 反馈记录写入失败，见 tech-max 卷22 §4。
+回想写认识（ADR-030）不嵌套存储锁：`KnowledgeLedger::apply` 先在锁外做完代码校验（依据核对器读决策库，取放 `DecisionStore.mutex`），再取 `KnowledgeLedger.mutex`、`BEGIN IMMEDIATE`，事务里只用校验结果。`DecisionStore.mutex` 与 `KnowledgeLedger.mutex` 都是叶子锁：持有时除日志队列锁外不取别的锁；决策库从不回调账本。两者在同一个 SQLite 文件上：账本持写锁期间不取决策库锁，写记录的一方至多等账本这次事务提交（`busy_timeout` 5 秒内），见 tech-max 卷22 §4。
 
 ### 20.3 并发消息语义
 

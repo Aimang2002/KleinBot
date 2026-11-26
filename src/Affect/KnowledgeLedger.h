@@ -8,11 +8,13 @@
  * SQLite 文件、独立连接。
  *
  * 延迟打开（ADR-023 稳定外壳，与 DecisionStore 同一做法）：对象始终构造，构造时不碰数据库；第一次
- * open() 才打开连接、建表。组合根里只有账本工具在 affect.enabled 为真时调用 open()，没启用过就没有这两张表；
- * 打开失败只试一次。未打开时读写方法返回失败 / 空结果，不会自行打开。
+ * open() 才打开连接、建表。affect.enabled 为真时，账本工具、取用（KnowledgeRecall：群聊两条路径与判定器
+ * 读认识时）与回想服务都会调用 open()；affect 没启用过就没有这两张表。打开失败只试一次。未打开时读写方法
+ * 返回失败 / 空结果，不会自行打开。
  *
- * 写入只有一个入口 apply()：一次运行（一次回想、一次教导）的若干条改动先经 KnowledgeGuard 的代码校验，
- * 再按账本状态检查（教导过的认识回想不能动），合格的在一个事务里写入，带同一个运行号；不合格的单条
+ * 写入只有一个入口 apply()：一次运行（一次回想、一次教导）的若干条改动先经 KnowledgeGuard 的代码校验
+ *（含依据核对，只读决策库；在取账本锁、开写事务之前做完，所以账本锁与库文件写锁不和决策库的锁嵌套），
+ * 再在锁内按账本状态检查（教导过的认识回想不能动），合格的在一个事务里写入，带同一个运行号；不合格的单条
  * 丢弃并说明原因，其余照常写入。回滚、遗忘、规模上限都只追加历史行，历史永不删除；唯一例外是按人、
  * 按群清除（forgetPerson / forgetGroup），与长期记忆的 clearUser 一样连同历史一起删。
  *
@@ -63,7 +65,7 @@ struct KnowledgeEntry
     std::uint64_t scopeUser = 0;  // 只有 person 非 0
     std::string key;
     std::string text;        // 第一人称的一句认识
-    std::string searchText;  // 检索词（E4 取用时的文本召回用）
+    std::string searchText;  // 检索词（存着备用：取用眼下不做文本召回，不读它）
     double strength = 0.0;   // 0–1，存储值；取用看 effectiveStrength
     std::string status;      // active / faded / withdrawn
     int version = 0;
@@ -131,7 +133,8 @@ struct KnowledgeRunContext
     std::set<std::uint64_t> presentUsers;
     // 本次材料的原文（只在内存里，用来挡照抄）；教导为空
     std::vector<std::string> material;
-    // 依据 id 是否存在（组合根 / E3 接 DecisionStore）；空 = 没有核对器，带依据的改动一律不收
+    // 依据 id 是否存在（回想接 evidenceCheckerFor(DecisionStore)）；空 = 没有核对器，带依据的改动一律不收。
+    // apply 在取账本锁、开写事务之前调用它，核对器里可以放心读决策库
     std::function<bool(const std::string &)> evidenceExists;
     std::string runId;                                   // 空 = 由账本生成
     nlohmann::json note = nlohmann::json::object();      // 并入每行 evidence_json（如 by=部署者号）
@@ -185,7 +188,7 @@ public:
     bool open();
     bool isOpen() const;
 
-    // 写入的唯一入口：校验 → 账本状态检查 → 一个事务写入
+    // 写入的唯一入口：代码校验（锁外）→ 取锁、开事务 → 账本状态检查 → 写入、提交
     KnowledgeRunResult apply(const std::vector<KnowledgeChange> &changes,
                              const KnowledgeRunContext &context);
 
@@ -213,9 +216,9 @@ public:
     // 这一条此刻的有效强度（按作者：教导的不衰减）；翻看工具显示用
     double effectiveOf(const KnowledgeEntry &entry) const;
 
-    // 取用候选（设计 §7，E4 调用；E2 只由测试调用）：全局习惯 + 本群的群认识与习惯 + 在场的人的认识
+    // 取用候选（设计 §7；现在只有测试调用，生产的取用走 recallPool + selectKnowledge）：全局习惯 + 本群的群认识与习惯 + 在场的人的认识
     //（person 的 scope_group 为 0 或本群），只取 active 且有效强度（教导的不衰减）不低于阈值；按有效强度降序。
-    // 不做文本召回与预算——那是 E4 的 KnowledgeRecall
+    // 不做预算（取用的上限与排序在 KnowledgeRecall 的 selectKnowledge）
     std::vector<KnowledgeEntry> candidatesFor(std::uint64_t groupId,
                                               const std::vector<std::uint64_t> &people) const;
 

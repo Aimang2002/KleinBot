@@ -13,7 +13,7 @@
  * 其中 @ 只算活动（回答由 Message 的 @ 路径给出），提名字/引用回复她才触发会话轮。
  *
  * 轮次循环：主 Agent（人格 system + 公共上下文材料 + 动作工具表）每轮
- * 三选一——group_say（说话）/ 不调用工具（pass，连续 3 拍收场）/
+ * 三选一——group_say（说话）/ 不调用工具（pass，这一拍沉默；连续沉默不会让会话结束）/
  * leave_topic（离场，可带最后一句）。发进群里的只有 group_say 的话与离场最后一句：
  * 不调工具、直接写出的文字按沉默处理，不发出（L3 护栏，判定见 Application/EngagementTurn）。
  * 定案前可走至多 3 趟工具轮（recall_context 召回 + setTools 开放的注册表工具，
@@ -277,7 +277,7 @@ private:
         std::int64_t armedTs = 0;        // 首条消息时刻（武装期起算）
         std::int64_t lastCheck = 0;      // 上次冷启动检查（60s 节流）
         std::int64_t dayAnchor = 0;      // 日界锚点：当天本地零点的时间戳
-        int coldToday = 0;               // 今日（本地日历日）冷启动评估次数：只计数进日志，不再限制
+        int coldToday = 0;               // 今日（本地日历日）冷启动尖峰命中次数：只计数并随基线状态持久化，不限制、不打日志
         std::int64_t lastEvaluation = 0; // 上次冷启动评估时刻：同一波热度只看一眼（纯内存）
     };
 

@@ -106,25 +106,30 @@ void ReflectionService::workerLoop()
     }
 }
 
-bool ReflectionService::enqueue(std::uint64_t groupId, bool manual)
+ReflectionService::QueueState ReflectionService::enqueue(std::uint64_t groupId, bool manual)
 {
     {
         std::lock_guard<std::mutex> lock(queueMutex);
         if (stopping)
-            return false;
+            return QueueState::Stopped;
         if (queued.count(groupId) != 0)
         {
-            // 已排队：手动触发只把那一次升级成手动（不受当日帽限制）
+            // 已排队：手动触发只把那一次升级成手动（不受当日帽限制）。queued 里有、队列里没有 =
+            // 工作线程已取走、正在回想（回想完才从 queued 里删）
+            bool waiting = false;
             for (Job &job : queue)
                 if (job.groupId == groupId)
+                {
                     job.manual = job.manual || manual;
-            return false;
+                    waiting = true;
+                }
+            return waiting ? QueueState::Waiting : QueueState::Running;
         }
         queued.insert(groupId);
         queue.push_back({groupId, manual});
     }
     queueChanged.notify_one();
-    return true;
+    return QueueState::Added;
 }
 
 void ReflectionService::pump(std::int64_t now)
@@ -141,27 +146,59 @@ void ReflectionService::pump(std::int64_t now)
         enqueue(groupId, false);
 }
 
-std::size_t ReflectionService::requestNow(std::uint64_t groupId)
+ReflectionRequest ReflectionService::requestNow(std::uint64_t groupId)
 {
-    if (!enabled() || !ledger.open())
-        return 0;
+    ReflectionRequest request;
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        request.unavailable = stopping;
+    }
+    if (request.unavailable || !enabled() || !ledger.open())
+    {
+        request.unavailable = true;
+        return request;
+    }
     std::vector<std::uint64_t> candidates;
     if (groupId != 0)
         candidates.push_back(groupId);
     else
         candidates = store.decisionGroups();
     const std::int64_t now = clock();
-    std::size_t count = 0;
     for (const std::uint64_t candidate : candidates)
     {
-        std::int64_t scanned = 0;
-        const ReflectionProgress progress = loadProgress(candidate);
-        if (pendingExperiences(candidate, progress.cursor, now, 1, scanned).empty())
-            continue;
-        if (enqueue(candidate, true))
-            ++count;
+        // 已排队或正在回想的群先如实计数，不看有没有经历（正在回想时游标还没前移，经历看起来仍是
+        // 待回想的）；其余的群与自动调度同一判据：游标套 24 小时地板后还有后续窗口已关闭的决策
+        if (!isQueued(candidate))
+        {
+            ReflectionProgress progress = loadProgress(candidate);
+            floorCursor(progress, now);
+            ReflectionProgress scanned;
+            if (pendingExperiences(candidate, progress, now, 1, scanned).empty())
+                continue;
+        }
+        switch (enqueue(candidate, true)) // 已在队列里的那一次升级成手动
+        {
+        case QueueState::Added:
+            ++request.scheduled;
+            break;
+        case QueueState::Waiting:
+            ++request.waiting;
+            break;
+        case QueueState::Running:
+            ++request.running;
+            break;
+        case QueueState::Stopped:
+            request.unavailable = true;
+            return request;
+        }
     }
-    return count;
+    return request;
+}
+
+bool ReflectionService::isQueued(std::uint64_t groupId) const
+{
+    std::lock_guard<std::mutex> lock(queueMutex);
+    return queued.count(groupId) != 0;
 }
 
 ReflectionProgress ReflectionService::loadProgress(std::uint64_t groupId) const
@@ -176,6 +213,8 @@ ReflectionProgress ReflectionService::loadProgress(std::uint64_t groupId) const
         if (value.is_object())
         {
             progress.cursor = value.value("cursor", std::int64_t{0});
+            // 旧进度没有这个字段：空 = cursor 那一秒的都看过了（与加字段之前的 created_at > cursor 一致）
+            progress.cursorDecision = value.value("cursor_decision", std::string());
             progress.lastRun = value.value("last_run", std::int64_t{0});
             progress.day = value.value("day", std::int64_t{0});
             progress.runsToday = value.value("runs_today", 0);
@@ -192,6 +231,7 @@ ReflectionProgress ReflectionService::loadProgress(std::uint64_t groupId) const
 bool ReflectionService::saveProgress(std::uint64_t groupId, const ReflectionProgress &progress)
 {
     const nlohmann::json value = {{"cursor", progress.cursor},
+                                  {"cursor_decision", progress.cursorDecision},
                                   {"last_run", progress.lastRun},
                                   {"day", progress.day},
                                   {"runs_today", progress.runsToday},
@@ -204,24 +244,33 @@ ReflectionProgress ReflectionService::progressOf(std::uint64_t groupId) const
     return loadProgress(groupId);
 }
 
-// 游标地板：不早于 24 小时前（群缓冲的保留期）。更早的决策没有现场可看，也不该让第一次回想从头翻旧账
-static std::int64_t flooredCursor(std::int64_t cursor, std::int64_t now)
+// 游标地板：不早于 24 小时前（群缓冲的保留期）。更早的决策没有现场可看，也不该让第一次回想从头翻旧账。
+// 地板高于游标时，游标那一秒的决策号随之作废（地板那一秒按“都看过了”算）
+void ReflectionService::floorCursor(ReflectionProgress &progress, std::int64_t now)
 {
-    return std::max(cursor, now - ReflectionRules::kLookbackSeconds);
+    const std::int64_t floor = now - ReflectionRules::kLookbackSeconds;
+    if (progress.cursor < floor)
+    {
+        progress.cursor = floor;
+        progress.cursorDecision.clear();
+    }
 }
 
 std::vector<ReflectionExperience> ReflectionService::pendingExperiences(
-    std::uint64_t groupId, std::int64_t cursor, std::int64_t now, std::size_t limit,
-    std::int64_t &scannedUpTo) const
+    std::uint64_t groupId, const ReflectionProgress &from, std::int64_t now, std::size_t limit,
+    ReflectionProgress &scanned) const
 {
     std::vector<ReflectionExperience> experiences;
-    scannedUpTo = cursor;
+    scanned.cursor = from.cursor;
+    scanned.cursorDecision = from.cursorDecision;
     const std::int64_t until = now - ReflectionRules::kAftermathSeconds;
-    if (limit == 0 || until <= cursor)
+    if (limit == 0 || until < from.cursor || (until == from.cursor && from.cursorDecision.empty()))
         return experiences;
-    for (const DecisionRecord &decision : store.decisionsForGroup(groupId, cursor, until, kScanLimit))
+    for (const DecisionRecord &decision :
+         store.decisionsForGroup(groupId, from.cursor, until, kScanLimit, from.cursorDecision))
     {
-        scannedUpTo = decision.createdAt;
+        scanned.cursor = decision.createdAt;
+        scanned.cursorDecision = decision.decisionId;
         const std::vector<ExecutionRecord> executions = store.executionsFor(decision.decisionId);
         // 每个动作都是经历（2026-11-21 部署者定规）：开口、沉默、离场都回想
         const auto spoken = std::find_if(executions.begin(), executions.end(), spokenExecution);
@@ -276,20 +325,13 @@ std::vector<std::uint64_t> ReflectionService::dueGroups(std::int64_t now)
             continue;
         if (now < progress.retryAfter)
             continue; // 上次模型没返回：退避中
-        progress.cursor = flooredCursor(progress.cursor, now);
-        std::int64_t scanned = 0;
+        floorCursor(progress, now);
+        ReflectionProgress scanned;
         const std::vector<ReflectionExperience> pending =
-            pendingExperiences(groupId, progress.cursor, now, 1, scanned);
+            pendingExperiences(groupId, progress, now, 1, scanned);
         if (pending.empty())
-        {
-            // 扫过的都是沉默的决策：游标直接跨过去，下次不再扫
-            if (scanned > progress.cursor)
-            {
-                progress.cursor = scanned;
-                saveProgress(groupId, progress);
-            }
-            continue;
-        }
+            continue; // 每个决策都是经历：没有经历 = 游标之后没有后续窗口已关闭的决策，游标不用动
+
         bool early = false;
         if (groups != nullptr)
         {
@@ -320,17 +362,12 @@ ReflectionReport ReflectionService::runNow(std::uint64_t groupId, bool manual)
     }
     const std::int64_t now = clock();
     ReflectionProgress progress = loadProgress(groupId);
-    progress.cursor = flooredCursor(progress.cursor, now);
-    std::int64_t scanned = 0;
+    floorCursor(progress, now);
+    ReflectionProgress scanned;
     std::vector<ReflectionExperience> experiences =
-        pendingExperiences(groupId, progress.cursor, now, ReflectionRules::kExperiencesPerRun, scanned);
+        pendingExperiences(groupId, progress, now, ReflectionRules::kExperiencesPerRun, scanned);
     if (experiences.empty())
     {
-        if (scanned > progress.cursor)
-        {
-            progress.cursor = scanned;
-            saveProgress(groupId, progress);
-        }
         report.skipped = "没有待回想的经历";
         return report;
     }
@@ -519,7 +556,9 @@ ReflectionReport ReflectionService::runNow(std::uint64_t groupId, bool manual)
         ++progress.runsToday;
     progress.lastRun = now;
     progress.retryAfter = 0;
-    progress.cursor = scanned;
+    // 游标推到这次看过的最后一条决策：同一秒里号更大的决策留给下一次
+    progress.cursor = scanned.cursor;
+    progress.cursorDecision = scanned.cursorDecision;
     saveProgress(groupId, progress);
 
     LOG_INFO("回想：群 " + std::to_string(groupId) + " 运行 " + report.runId + "（" +

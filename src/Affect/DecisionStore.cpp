@@ -653,7 +653,8 @@ std::vector<std::uint64_t> DecisionStore::decisionGroups() const
 }
 
 std::vector<DecisionRecord> DecisionStore::decisionsForGroup(std::uint64_t groupId, std::int64_t after,
-                                                             std::int64_t until, std::size_t limit) const
+                                                             std::int64_t until, std::size_t limit,
+                                                             const std::string &afterDecisionId) const
 {
     std::vector<DecisionRecord> result;
     if (!isOpen() || limit == 0 || groupId == 0)
@@ -662,7 +663,8 @@ std::vector<DecisionRecord> DecisionStore::decisionsForGroup(std::uint64_t group
     const char *sql =
         "SELECT decision_id, created_at, source, group_id, user_id, trigger_message_id,"
         " plan_json, policy_version, plan_version, state_json, fallback_reason"
-        " FROM affect_decisions WHERE group_id=?1 AND created_at>?2 AND created_at<=?3"
+        " FROM affect_decisions WHERE group_id=?1 AND created_at<=?3"
+        " AND (created_at>?2 OR (?5<>'' AND created_at=?2 AND decision_id>?5))"
         " ORDER BY created_at ASC, decision_id ASC LIMIT ?4;";
     sqlite3_stmt *statement = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
@@ -671,6 +673,7 @@ std::vector<DecisionRecord> DecisionStore::decisionsForGroup(std::uint64_t group
     sqlite3_bind_int64(statement, 2, static_cast<sqlite3_int64>(after));
     sqlite3_bind_int64(statement, 3, static_cast<sqlite3_int64>(until));
     sqlite3_bind_int64(statement, 4, static_cast<sqlite3_int64>(limit));
+    sqlite3_bind_text(statement, 5, afterDecisionId.c_str(), -1, SQLITE_TRANSIENT);
     while (sqlite3_step(statement) == SQLITE_ROW)
     {
         if (std::optional<DecisionRecord> record = readDecision(statement))

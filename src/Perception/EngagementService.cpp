@@ -72,7 +72,8 @@ constexpr double kSpikeFloor = 6.0;                  // 绝对地板（防死群
 constexpr double kMemberFloorRatio = 0.03;           // 人数地板：人数 × 3%
 constexpr double kMemberPriorDaily = 0.2;            // 冷启动先验：人数 × 0.2 条/天
 // 2026-11-21 部署者定规：入场、出场由她定，程序只留底层护栏与资源预算——冷启动的当日帽（每天 3 次）
-// 与两种冷却（冷启动会话结束后 2 小时、任意会话结束后 1 小时）都去掉了。coldToday 只计数进日志。
+// 与两种冷却（冷启动会话结束后 2 小时、任意会话结束后 1 小时）都去掉了。coldToday 只计数并持久化
+//（engagement_cold），不再限制，也不打日志。
 // 同一波热度只看一眼（上次评估还在 kSpikeBucketSeconds 内就不再评估）是资源预算：没有它，她谢绝之后
 // 同一个 10 分钟桶会每 60 秒再触发一次判定调用
 constexpr std::int64_t kArmSeconds = 2 * 60 * 60;    // 武装期：观察满 2 小时才启用
@@ -258,7 +259,7 @@ EngagementService::EngagementService(const Live<BotIdentity> &bot, GroupContextS
       clock(clock ? std::move(clock)
                   : [] { return static_cast<std::int64_t>(std::time(nullptr)); })
 {
-    // 自学习状态恢复：EMA/武装期/当日帽/冷却截止持久化在 engagement_cold，
+    // 自学习状态恢复：EMA、武装期、当日计数（只计数不限制）持久化在 engagement_cold（冷却截止列保留、写 0），
     // 重启续用（消息桶计数是实时数据，不持久化，从活流量自然回填）
     if (store == nullptr)
         return;

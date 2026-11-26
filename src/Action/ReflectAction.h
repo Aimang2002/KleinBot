@@ -15,6 +15,7 @@ class ReflectionService;
 // 手动回想（经历层 E3，ADR-030；设计 §6.2 “部署者命令手动触发”）：reflect_now。
 // 部署者在管理员私聊里说“你回想一下最近在群里的事”，她觉得是在叫她回想就调它；工具只是把那个群
 //（或所有有待回想经历的群）排进回想服务的队列，回想在后台线程上跑，结果之后用 review_guidance 翻看。
+// 回复如实区分：这次排上了、正在回想、已排着队、没有待回想的经历（与自动调度同一判据）、回想用不了。
 // 与账本工具同一开放规则：只在管理员私聊里出现（managerPrivateOnly + requires_admin），affect.enabled
 // 当前为假时不可用。描述只写机制。回复是给模型看的短句，由她自己用自己的话说
 class ReflectAction : public Action

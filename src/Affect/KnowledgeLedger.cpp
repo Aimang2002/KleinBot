@@ -402,6 +402,20 @@ KnowledgeRunResult KnowledgeLedger::apply(const std::vector<KnowledgeChange> &ch
     result.runId = !context.runId.empty()
                        ? context.runId
                        : utils::uniqueId(context.origin == "teaching" ? "teach" : "run");
+    if (!isOpen())
+    {
+        result.error = "认识账本未打开";
+        return result;
+    }
+    // 代码校验（结构、长度、作用域、照抄、依据核对）只看改动与本次上下文，不依赖账本状态：在取账本锁、
+    // 开写事务之前做完，事务里只用结果。依据核对会读决策库（取 DecisionStore.mutex）；放在锁外，
+    // 账本锁与库文件写锁就都不会和决策库的锁嵌套（技术设计 §20.2，卷22 §4）
+    const std::size_t checkedCount = std::min(changes.size(), KnowledgeRules::kMaxChangesPerRun);
+    std::vector<bool> guardPassed(checkedCount, false);
+    std::vector<std::string> guardReasons(checkedCount);
+    for (std::size_t index = 0; index < checkedCount; ++index)
+        guardPassed[index] = KnowledgeGuard::check(changes[index], context, guardReasons[index]);
+
     std::lock_guard<std::mutex> lock(mutex);
     if (db == nullptr)
     {
@@ -425,12 +439,12 @@ KnowledgeRunResult KnowledgeLedger::apply(const std::vector<KnowledgeChange> &ch
             reject(index, "每次至多 8 条改动");
             continue;
         }
-        std::string reason;
-        if (!KnowledgeGuard::check(change, context, reason))
+        if (!guardPassed[index])
         {
-            reject(index, reason);
+            reject(index, guardReasons[index]);
             continue;
         }
+        std::string reason;
 
         std::optional<KnowledgeEntry> existing;
         if (change.targetId != 0)

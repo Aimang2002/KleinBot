@@ -84,7 +84,7 @@ TEST(PersonCardTest, BlankCardIsBuiltOnFirstContactAndOnlyOnce)
 {
     Harness harness;
     ASSERT_TRUE(harness.store.isOpen());
-    const std::string first = harness.cards.privateSection(kAqing, "阿青", kNow, 77);
+    const std::string first = harness.cards.privateSection(kAqing, "阿青", kNow);
     EXPECT_NE(first.find("[对方的卡片]"), std::string::npos);
     EXPECT_NE(first.find("QQ：" + std::to_string(kAqing)), std::string::npos);
     EXPECT_NE(first.find("QQ 昵称：阿青"), std::string::npos);
@@ -95,7 +95,7 @@ TEST(PersonCardTest, BlankCardIsBuiltOnFirstContactAndOnlyOnce)
     EXPECT_EQ(harness.writes, 1);
 
     // 第二次：卡已经在了，不再写库，文本逐字相同（进 system，要稳定）
-    EXPECT_EQ(harness.cards.privateSection(kAqing, "阿青", kNow + 86400 * 3, 78), first);
+    EXPECT_EQ(harness.cards.privateSection(kAqing, "阿青", kNow + 86400 * 3), first);
     EXPECT_EQ(harness.writes, 1);
 }
 
@@ -289,6 +289,51 @@ TEST(PersonCardTest, ToolWritesForTheSpeakerByDefaultOrAnExplicitUser)
     harness.on = false;
     EXPECT_FALSE(action.available());
     EXPECT_EQ(action.execute({{"slot", "wanted_name"}, {"value", "小白"}}, speaking).content, "功能未开启");
+}
+
+// #删除上条对话 按会话行 id 回滚（来源号 ≥ 被删的第一行）。程序给出的建卡日期不随对话回滚；她在某一轮里
+// 给说话人自己记下的槽位随那一轮撤回（恢复到之前那一版）；她在别人那一轮里给这个人记下的，这个人删自己的
+// 对话不撤
+TEST(PersonCardTest, RollingBackARoundKeepsFirstSeenAndUndoesOnlyWhatSheWroteInThatRound)
+{
+    Harness harness;
+    UpdatePersonCardAction action(harness.cards);
+    harness.cards.privateSection(kAqing, "阿青", kNow); // 第一句：建卡
+    const std::string firstSeen = slotValue(harness.store, kAqing, "card.first_seen");
+    ASSERT_FALSE(firstSeen.empty());
+
+    ActionContext round100;
+    round100.user_id = kAqing;
+    round100.user_message_id = 100;
+    ASSERT_TRUE(action.execute({{"slot", "wanted_name"}, {"value", "小白"}}, round100).content.find("改好了") !=
+                std::string::npos);
+    ActionContext round120 = round100;
+    round120.user_message_id = 120;
+    ASSERT_TRUE(action.execute({{"slot", "wanted_name"}, {"value", "小黑"}}, round120).content.find("改好了") !=
+                std::string::npos);
+    // 同在阿青的第 120 行那一轮里，她给老余记了一条
+    ASSERT_TRUE(action.execute({{"slot", "note"}, {"value", "爱接梗"}, {"user", kLaoyu}}, round120)
+                    .content.find("改好了") != std::string::npos);
+
+    // 阿青删掉第 120 行起的那一轮：她在那一轮写的称呼回到上一版，建卡日期不动
+    harness.store.deactivateBySourceFrom(kAqing, 120);
+    ++harness.generation;
+    EXPECT_EQ(harness.cards.load(kAqing).wantedName, "小白");
+    EXPECT_EQ(slotValue(harness.store, kAqing, "card.first_seen"), firstSeen);
+    // 再删到最早一行：她记下的都撤了，建卡日期仍在；下次说话不会以新的日期重建
+    harness.store.deactivateBySourceFrom(kAqing, 1);
+    ++harness.generation;
+    EXPECT_TRUE(harness.cards.load(kAqing).wantedName.empty());
+    EXPECT_EQ(slotValue(harness.store, kAqing, "card.first_seen"), firstSeen);
+    const int writes = harness.writes;
+    harness.cards.privateSection(kAqing, "阿青", kNow + 86400 * 30);
+    EXPECT_EQ(harness.writes, writes) << "建卡日期还在，不重写";
+    EXPECT_EQ(slotValue(harness.store, kAqing, "card.first_seen"), firstSeen);
+
+    // 老余删自己的对话（他的会话行 id 可能比阿青那一轮小）：她在阿青那一轮里给他记的不撤
+    harness.store.deactivateBySourceFrom(kLaoyu, 50);
+    ++harness.generation;
+    EXPECT_EQ(harness.cards.load(kLaoyu).notes[0], "爱接梗");
 }
 
 TEST(PersonCardTest, GroupLineMarksTheDeployerByManagerId)

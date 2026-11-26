@@ -14,10 +14,12 @@
 
 #include <sqlite3.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -338,6 +340,72 @@ TEST(KnowledgeGuardTest, EvidenceCheckerLooksUpDecisionsAndFeedback)
     EXPECT_FALSE(exists("decision:dec_nope"));
     EXPECT_FALSE(exists("feedback:fbk_nope"));
     EXPECT_FALSE(exists(decisionId));
+}
+
+// 锁序（技术设计 §20.2，卷22 §4）：依据核对器会读决策库（取 DecisionStore.mutex），apply 必须在取账本锁、
+// 开写事务之前调用它——否则账本锁 → 决策库锁、库文件写锁 → 决策库锁，与写决策的线程（先持决策库锁、
+// 再要库文件写锁）顺序相反。假核对器在被调用时探测：账本锁是否被占着（另一线程取同一把锁）、库文件的
+// 写锁是否被占着（另一连接不等待地 BEGIN IMMEDIATE）；校验结果与原来一样
+TEST(KnowledgeLedgerTest, EvidenceCheckerRunsOutsideTheLedgerLockAndWriteTransaction)
+{
+    LedgerHarness harness;
+    const std::string path = harness.directory.path() + "/affect.db";
+    std::vector<std::future<bool>> lockProbes; // apply 返回之后才析构：旧代码下探测线程要等锁放开
+    int calls = 0;
+    int ledgerLockHeld = 0;
+    int writeLockHeld = 0;
+    affect::KnowledgeRunContext context = harness.reflection();
+    context.evidenceExists = [&](const std::string &id)
+    {
+        ++calls;
+        lockProbes.push_back(std::async(std::launch::async, [&harness] { return harness.ledger.isOpen(); }));
+        if (lockProbes.back().wait_for(std::chrono::milliseconds(300)) != std::future_status::ready)
+            ++ledgerLockHeld;
+        sqlite3 *probe = nullptr;
+        if (sqlite3_open(path.c_str(), &probe) == SQLITE_OK)
+        {
+            sqlite3_busy_timeout(probe, 0);
+            if (sqlite3_exec(probe, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr) == SQLITE_OK)
+                sqlite3_exec(probe, "ROLLBACK;", nullptr, nullptr, nullptr);
+            else
+                ++writeLockHeld;
+        }
+        sqlite3_close(probe);
+        return id != "decision:missing";
+    };
+
+    std::vector<affect::KnowledgeChange> changes;
+    changes.push_back(change("add", "habit", "ok", "有人抱怨工作时我不急着给建议", kGroup));
+    affect::KnowledgeChange missing = change("add", "habit", "missing", "一句", kGroup);
+    missing.evidence = {"decision:missing"};
+    changes.push_back(missing);
+    const affect::KnowledgeRunResult result = harness.ledger.apply(changes, context);
+    for (std::future<bool> &probe : lockProbes)
+        EXPECT_TRUE(probe.get());
+
+    EXPECT_EQ(calls, 2);
+    EXPECT_EQ(ledgerLockHeld, 0) << "核对依据时账本锁不该被占着";
+    EXPECT_EQ(writeLockHeld, 0) << "核对依据时不该开着写事务";
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(result.written.size(), 1U);
+    ASSERT_EQ(result.rejected.size(), 1U);
+    EXPECT_EQ(result.rejected[0].index, 1U);
+    EXPECT_EQ(result.rejected[0].reason, "依据不存在");
+
+    // 超过 8 条的部分不做校验（与原来一样直接按“每次至多 8 条”丢弃），核对器也不为它们调用
+    calls = 0;
+    std::vector<affect::KnowledgeChange> many;
+    for (int index = 0; index < 9; ++index)
+        many.push_back(change("add", "habit", "k" + std::to_string(index), "第 " + std::to_string(index) + " 条", kGroup));
+    const affect::KnowledgeRunResult capped = harness.ledger.apply(many, context);
+    for (std::future<bool> &probe : lockProbes)
+        if (probe.valid())
+            probe.get();
+    EXPECT_EQ(calls, 8);
+    EXPECT_EQ(ledgerLockHeld, 0);
+    EXPECT_EQ(writeLockHeld, 0);
+    ASSERT_EQ(capped.rejected.size(), 1U);
+    EXPECT_EQ(capped.rejected[0].reason, "每次至多 8 条改动");
 }
 
 // ---------- 教导不可被回想改写 ----------

@@ -457,9 +457,10 @@ int main(int argc, char **argv)
 		userSession.ensureUserExists(settings.bot.managerId);
 	// 语音合成先于注册表构造、后于它析构：send_voice 工具持它的引用
 	Voice voice(liveSettings.voice, &running);
-	// 认识账本（经历层 E2，ADR-028）：与决策库同一个文件、独立连接，延迟打开——第一次在 affect.enabled
-	// 为真时调用账本工具才打开建表。三个工具只在管理员私聊里开放、affect 关着时不出现；记不记由她判断。
-	// E2 里账本只经这三个工具读写，不进判定器与表达请求（取用是 E4）。先于注册表构造、后于它析构
+	// 认识账本（经历层 E2，ADR-028）：与决策库同一个文件、独立连接，延迟打开——affect.enabled 为真时，
+	// 第一次用到它的地方（账本工具、群聊取用、回想）才打开建表。三个账本工具只在管理员私聊里开放、affect
+	// 关着时不出现，记不记由她判断；取用（ADR-029）把认识读进判定器与表达请求，回想（ADR-030）经 apply
+	// 写入。先于注册表构造、后于它析构
 	affect::KnowledgeLedger knowledgeLedger(dbPath);
 	RememberGuidanceAction rememberGuidanceAction(knowledgeLedger, liveSettings.affect);
 	ReviewGuidanceAction reviewGuidanceAction(knowledgeLedger, liveSettings.affect);

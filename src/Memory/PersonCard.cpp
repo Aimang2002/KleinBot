@@ -173,13 +173,14 @@ PersonCard PersonCards::load(std::uint64_t userId)
     return card;
 }
 
-PersonCard PersonCards::ensure(std::uint64_t userId, std::time_t now, std::int64_t sourceId)
+PersonCard PersonCards::ensure(std::uint64_t userId, std::time_t now)
 {
     PersonCard card = load(userId);
     if (userId == 0 || !enabled() || !card.firstSeen.empty())
         return card;
     const std::string date = dateOf(now);
-    if (backend.set(userId, kFirstSeen, date, "初次记下这个人的日期：" + date, sourceId))
+    // 来源号 0：建卡日期是程序给出的事实，不属于哪一轮对话，#删除上条对话 不撤它
+    if (backend.set(userId, kFirstSeen, date, "初次记下这个人的日期：" + date, 0))
     {
         std::lock_guard<std::mutex> lock(mutex);
         cache.erase(userId);
@@ -283,11 +284,11 @@ PersonCards::WriteResult PersonCards::write(std::uint64_t userId, const std::str
 }
 
 std::string PersonCards::privateSection(std::uint64_t userId, const std::string &nickname,
-                                        std::time_t now, std::int64_t sourceId)
+                                        std::time_t now)
 {
     if (userId == 0 || !enabled())
         return {};
-    return renderPrivateCard(ensure(userId, now, sourceId), userId, isDeployer(userId), nickname);
+    return renderPrivateCard(ensure(userId, now), userId, isDeployer(userId), nickname);
 }
 
 std::string PersonCards::groupLines(const std::vector<PersonPresent> &people)

@@ -19,6 +19,14 @@
  * subject_key='user:self'、谓词用保留前缀 card.（card.wanted_name、card.note1 …），历史与按来源回滚
  * 沿用事实表的；按人清除记忆时卡片一起清掉。批量提取不许写这个前缀（isPersonCardPredicate）。
  *
+ * 来源号与回滚（#删除上条对话 按会话行 id 回滚，条件是来源号 ≥ 被删的第一行）：
+ *   - 程序给出的事实不随对话回滚：建卡日期的来源号固定为 0（不属于任何一轮对话），QQ 号、昵称、
+ *     是不是部署者不存库；
+ *   - 她自己记下的槽位，来源号是写它的那一轮对话的会话行 id——只在写的是这一轮说话人自己的卡时
+ *    （写卡工具的 user 不填或填的就是说话人）；这样删掉那一轮，她在那一轮里记下的也一起撤回，与长期
+ *     记忆“删掉一轮，从它整理出的事实一起撤”一致。写别人的卡时来源号为 0：那一轮不在这个人的会话里，
+ *     这个人删自己的对话不该撤掉它（会话行 id 全局递增，按说话人的行 id 记会被别人的回滚误撤）。
+ *
  * 怎么加载：
  *   - 私聊：稳定文本，接在人格之后进 system（privateSection）；卡片改了才变一次；
  *   - 群聊：在场的人各一行（groupLines），放在本轮 user 侧尾部、与她的认识挨着；只写有内容的人
@@ -110,16 +118,16 @@ public:
 
     // 读卡（带缓存）；未启用返回空卡
     PersonCard load(std::uint64_t userId);
-    // 当场建卡：还没有“初次记下”就由程序写上今天；返回卡
-    PersonCard ensure(std::uint64_t userId, std::time_t now, std::int64_t sourceId = 0);
+    // 当场建卡：还没有“初次记下”就由程序写上今天（来源号 0：程序给出的事实，不随对话回滚）；返回卡
+    PersonCard ensure(std::uint64_t userId, std::time_t now);
     // 她写一个槽位：slot = wanted_name / my_name / name_for_me / note；note 用 index（1–5）指明哪一条，
-    // 0 = 放进第一个空位；value 去首尾空白后为空 = 清掉
+    // 0 = 放进第一个空位；value 去首尾空白后为空 = 清掉。sourceId 是写它的那一轮对话的会话行 id
+    //（0 = 不随对话回滚；怎么取见文件头）
     WriteResult write(std::uint64_t userId, const std::string &slot, const std::string &value,
                       int index, std::int64_t sourceId = 0);
 
     // 私聊：建卡并渲染成 system 段；未启用或 userId 为 0 返回空串
-    std::string privateSection(std::uint64_t userId, const std::string &nickname, std::time_t now,
-                               std::int64_t sourceId = 0);
+    std::string privateSection(std::uint64_t userId, const std::string &nickname, std::time_t now);
     // 群聊：在场的人各一行（不含标题），只写有内容的人，至多 kMaxPeopleInGroup 行；未启用返回空串
     std::string groupLines(const std::vector<PersonPresent> &people);
     // 加上标题行："[在场的人]（…）\n" + lines；lines 为空返回空串
