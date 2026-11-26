@@ -61,6 +61,8 @@ Windows（MinGW-w64）与发布构建的命令见 `AGENTS.md`。自动化测试�
 
 **文档跟着代码走。** 改动影响了 `docs/technical-design.md` 或 `docs/tech-max/` 某一卷描述的事实，在同一个 PR 里更新，过时的句子直接改写，不要只在末尾追加。
 
+**对外可见的变化记进更新日志。** 新功能、行为变化、配置键或命令的增删、修复，在 [CHANGELOG.md](CHANGELOG.md) 的“未发布”一节加一行，用使用者看得懂的话写。内部重构不用写。
+
 ## 提交信息
 
 格式是 `类型: 简短的中文描述`，类型用 `feat`、`fix`、`refactor`、`test`、`docs`、`chore`。
