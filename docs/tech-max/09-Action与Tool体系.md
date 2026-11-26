@@ -16,7 +16,7 @@ flowchart TB
         DT[直接 Tool<br/>GetTime/图片三件套/召回]
     end
     subgraph 业务层
-        A1[Action<br/>get_current_model / voice / admin / search / fetch / 提醒×3]
+        A1[Action<br/>get_current_model / admin / search / fetch / 提醒×3 / 账本×3 / reflect_now / update_person_card]
     end
     CMD --> C1 --> A1
     LLM --> AT --> A1
@@ -71,9 +71,9 @@ inline bool terminatesToolRound(r) { return r.terminal || !r.outbound_messages.e
 
 `ToolContext{user_id, user_message_id, user_text}`：调用期数据走参数而非构造注入——工具实例是全用户共享的。
 
-**适用场合（ADR-024，2026-11-16）**：`ToolContext.h` 定义 `enum class ToolVenue { Private, Group }` 与 `venueOf(shared_scope_id)`（非 0 即群聊，与 ADR-019 同一判据）；`Tool` 新增虚函数 `offeredIn(ToolVenue)`（默认真，与 `available()` 正交：`available` 看配置开关，场合看这次对话发生在哪），`ToolRegistry::namesIn(venue)` 给出当前可用且适用于该场合的名字。`ChatService::reply` 按 `venueOf(sharedScopeId)` 取工具表，`ChatService::toolNames()` 改为 `toolNamesIn(ToolVenue)`。目前只有 `leave_topic` 覆写为只在群聊开放；私聊的工具表、使用规则与此前逐字相同。
+**适用场合（ADR-024，2026-11-16）**：`ToolContext.h` 定义 `enum class ToolVenue` 与 `venueOf`（`shared_scope_id` 非 0 即群聊，与 ADR-019 同一判据）；`Tool` 新增虚函数 `offeredIn(ToolVenue)`（默认真，与 `available()` 正交：`available` 看配置开关，场合看这次对话发生在哪），`ToolRegistry::namesIn(venue)` 给出当前可用且适用于该场合的名字。`ChatService::reply` 按 `venueOf(sharedScopeId, user_id, managerId)` 取工具表，`ChatService::toolNames()` 改为 `toolNamesIn(ToolVenue)`。`leave_topic` 覆写为只在群聊开放。经历层 E2（ADR-028）起场合有三种：`ToolVenue { Private, Group, ManagerPrivate }`，群聊之外、对方是 `bot.manager_id` 时 `venueOf` 给 `ManagerPrivate`；`Action` 新增虚函数 `managerPrivateOnly()`（默认假），`ActionTool::offeredIn` 对它为真的 Action 只在 `ManagerPrivate` 开放（认识账本三工具与 `reflect_now`，§6.15、§6.16）。
 
-**工具自带使用规则（ADR-022，2026-10-31）**：`Tool::usageGuidance(GuidanceScene, const GuidanceContext&) const` 默认返回空串；`GuidanceScene{Conversation, GroupTurn}` 与 `GuidanceContext{localDate}` 定义在 `src/Port/UsageGuidance.h`（Tool 与 Action 两层共用）。每个工具给出自己在两种场景下"何时该用我"的文本：图片三工具共用 `src/Tool/ImageToolGuidance.h` 的同一段（组装时去重）；联网两工具的文本在 `src/Action/WebToolGuidance.h`（对话场景的搜索规则带运行时本地日期锚点）；`set_reminder` 承载提醒三工具的规则；`recall_conversation`、`get_current_model`、`set_voice_mode`、`admin_control` 各一句（对话场景）；`get_time` 无规则。`src/Application/ToolGuidance` 的 `composeToolGuidance(registry, offeredNames, scene, context)` 按固定顺序拼接（只取既开放又已注册的工具；相同文本只出一次；布局外的新工具按开放顺序接在最后），ChatService（Conversation）与EngagementService（GroupTurn）共用，不再按工具名 if。新工具只需实现 `usageGuidance`。
+**工具自带使用规则（ADR-022，2026-10-31）**：`Tool::usageGuidance(GuidanceScene, const GuidanceContext&) const` 默认返回空串；`GuidanceScene{Conversation, GroupTurn}` 与 `GuidanceContext{localDate}` 定义在 `src/Port/UsageGuidance.h`（Tool 与 Action 两层共用）。每个工具给出自己在两种场景下"何时该用我"的文本：图片三工具共用 `src/Tool/ImageToolGuidance.h` 的同一段（组装时去重）；联网两工具的文本在 `src/Action/WebToolGuidance.h`（对话场景的搜索规则带运行时本地日期锚点）；`set_reminder` 承载提醒三工具的规则；`recall_conversation`、`get_current_model`、`admin_control`、`leave_topic` 各一句（对话场景；`leave_topic` 只在群里被 @ 时开放，§6.14），`send_voice` 两个场景各一句（§6.3）；账本三工具、`reflect_now`、`update_person_card` 没有使用规则，描述只讲机制；`get_time` 无规则。`src/Application/ToolGuidance` 的 `composeToolGuidance(registry, offeredNames, scene, context)` 按固定顺序拼接（只取既开放又已注册的工具；相同文本只出一次；布局外的新工具按开放顺序接在最后），ChatService（Conversation）与EngagementService（GroupTurn）共用，不再按工具名 if。新工具只需实现 `usageGuidance`。
 
 ## 4. ActionTool 适配器（ActionTool.h，全文 40 行）
 
@@ -110,6 +110,8 @@ ToolResult ActionTool::execute(args, ctx) {
 `parseToolArguments(args).dump()`；**解析失败时原样返回**——保证回灌给网关的内容"不会比收到的更差"（Anthropic 转换器对无法解析的 tool_use 参数亦有"退回空对象"的兜底，构成双重保险机制，见[卷11 §5](11-模型调用层.md#5-openaistandard-逐函数openaistandardcpp)）。
 
 ## 6. 全部 14 个模型工具详解
+
+> 本节标题里的个数是数到 6.14 为止的；6.15–6.17 是经历层加的工具（ADR-028、ADR-030、ADR-032）。
 
 ### 6.1 GetTimeTool `get_time`
 
@@ -198,6 +200,29 @@ ToolResult{
 
 `src/Tool/LeaveTopicTool.h`（仅头文件，原生 Tool）。与话题会话轮的离场动词同名同义，两条群发言路径共用同一个离场动作：参数 `reason`（只进日志）、`step_back`（布尔，被请走时为 true，之后一段时间不主动接话，被 @ 仍会回答）。只在群聊开放（`offeredIn`）；组合根在 `EngagementService` 构造后 `bind` 到 `EngagementService::leaveTopic`，未接线时不可用（`available`）。非终止：结果回灌后她照常写回复（或按群聊收敛契约不回应）。私聊里被调（模型臆造）只回灌“这里是私聊……”，不动任何群。使用规则只在 Conversation 场景给出（群里被 @ 时），排在布局之外、接在最后。起因：2026-11-16 她在 @ 回复里答应“好，我退开了”，话题会话那边不知道，10 秒后照常接话（卷23 §4.4）。
 
+### 6.15 认识账本三工具 `remember_guidance` / `review_guidance` / `forget_guidance`（经历层 E2，ADR-028）
+
+`src/Action/KnowledgeAction.h/.cpp`：基类 `KnowledgeAction` + 三个子类，账本见[卷13](13-持久化层.md)文末的认识账本附录。原来的五个账本命令已移除，改为这三个工具（[卷08 §2.13.1](08-命令体系.md#2131-knowledgecommand教她--查看认识--撤回认识--回滚认识--清除认识管理员经历层-e2adr-028)）。
+
+- 开放：`managerPrivateOnly()` 为真，只在管理员私聊（`ToolVenue::ManagerPrivate`）出现；`requires_admin` 也为真，工具循环再按调用者核对一道；`affect.enabled` 当前为假时 `available()` 为假，工具表里没有它们、账本不打开。没有使用规则。
+- 每次调用先打开账本（幂等），再跑一次 `applyDecay()`（`forget_guidance` 给 `scope` 时不跑：要删的东西不必先记成淡了）。
+- `remember_guidance {text, scope?, replaces?}`：用她自己的话记一句（`origin=teaching`，经账本的代码校验）；`scope` 为 `global`（默认）/ `group:<群号>` / `user:<QQ号>`；`replaces` 填编号即改写那一条，同一句再记一次算再确认。记下的算教导：不衰减、回想改不了、只有部署者能让她忘掉。
+- `review_guidance {scope?, id?}`：不给参数列出全部范围的条目（至多 30 条，`kMaxListedEntries`），给 `scope` 只看那个范围，给 `id` 看那一条和它最近的变化（至多 10 行，`kMaxHistoryRows`）；每条有编号、范围、原文、强度、来源、最后确认时间。
+- `forget_guidance {id | scope}`：给 `id` 撤回那一条，变化记录保留；给 `scope`（`group:<群号>` 或 `user:<QQ号>`）把那个群或那个人的全部条目连同变化记录删掉（`forgetGroup` / `forgetPerson`），不可恢复。两者只给一个。
+- 回滚（`rollbackTo` / `rollbackBefore`）不对外。回复是给模型看的短文本（`terminal=false`），由她用自己的话说；日志里没有认识正文。
+
+### 6.16 ReflectAction `reflect_now`（经历层 E3，ADR-030）
+
+`src/Action/ReflectAction.h/.cpp`。参数 `{group?}`：群号；不填或 0 = 所有有待回想经历的群。开放规则与账本三工具相同（`managerPrivateOnly`、`requires_admin`、`affect.enabled` 当前为真）；另要求回想服务已由组合根 `bind`（它构造得比工具表晚），未 bind 时不可用。执行只调 `ReflectionService::requestNow` 把群排进回想队列，回想在后台线程上跑（[卷23 附：回想](23-观察通道与话题会话.md#附回想经历层-e3adr-030)），手动回想不受自动回想的间隔、当日次数与退避限制，但它同样记下 `last_run`，会推迟下一次自动回想；回复：安排上时“安排了 N 个群的回想，在后台进行。”；一个也没安排上时，指定了群号回“这个群眼下没有待回想的经历（她最近没在那说过话，或说完还不到 20 分钟）。”，没指定回“眼下没有待回想的经历。”。`terminal=false`，回复由她自己说；结果之后用 `review_guidance` 翻看。边界：同一个群已在队列里或正在回想时（已排队集合在 `runNow` 跑完后才清），再请求不会重复入队（还在队列里的自动任务会升级为手动），计为 0 个，工具照样回“没有待回想的经历”——这时这句话是误导，实际是已经在排或正在想。没有使用规则。
+
+### 6.17 UpdatePersonCardAction `update_person_card`（ADR-032）
+
+`src/Action/PersonCardAction.h/.cpp`，名字常量 `KleinUpdatePersonCardToolName`。参数 `{slot, value, user?, index?}`，`slot`、`value` 必填：`slot` ∈ `wanted_name` / `my_name` / `name_for_me` / `note`；`value` 一行，留空 = 清掉；`user` 是那个人的 QQ 号，不填就是正在跟她说话的人（私聊对象 / @ 她的人；话题会话轮里没有这个人，必须填）；`index` 只对 note 有意义（1–5，不填就放进空位）。QQ 号、昵称、是不是部署者、建卡日期由程序给出，不在可写范围里——没有人能靠说一句话变成部署者。
+
+- 开放：私聊与群聊都开放、不要求管理员（`requires_admin=false`）；组合根也把它放进话题会话轮的注册表工具名单。`available()` = `PersonCards::enabled()`（记忆库可用且 `memory.enabled` 为真）。
+- 执行：`PersonCards::write` 当场写库并清掉这个人的缓存，下一次请求里的卡片就是新的；成功回“改好了，卡片现在是——<这个人在群聊里的那一行>”，失败回“没改：<原因>。”；`terminal=false`。护栏与上限见[卷14 附](14-长期记忆系统.md#附人物卡确定性加载的对方卡片adr-032)。
+- 没有使用规则：记不记、怎么叫由她定，描述只讲机制。
+
 ## 7. 工具 Schema 汇总表（发给模型的能力清单）
 
 | 工具名 | 参数要点 | terminal 默认 | 权限 |
@@ -216,6 +241,11 @@ ToolResult{
 | list_reminders | 无 | false | 所有人 |
 | cancel_reminder | id | false | 所有人 |
 | leave_topic | reason + step_back:bool | false | 所有人；只在群聊开放（ADR-024） |
+| remember_guidance | text + scope + replaces | false | 仅管理员；只在管理员私聊开放、affect 开着时（ADR-028） |
+| review_guidance | scope / id | false | 同上 |
+| forget_guidance | id / scope | false | 同上 |
+| reflect_now | group | false | 同上（ADR-030）；回想服务已接线 |
+| update_person_card | slot + value + user + index | false | 所有人；长期记忆开着时开放，会话轮也开放（ADR-032） |
 
 ## 附：ToolContext.shared_scope_id（ADR-019，2026-10-28）
 
@@ -233,6 +263,9 @@ ToolResult{
 | `src/Action/SetReminderAction.*` / `ListRemindersAction.*` / `CancelReminderAction.*` | 提醒三件套 |
 | `src/Tool/Tool.h` / `ToolRegistry.h` / `ToolContext.h` | 工具接口（含 usageGuidance、`offeredIn`）与注册表（含 `namesIn`）；`ToolVenue` |
 | `src/Tool/LeaveTopicTool.h` | `leave_topic`：@ 回复路径的离场（只在群聊开放，ADR-024） |
+| `src/Action/KnowledgeAction.h/.cpp` | 认识账本三工具（ADR-028） |
+| `src/Action/ReflectAction.h/.cpp` | `reflect_now`：手动回想（ADR-030） |
+| `src/Action/PersonCardAction.h/.cpp` | `update_person_card`：写人物卡（ADR-032） |
 | `src/Port/UsageGuidance.h` | GuidanceScene / GuidanceContext |
 | `src/Tool/ImageToolGuidance.h` / `src/Action/WebToolGuidance.h` | 图片三工具、联网两工具的共用规则文本 |
 | `src/Application/ToolGuidance.h/.cpp` | composeToolGuidance（固定顺序组装） |

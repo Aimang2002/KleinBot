@@ -99,6 +99,8 @@ QQ / OneBot 协议端
 - `ConversationStore`：对话原始历史的 SQLite 写穿、读取和关键词检索；
 - `ImageAssetStore`：用户图片和生图结果的本地文件、SQLite 元数据、资源引用和生命周期清理；
 - `MemoryService`：长期记忆异步批处理、模型提取、更新、失效和召回；
+- `PersonCards`：人物卡的读写、缓存与渲染，卡片存在长期记忆的结构化事实表里（ADR-032，§11.8）；
+- `KnowledgeLedger` / `ReflectionService`：认识账本（ADR-028）与回想（ADR-030）——账本存她从经历里整理出的认识，取用每轮把其中相关的几条带进群聊判定与表达（ADR-029），回想定时让她把最近的决策连同之后的现场想一遍，读法记成反馈、认识的增改写回账本；回想服务自有一条工作线程（§4.2、§10.8）；
 - `ReminderStore` / `ReminderService`：提醒的 SQLite 持久化与内存到期队列调度；
 - `Log`：错误、警告和重要信息的异步文件日志；
 - `ModelRegistry`：从 `ModelsName.json` 注册模型名称到供应商配置的映射。
@@ -114,7 +116,7 @@ QQ / OneBot 协议端
 5. `UserSessionService` 持有用户内存状态、对话存储和图片资源存储引用；
 6. `Dock` 注册 `OpenAIStandard` 与 `AnthropicStandard`；
 7. `MemoryService` 复用同一数据库路径，启动长期记忆线程；
-8. `ToolRegistry` 注册时间、对话召回、图片工具、联网搜索与网页抓取（2026-11-15 L2.a 起始终注册，是否对模型开放看各自活值里的 `enabled`，ADR-023）和提醒工具（`set_reminder` / `list_reminders` / `cancel_reminder`，核心功能无条件注册），以及群聊离场 `leave_topic`（2026-11-16 起，只在群聊开放，跟进服务构造后接线，ADR-024）与用语音说 `send_voice`（2026-11-16 起取代 `set_voice_mode`，总开关开且语音服务可达时开放，ADR-025）；
+8. `ToolRegistry` 注册时间、对话召回、图片工具、联网搜索与网页抓取（2026-11-15 L2.a 起始终注册，是否对模型开放看各自活值里的 `enabled`，ADR-023）和提醒工具（`set_reminder` / `list_reminders` / `cancel_reminder`，核心功能无条件注册），以及群聊离场 `leave_topic`（2026-11-16 起，只在群聊开放，跟进服务构造后接线，ADR-024）与用语音说 `send_voice`（2026-11-16 起取代 `set_voice_mode`，总开关开且语音服务可达时开放，ADR-025），以及只在管理员私聊里开放的认识账本三工具（`remember_guidance` / `review_guidance` / `forget_guidance`，ADR-028）与手动回想 `reflect_now`（ADR-030，回想服务构造后 `bind`）、写人物卡的 `update_person_card`（ADR-032，长期记忆开着时开放）；
 9. `ChatService` 编排模型调用、工具循环和上下文落盘；
 10. 组合根创建 `CommandRegistry`、`Voice`、消息队列、sender 和 OneBot codec，并集中注册命令；
 11. `Message` 只持有已装配依赖并负责意图路由；
@@ -220,6 +222,7 @@ flowchart TD
     POOL[KeyedTaskScheduler]
     MEMORY[MemoryService线程]
     GLANCE[GlanceService线程]
+    REFLECT[ReflectionService线程]
     TIMER[pollingThread]
     FORWARD[服务器模式WebSocket线程]
     REVERSE[客户端模式WebSocket线程]
@@ -228,6 +231,7 @@ flowchart TD
     MAIN --> POOL
     MAIN --> MEMORY
     MAIN --> GLANCE
+    MAIN --> REFLECT
     MAIN --> TIMER
     MAIN --> FORWARD
     MAIN --> REVERSE
@@ -235,7 +239,8 @@ flowchart TD
     MAIN -.停止顺序.-> POOL
     POOL -.完成后.-> GLANCE
     GLANCE -.完成后.-> MEMORY
-    MEMORY -.完成后.-> TIMER
+    MEMORY -.完成后.-> REFLECT
+    REFLECT -.完成后.-> TIMER
     TIMER -.完成后.-> FORWARD
     FORWARD -.完成后.-> REVERSE
     REVERSE -.完成后.-> LOG
@@ -391,13 +396,16 @@ flowchart TB
 
 | 对象 | 当前所有者 | 使用方式 | 生命周期要求 |
 | --- | --- | --- | --- |
-| `LiveSettings`（活值集合，ADR-023） | `main` 栈对象，声明在所有服务之前 | 只有 `ConfigReloader` 经规则表的应用函数替换成员快照（唯一例外：语音总开关 `globalVoice` 还由 `AdminControlAction` 改，后写者生效）；使用方只拿单个成员的 `const Live<T> &`：L1.a–L1.f 起 `UserSessionService`、`ChatService`、三个专用端点来源、`Voice`、`VoiceModeAction`、`MemoryService`、`Dock` 的两个适配器、`TavilySearchProvider`、`WebSearchAction`、`WebFetchAction`、`GlanceService`、`EngagementService`、`Message`，L2.a–L2.d 起另有 `GroupContextService`（机器人名字）、`DecisionRecorder`、策略外壳 `SwitchingPolicy`、judge 的调用目标解析与组合根里的网页摘录、长度粗检、瞥视视觉就绪判断 | 必须晚于所有使用者析构 |
+| `LiveSettings`（活值集合，ADR-023） | `main` 栈对象，声明在所有服务之前 | 只有 `ConfigReloader` 经规则表的应用函数替换成员快照（唯一例外：语音总开关 `globalVoice` 还由 `AdminControlAction` 改，后写者生效）；使用方只拿单个成员的 `const Live<T> &`：L1.a–L1.f 起 `UserSessionService`、`ChatService`、三个专用端点来源、`Voice`、`SendVoiceTool`（只读语音总开关；原 `VoiceModeAction` 已于 2026-11-16 删除，ADR-025）、`MemoryService`、`Dock` 的两个适配器、`TavilySearchProvider`、`WebSearchAction`、`WebFetchAction`、`GlanceService`、`EngagementService`、`Message`，L2.a–L2.d 起另有 `GroupContextService`（机器人名字）、`DecisionRecorder`、策略外壳 `SwitchingPolicy`、judge 的调用目标解析与组合根里的网页摘录、长度粗检、瞥视视觉就绪判断 | 必须晚于所有使用者析构 |
 | `ConfigReloader`（唯一的重载入口，ADR-023） | `main` 栈对象，紧随 `LiveSettings` | `AdminControlAction` 的刷新回调、面板线程持引用 | 面板线程与消息任务退出前不可析构 |
 | `ModelRegistry` | `main` 栈对象 | 多处持引用 | 必须晚于所有引用者析构 |
 | `ConversationStore` | `main` 栈对象 | USS 和记忆服务持引用 | 必须早于 USS 创建、晚于 USS 析构 |
 | `UserSessionService` | `main` 栈对象 | ChatService、Message、Command 持引用 | 消息任务退出前不可析构 |
 | `Dock` | `main` 栈对象 | ChatService、Message、MemoryExtractor 持引用 | 模型调用和记忆线程退出前不可析构 |
 | `MemoryService` | `main` 栈对象 | ChatService、USS、Recall tool 使用 | 消息线程完成后再 shutdown |
+| `PersonCards`（人物卡，ADR-032） | `main` 栈对象，紧随 `MemoryService` | `Message`、`EngagementService` 持指针，`UpdatePersonCardAction` 持引用 | 先于工具注册表构造、后于它析构 |
+| `KnowledgeLedger`（认识账本，ADR-028） | `main` 栈对象，先于工具注册表构造 | 账本三工具与 `ReflectionService` 持引用，`Message`、`EngagementService` 持指针（取用） | 晚于所有使用者析构 |
+| `ReflectionService`（回想，ADR-030） | `main` 栈对象，构造在决策库、记录器、账本、群内容库之后 | `pollingThread` 调 `pump`，`ReflectAction` 经 `bind` 持指针 | 先于它依赖的对象析构；线程在 `resourceCleanup` 里先于 `pollingThread` 收（§4.3） |
 | `ToolRegistry` | `main` 栈对象 | ChatService 持只读引用 | ChatService 存活期间不可析构 |
 | `Action` 实例 | `main` 栈对象 | Command 与 ActionTool 持引用 | Command、Tool 和 Message 析构前不可析构 |
 | `CommandRegistry` | `main` 栈对象 | Message 持引用 | Message 析构前不可析构 |
@@ -525,6 +533,7 @@ ADR-018、ADR-021 两个编号预留给尚未实施的规划，没有正文。
 | 推送门线程 | **2026-10-25 起运行时搁置**：`main.cpp` 组合根接线以 `#if 0` 停用，不创建该线程；恢复后仅在 `push.enabled` 时运行嵌入式 HTTP 服务器（cpp-httplib），接收外部投递并经 `PushDelivery` 接缝润色投递（`src/Push/` 模块与测试保留） | 当前无该线程；恢复后看门狗观察到 `running=false` 后调用 `Server::stop()` 使 `listen()` 返回，主清理流程 join |
 | 群聊瞥视线程（R1.1） | 观察通道启动时开着（群内容库已建）且组合根设置了视觉 seam 时由 `GlanceService::start()` 启动（2026-11-15 L2.b 起与 `glance.enabled` 无关，视觉 seam 无条件设置；`glance.enabled` 与视觉就绪在每张图入队时判断）：消费观察路径入队的群图片，按每群每分钟预算与字节去重调用视觉模型，把一行描述写回群缓冲占位符 | `GlanceService::shutdown()`：丢弃 pending（不写标记），进行中的视觉 HTTP 随 `running=false` 取消，返回后不写回 |
 | 长期记忆线程 | 记忆库可用即启动（2026-11-15 L2.b 起与 `memory.enabled` 无关，开关在入队与召回处读，关掉后已入队的批次照常提取完）；选择已达到批量或空闲阈值的用户批次并提取记忆 | `MemoryService::shutdown()` |
+| 回想线程（经历层 E3，ADR-030） | 组合根在启动 `pollingThread` 之前调 `ReflectionService::start()`，始终存在（`affect.enabled` 在每次到期判断与回想开头读）：从按群去重的队列里一次取一个群，装配材料、调用模型、写反馈与账本；`pollingThread` 只做节流后的到期判断与入队 | `ReflectionService::shutdown()`：丢弃队列、置停止标志并 join；进行中的模型调用随 `running=false` 取消，这次回想不写反馈与认识 |
 | 日志线程 | 消费日志队列、写文件 | `Log::shutdown()` |
 
 ### 4.3 退出顺序
@@ -535,13 +544,16 @@ ADR-018、ADR-021 两个编号预留给尚未实施的规划，没有正文。
 2. 关闭消息执行器并等待已提交任务完成；
 3. 关闭群聊瞥视服务（R1.1），丢弃尚未处理的瞥视任务（不写"未看"标记）并等待 worker；
 4. 关闭长期记忆服务，丢弃尚未处理的 pending batch 并等待 worker；
-5. 等待定时任务线程；
-6. 等待唯一活动通信线程；
-7. 等待配置面板线程（仅 `webui.enabled` 时存在）；
-8. 等待推送门线程（2026-10-25 起运行时搁置，组合根未启动，此步实际为空；恢复后仅 `push.enabled` 时存在）；
-9. 调用日志单例的 `shutdown()`，刷新并关闭日志线程。
+5. 关闭回想服务（ADR-030），丢弃排队的群并等待回想线程；
+6. 等待定时任务线程；
+7. 等待唯一活动通信线程；
+8. 等待配置面板线程（仅 `webui.enabled` 时存在）；
+9. 等待推送门线程（2026-10-25 起运行时搁置，组合根未启动，此步实际为空；恢复后仅 `push.enabled` 时存在）；
+10. 调用日志单例的 `shutdown()`，刷新并关闭日志线程。
 
 消息执行器必须先于长期记忆服务与群聊瞥视服务退出，因为活动聊天任务可能在完成回复后调用 `MemoryService::enqueueTurn()`，观察路径会调用 `GlanceService::enqueue()`。`Dock` 内的 OpenAI、Anthropic 适配器和 `Voice` 都观察同一个进程 `running` 状态；外部请求使用 300 秒连接超时、300 秒单次请求超时和 libcurl progress callback，收到停止信号后主动返回 `CURLE_ABORTED_BY_CALLBACK`。取消状态会继续传递到模型响应、图像工具和 ChatService，停止路径不会解析空响应或继续工具调用。SQLite 对象由栈对象析构顺序最终释放，日志在所有主要线程完成后再关闭。
+
+回想服务在定时任务线程之前收：它的 `pump` 由 `pollingThread` 调用，`shutdown` 之后的 `pump` 是空操作。进行中的回想模型调用同样随 `running=false` 取消，返回空后按“模型没返回”处理：不写反馈与认识，游标不动，只在进度里记下退避截止。
 
 第一次收到 `SIGINT` 或 `SIGTERM` 时执行上述正常清理。若清理完成前再次收到退出信号，signal handler 直接调用 `std::_Exit(128 + signal)` 强制终止进程，不再等待 Worker、外部请求、SQLite 析构或日志刷新。该路径只用于用户明确连续中断的场景，允许牺牲未完成写入以保证进程立即结束。
 
@@ -769,6 +781,8 @@ notice/request 事件不再进入 `Message::classify`：`workingThread` 按 `pos
 
 群聊 @ 回复在当条消息的 `affect.enabled` 快照为真时带事实卡（ADR-026，经历层 E0）：部署者事实段随 `situationNote` 接在群聊收敛契约之后进 system，现场事实（日期、星期、时刻）并入 `tailNote`，经 `appendContextNote` 以“[系统注]”尾插到本轮最后一条 user 消息（已有连发注记时用换行接在后面）。`affect.enabled` 为假、或组合根没有接部署者事实时，请求与此前逐字相同；私聊不加。
 
+群聊 @ 回复另带两段，都并入同一个 `tailNote`、接在现场事实之后（本轮 user 侧，不进 system）：先是人物卡的“在场的人”（`memory.enabled` 为真且记忆库可用时；@ 她的人当场建卡，ADR-032，§11.8），再是“她的认识”（取用，当条消息的 `affect.enabled` 快照为真且接了账本时；现场的人 = 群背景入选的群友 + 触发句发送者，ADR-029，§10.8）；判定器经 `SituationCard` 拿到同样两段。生效期（`affect.enforce=true` 且策略非基线）判定器对 @ 可以选 `no_reply`（ADR-031）：不请求表达模型、不发任何东西，执行记录 `skipped`，这条 @ 不写进她与对方的私聊会话。私聊不取用认识，但对方的卡片作为稳定文本接在 `situationNote` 里进 system（ADR-032）。
+
 如果模型不存在、模型返回错误或内容为空，返回系统提示，不写入助手历史。
 
 ### 8.2 无状态聊天
@@ -896,19 +910,25 @@ SQLite 设置 5 秒 busy timeout 和 WAL journal mode。当前没有 schema 版�
 
 **话题会话（EngagementService，意志层 v2，2026-09-16 起）**：每群**至多一个存活会话**（项目规则），一次话题跟进的完整生命周期为"激活 → 轮次循环 → 结束保留 2 小时 → 清扫/被新会话覆盖"。激活两条路：**@ 是硬激活**（回答仍走既有回复路径，`GroupContextService::onAtActivated` 只开会话；会话存活期间再次 @ 并入会话，不重置轮次计数）；**提名字无 @ 直入入场轮**（2026-10-31 起）——无存活会话时，过提名字激活预算（资源护栏：每群 60 秒最小间隔 + 每小时 6 次上限）即清旧建新（旧上下文让位）并提交**入场轮**；是不是在叫她**由她本人（人格主模型）读现场判断**：入场轮 ask 说明"有人提到你的名字但没有 @ 你"，并附上"提到你的那句是：「…」"，叫她就 `group_say` 自然回应，只是聊起她或顺嘴用到这个词就 `leave_topic`（她自己选沉默是正当结果，入场轮决策照常记 `engagement_turn`）。此前由 `models.worker` 杂务模型判定器先判 `YES`/`NO` 再开会话，10-31 真机上模型回"介入输出 YES"被前缀判断误读成 NO，别名点名"克莱茵在吗"无人应答；产品定规：点名是否在叫她不得由独立分类器加字符串判断决定，判定器随之退役。
 
-轮次循环：主模型走 `ChatService::requestInCharacter`（人格 system 来自管理员会话装配的 soul/用户人格，**history 与工具完全由调用方给定**，不读任何真人会话镜像、不落库不入长期记忆——话题会话是公共临时上下文）。材料由 `prepareContext` 装配（每行经 `Perception/GroupLineFormat`，画出回复关系，ADR-026）：原文窗口最近 30 条（摘要水位之后），单条超 1000 token（UTF-8 启发式估算：CJK 1:1、ASCII 4:1）做**保头截断**——留前 120 字并退到最近句读收尾、附"……（后文略）"标记（2026-09-17 起，替代旧版整条占位符：对着"省略"说话会让输出变公文腔）；总预算 3000 token，超预算把最旧一段（保底留最后 3 条原文尾巴）经轻量模型合并进**滚动摘要**（`digest` + `compressedUpToTs` 水位存会话；压缩 prompt 要求保留原话关键词、梗与语气词，不书面化改写）。每轮动作三选一（行为约束在 system 契约）：`group_say(text)` 说话 / 不调工具 = pass（连续 3 拍收场）/ `leave_topic(reason, final_text)` 离场（可带最后一句）。**发进群里的只有 `group_say` 的 text 与离场的 final_text**：不调工具直接写出的文字，不论内容如何，一律按沉默处理、不发出，会话推进与决策/执行记录和她主动选择沉默完全一样，只记一条含码点数与群号的 `LOG_WARNING`（原文可能引用群友的话，不进日志）。这是 ADR-017 的 L3 程序护栏，判定的唯一实现是 `Application/EngagementTurn` 的纯函数 `parseEngagementTurn`（2026-11-14）。此前无工具的非空裸文本被宽容视为说话，与契约"文字内容只有经 group_say 才会被发出"矛盾，截至 2026-11-14 主动轮发进群的 459 条里有 5 条整句是她写给自己的旁白（如"（没有说话，继续留意后续）"）；被 @ 的回复与私聊不经这里。契约在动作机制之外叠加一小段**语用层**（2026-10-31 改写为"先看懂再开口"，见下文"诚实优先"；2026-09-17/09-18 的十条"像真人一样说话"清单已删除）。会话另带**情绪基调**字段（`moodLine`，纯内存）：每 3 个发言轮经轻量模型把最新发言概括成一句话，下一轮材料置顶注入（"接着这个状态说话，别突然归零"）——针对真机反馈"情绪过于稳定/调节太快"的跨轮情绪惯性。窗口外的更早记录可经 `recall_context` 工具按关键词检索（主模型出关键词、`TextRecall` 词面匹配，**每会话限 1 次**，剩余次数写入 system 契约）。
+轮次循环：主模型走 `ChatService::requestInCharacter`（人格 system 来自管理员会话装配的 soul/用户人格，**history 与工具完全由调用方给定**，不读任何真人会话镜像、不落库不入长期记忆——话题会话是公共临时上下文）。材料由 `prepareContext` 装配（每行经 `Perception/GroupLineFormat`，画出回复关系，ADR-026）：原文窗口最近 30 条（摘要水位之后），单条超 1000 token（UTF-8 启发式估算：CJK 1:1、ASCII 4:1）做**保头截断**——留前 120 字并退到最近句读收尾、附"……（后文略）"标记（2026-09-17 起，替代旧版整条占位符：对着"省略"说话会让输出变公文腔）；总预算 3000 token，超预算把最旧一段（保底留最后 3 条原文尾巴）经轻量模型合并进**滚动摘要**（`digest` + `compressedUpToTs` 水位存会话；压缩 prompt 要求保留原话关键词、梗与语气词，不书面化改写）。每轮动作三选一（行为约束在 system 契约）：`group_say(text)` 说话 / 不调工具 = pass（2026-11-21 起只计数进情境卡、不再收场，ADR-031）/ `leave_topic(reason, final_text)` 离场（可带最后一句）。**发进群里的只有 `group_say` 的 text 与离场的 final_text**：不调工具直接写出的文字，不论内容如何，一律按沉默处理、不发出，会话推进与决策/执行记录和她主动选择沉默完全一样，只记一条含码点数与群号的 `LOG_WARNING`（原文可能引用群友的话，不进日志）。这是 ADR-017 的 L3 程序护栏，判定的唯一实现是 `Application/EngagementTurn` 的纯函数 `parseEngagementTurn`（2026-11-14）。此前无工具的非空裸文本被宽容视为说话，与契约"文字内容只有经 group_say 才会被发出"矛盾，截至 2026-11-14 主动轮发进群的 459 条里有 5 条整句是她写给自己的旁白（如"（没有说话，继续留意后续）"）；被 @ 的回复与私聊不经这里。契约在动作机制之外叠加一小段**语用层**（2026-10-31 改写为"先看懂再开口"，见下文"诚实优先"；2026-09-17/09-18 的十条"像真人一样说话"清单已删除）。会话另带**情绪基调**字段（`moodLine`，纯内存）：每 3 个发言轮经轻量模型把最新发言概括成一句话，下一轮材料置顶注入（"接着这个状态说话，别突然归零"）——针对真机反馈"情绪过于稳定/调节太快"的跨轮情绪惯性。窗口外的更早记录可经 `recall_context` 工具按关键词检索（主模型出关键词、`TextRecall` 词面匹配，**每会话限 1 次**，剩余次数写入 system 契约）。
 
 **会话轮注册表工具（2026-10-30）**：组合根 `engagementService.setTools(&tools, {"inspect_image", "generate_image", "send_image"})` 把三个图片工具开放给会话轮（过滤掉未注册与 `requiresAdmin()` 的名字），schema 经 `ToolRegistry::schemaFor` 追加在动作工具之后，开放任一图片工具时契约追加"图片占位符 `|` 后只是瞥视印象，要细节调 `inspect_image`；`generate_image` 直接把图发到群里、`send_image` 可重发 24h 内的图"的系统注；工具的 `outbound_messages` 在回灌前经 `OutboundRecorder` seam（组合根适配 `GroupContextService::recordOutbound`，占位符与 @ 路径一致）入群缓冲、再经 `deliverMessage` 投递到群（关联键只给第一条），不算她的发言、不挂执行记录（起因：10-30 18:08 群友点名让她画图，她只能嘴上说）；定案前的工具轮（召回 + 注册表工具）合计至多 3 趟，到顶按沉默处理。工具以 `user_id=0`、`shared_scope_id=群号` 执行，只看本群 24h 群库。起因：群友发图后主动轮只看得到瞥视一句话，@ 路径却能看图（2026-10-30 真机缺陷）。未 `setTools` 时行为与此前一致。2026-11-15（L2.a）起每轮开头再按工具当前是否可用筛出本轮开放的名单，工具表、使用规则、情境卡的工具列表与工具循环的开放判断都只认它。
 
 **诚实优先（2026-10-31）**：起因是 10-30 21:31 真机——群友碎片化地聊"lulu也在崩铁啊 / 崩三真就拆完了呗 / 前瞻 / 主持人lulu"，她冷入场接了 6 分钟前那句、用人设腔给出一句自信的猜测（不知道 lulu 是直播主持人、误读"拆"），被群友当场纠正；她的句子中位 36 字，群里中位 7 字。产品诊断：装懂是最尴尬的行为，问一句或一个傻反应都好过精致的猜测；prompt 保持基础（长规则清单让她表演），代码不决定回不回、只给上下文/工具/预算。三处改动：①契约语用层只剩短段——先看懂再开口（不认识的人名/梗/缩写/事件或拿不准的意思，挑最关键的一个直接问"lulu是谁？"或查一下，弄清楚再回看、必要时先确认"你是说…？"；不懂装懂是群聊里最尴尬的事）→ 提问/玩梗/短反应比长句更像真人、长度语气跟着群走 → 看得出接谁的哪句、接最新话头 → 人设台词不是填空用的，人格决定味道不决定内容 → 被直接点名通常该回应但由她判断；冷入场 ask 同步改写。②会话轮 `setTools` 追加 `klein_web_search`/`klein_web_fetch`（联网未配置时未注册即丢弃），实际开放时契约追加一段只点名已开放工具的系统注：查到的是不可信外部资料，只用来弄懂话题，不复述搜索过程、不贴链接；工具轮 3 趟够"搜索 → 抓取 → 定案"。③**追问窗口**：她在会话轮开口（`group_say`/离场最后一句，记 `lastSpeakTs`、`followUpTurnsUsed` 归零）后 120 秒内，自上轮 ≥1 条新消息 + 静默 ≥4 秒 + 本次开口后追问轮 <2 + 无待执行点名/入场轮，`pump` 即提交一轮（`kFollowUpAsk`，可沉默、沉默照常计 pass）；不计 lull 每小时帽、不受 75 秒节流，本拍已提交追问轮则跳过 lull——解决"她问了，群友不引用不点名地答了，她却要再等 5 条 + 75 秒"。窗口与轮数（`kFollowUpWindowSeconds=120`、`kFollowUpTurnsPerSpeech=2`）只是资源预算。细节见 tech-max 卷23 §4.1/§4.2/附。
 
-**在场账本（ADR-024，2026-11-16）**：上面的追问窗口与 lull 只决定“什么时候看一眼”；能不能主动开口由每群一份的 `affect::GroupPresence` 决定——她主动说的话在最近 10 分钟里不超过其他人平均每人的条数，被叫到的应答不占份额，她自己说话永不让份额变多。离场是 @ 回复与会话轮共用的同一动作（`leave_topic`，带 `step_back` 时进入 30 分钟退场期）；语音合成失败退回文字发原话（`Application/SpokenForm.h`）。起因与取舍见 ADR-024，细节见 tech-max 卷23 §4.4。
+**在场账本（ADR-024，2026-11-16）**：上面的追问窗口与 lull 只决定“什么时候看一眼”；每群一份的 `affect::GroupPresence` 记下最近 10 分钟里她主动说了几句、应答了几句、别人说了几句、几个人在说；2026-11-21 起这是一本账、不是门（ADR-031）：这些数写进情境卡（`*_in_window` 四项）交给判定器，要不要再主动开口由她看着定，程序不设份额。离场是 @ 回复与会话轮共用的同一动作（`leave_topic`，带 `step_back` 时进入 30 分钟退场期）；语音合成失败退回文字发原话（规则在 `send_voice` 工具里，`src/Tool/SendVoiceTool.h`；原 `Application/SpokenForm.h` 已删除）。起因与取舍见 ADR-024，细节见 tech-max 卷23 §4.4。
 
 **事实卡与回复关系（经历层 E0，ADR-026，2026-11-16）**：当轮 `affect.enabled` 快照为真且组合根接了 `affect::DeployerFacts` 时，会话轮的 `systemNote` 以部署者事实段开头（紧跟人格与服务契约，影子与生效两种契约一样），现场事实作为一行“（现在是 2026年11月16日 星期一 15:51。这一轮你能用的工具，就是提供给你的这些。）”放在材料之后、提问语之前（本轮 user 侧，时间取服务的时钟 seam）；judge 拿到的材料不带这一行，它自己在 prompt 里加“此刻”。@ 回复路径见 §8.1。群聊材料的每一行（原文窗口、压缩块、尾巴、召回结果、@ 群背景）都经 `GroupLineFormat` 一处格式化：没有引用时与此前逐字相同；引用回复写“（回复 你/昵称：「前 12 个码点…」）”，被回复的只是图片或表情时写短词、不抄 asset_id，不在缓冲里写“（回复了一条更早的消息）”。回复关系不受 `affect.enabled` 控制。细节见 tech-max 卷23 附录。
 
+**取用：认识进判定与表达（经历层，ADR-029，2026-11-21）**：当轮 `affect.enabled` 快照为真且组合根接了 `affect::KnowledgeLedger` 时（与事实卡同一判据），两条群聊路径每轮从账本读一次取用池（`KnowledgeLedger::recallPool`：只读，不跑遗忘、不写库），由纯函数 `affect::selectKnowledge`（`src/Affect/KnowledgeRecall`）挑选：只取 active、有效强度不低于淡出阈值、作用域是全局 / 本群 / 现场的人的条目（现场的人：会话轮是材料窗口里的群友与可回应消息的发言者，@ 回复是群背景入选的群友与触发句发送者）；教导永远优先，其余按有效强度降序截到上限（判定器与表达请求各一个上限），截完按条目编号升序输出——强度衰减只决定谁被截掉，留下的文本一字不变。拼成标题行“[你的认识]”加一行一条原文，没有条目时什么都不加，请求逐字不变。放哪：会话轮在现场事实一行之后、提问语之前；@ 回复并入 `tailNote`（§8.1）；判定器 prompt 里排在“此刻”与“在场的人”之后、可回应的消息与现场材料之前。全部在本轮 user 侧，system 与缓存前缀不动；私聊不取用。判定器看见的条目编号写进决策记录 `state_json` 的 `knowledge_ids`。账本没打开时由取用按同一判据打开（重启后不必等账本工具）。上限常量与测试见 tech-max 卷23 附“取用”。
+
+**人物卡在群聊里（ADR-032，2026-11-22）**：长期记忆开着时，两条群聊路径把在场的人（与取用同一批，@ 回复另加触发句发送者）的卡片各写一行“在场的人”，只写有内容的人、部署者排最前、有人数上限，放在现场事实之后、她的认识之前；判定器经 `SituationCard::peopleSection` 拿到同一份。另外，群聊材料每一行里部署者的昵称后加“（部署者）”（`GroupLineFormat`，只由 `bot.manager_id` 认出）：这个行内标记不归人物卡的开关管，与长期记忆、affect 开关都无关，始终生效。卡片本身见 §11.8。
+
 **硬后盖不依赖模型自觉**：单会话群消息量上限 300 条、群内无新消息 10 分钟，任一触顶由 `pump` 强制结束（`forced:` 前缀落日志）；轮次计数保留作观测日志，不再是硬帽（2026-09-17 项目规则：会话陪聊能力以消息量计）。**结束不是删除**：会话（含话题行与滚动摘要）保留 2 小时（2026-09-17 项目规则：原定 24 小时太长，缩到 2 小时）；保留期内同群新激活 = 清旧建新，2 小时无续接由 pump 清扫（群内容库消息自按 300 条/24h TTL 淘汰）。会话状态为**纯内存**（重启即失，与旧 TopicTracker 同一取舍）； lull 轮次触发 = 自上轮起攒够 5 条新消息 + 群内静默 ≥4 秒 + 跨轮次节流 75 秒 + **每小时至多 8 次**（2026-09-17 曾放宽到 3 条/20 秒，真机验证过勤——群友反馈跟得太勤、每个话头都接，故回调并加小时帽；点名/入场/追问轮不受帽限）。所有压缩/轮次 prompt 携带不可信数据契约。
 
-**冷启动自动介入（热度尖峰自决，2026-09-17 起）**：无人生成互动的火热对话此前无法进入——本轮补上第三个入口。每群维护基线状态：10 分钟消息桶（尖峰检测）+ 1 小时桶（每小时采样 EMA 学习日常对话量）+ 人数地板（组合根从 `GroupListService::snapshot` 查 `member_count`）；桶计数是实时数据留在内存，**学习与频控状态（EMA/武装期/当日帽/冷却截止）write-through 持久化在 `engagement_cold` 表**（`GroupContextStore` 内，每群一行 UPSERT，无 TTL），重启续用不重置。触发阈值 = `max(6, 人数×3%, 基线×3)`，其中 `基线 = max(人数×0.2, EMA×24)/144` 折算 10 分钟桶——人数给地板与冷启动先验，EMA 管学习，武装期（首条消息起 2 小时）内不启用。尖峰命中且无存活会话 → 开冷启动会话并直接跑**入场轮**（不设独立 judge）：带人格的主模型看最近 15 条材料自决三选一，prompt 明示"没有任何人点名你，只是群里刚热闹起来"，先读懂，看不懂就问一句、查一下或不出声，看懂了再用自己的方式加入（2026-10-31 改写；此前为"是否加入由你的性格决定"）——`leave_topic`/沉默即自决不加入（沉默在冷入场轮直接收场，不计 pass）。频控：每群每天 3 次评估（日界重置）、冷启动开启的会话结束后冷却 2 小时、任意会话结束后冷却 1 小时。会话与保留期状态仍纯内存（重启即失），冷启动学习/频控状态已持久化（2026-09-17）。
+**冷启动自动介入（热度尖峰自决，2026-09-17 起）**：无人生成互动的火热对话此前无法进入——本轮补上第三个入口。每群维护基线状态：10 分钟消息桶（尖峰检测）+ 1 小时桶（每小时采样 EMA 学习日常对话量）+ 人数地板（组合根从 `GroupListService::snapshot` 查 `member_count`）；桶计数是实时数据留在内存，**学习状态（EMA/武装期/当日评估计数；冷却截止一列保留，2026-11-21 起恒写 0）write-through 持久化在 `engagement_cold` 表**（`GroupContextStore` 内，每群一行 UPSERT，无 TTL），重启续用不重置。触发阈值 = `max(6, 人数×3%, 基线×3)`，其中 `基线 = max(人数×0.2, EMA×24)/144` 折算 10 分钟桶——人数给地板与冷启动先验，EMA 管学习，武装期（首条消息起 2 小时）内不启用。尖峰命中且无存活会话 → 开冷启动会话并直接跑**入场轮**（不设独立 judge）：带人格的主模型看最近 15 条材料自决三选一，prompt 明示"没有任何人点名你，只是群里刚热闹起来"，先读懂，看不懂就问一句、查一下或不出声，看懂了再用自己的方式加入（2026-10-31 改写；此前为"是否加入由你的性格决定"）——`leave_topic`/沉默即自决不加入（沉默在冷入场轮直接收场，不计 pass）。频控：2026-11-21 起当日帽与两种冷却都去掉了（ADR-031，见下文“去闸”），只留“同一波热度只看一眼”——上次评估还在同一个尖峰桶窗口（`kSpikeBucketSeconds`）内就不再评估；当日评估次数只计数并持久化（`engagement_cold.cold_today`），不再做门。会话与保留期状态仍纯内存（重启即失），冷启动学习/频控状态已持久化（2026-09-17）。
+
+**去闸：入场、出场由她定（ADR-031，2026-11-21）**：程序只留底层护栏与资源预算，替她做决定的门都去掉了——连续沉默强制收场（`consecutivePasses` 只计数进情境卡）、发言份额做门（在场账本只记账，只剩她自己请求的退场生效）、冷启动的当日帽与两种冷却。保留的预算：会话的消息量上限与不活跃收场、lull 的节流与每小时帽、追问窗口的轮数、提名字激活预算、judge 每小时预算，以及新加的冷启动“同一波热度只看一眼”。被 @ 时判定器的动作空间是 `reply` / `no_reply`（`JudgePolicy::allowedActions`，§8.1）；@ 路径的群聊收敛契约（`GroupContextService::groupConversationContract`）删到只剩机制：这是群里的一次插话、不 @ 任何人、只输出 `[不回应]` 时静默不发。判定提示里写明“要不要再主动开口由你看着它定，程序不设份额”。回想把开口、沉默、离场都当经历。常量与流程见 tech-max 卷23 附“去闸”。
 
 **隐私边界（D7 修订，项目规则 2026-09-15）**：原文可入库存但仅限监控群的 300 条/24h 短时缓冲，**永不进入长期记忆与日志**（MemoryService 的提取源仍只有她参与的对话轮次）；`user_id` 直接存**原始 QQ 号**（项目规则同日：伪名化哈希无实际收益且挡住直接查库，故不做）。成本观测：每小时一行 `LOG_INFO` 汇总，兼作 72 小时挂机验收的活性心跳。
 
@@ -917,6 +937,8 @@ SQLite 设置 5 秒 busy timeout 和 WAL journal mode。当前没有 schema 版�
 **M0 边界（2026-10-25）**：群背景、`topicNote` 等临时材料只写入 `ChatService::reply` 的 `requestContext`，由 `appendTransientUserContext` 附在请求副本最后一条 user 消息尾部；`conversationText`（会话落库、自动召回、长期记忆提取、`ToolContext.user_text`）只含用户原文（及图片占位符）。修复前群背景经 `conversationText` 同时进入 conversations 表、召回查询和记忆提取；回归测试见 `tests/StorageIntegrationTests.cpp` 的 `UserSessionContextBoundaryTest`。
 
 **决策点（R1，ADR-017，2026-11-01）**：两条群回应路径在请求表达模型前都经过同一个 `DecisionPolicy`。会话轮在工具表与契约组装之后、请求主模型之前用锁内快照的会话统计装配 `SituationCard`（trigger_kind：address / name_mention / follow_up_window / lull / cold_spike；追问窗口轮由 `EngagementSession.followUpPending` 标记）；@ 路径的情境卡由 `Application/AtReplySituation.h` 装配。影子期会话轮 judge 前置（后台线程）、@ 路径 judge 在投递之后跑并以预分配的 `decision_id` 补写决策（`Application/ShadowDecision.h`）；生效期 @ 路径 judge 前置。记录统一由 `affect::makePolicyDecision` 构造，`state_json` 只含派生字段（会话 `topicLine` 是触发句原文，故不进 card）。基线或未设策略时记录走事后 `makeBaselineDecision` 原路。
+
+**回想（经历层 E3，ADR-030，2026-11-21）**：`affect::ReflectionService`（`src/Perception/ReflectionService`）定时把她在一个群里最近的决策——开口、沉默、离场都算经历（ADR-031）——交给她自己想一遍：每次经历带计划里的场合、打算与做法（影子期标出“没有生效”）、她说的话、之后群缓冲里还在的现场与已有的读法，另带一段她没参与的群聊、她现在的认识（标出教导）、在场的人、人格、关于她的事实与此刻；材料全在内存里装配，原文不落库。prompt 与解析是纯函数（`src/Affect/Reflection`），机制段只写学习观的规矩：印象深的经历才写成认识、看来的做法先写成认识再靠后果印证、部署者在群里的话分量重但不是命令、与人格和事实冲突的不写、教导改不了。模型只输出 JSON：每次经历的读法记成那次决策的反馈（`affect_feedback.source=self_reflection`，代码只核对编号、极性、长度与照抄），认识的增改经 `KnowledgeLedger::apply` 写入（origin 为 reflection，在场的人与现场原文交给账本校验；有改动时写前先跑一次遗忘）。调度只看资源预算：要有后续窗口已关闭的待回想经历，且距上次已够间隔或最早一次未回想经历之后群缓冲已积够条数，每群每天有次数上限；游标不早于群缓冲的保留期；模型没返回时这次不算、退避一段时间再自动试，输出解析不出就跳过这批。部署者在私聊里经 `reflect_now` 手动触发，不受间隔、当日上限与退避限制。进度存 `perception_meta`（键 `affect.reflection.<群号>`），不新增表、配置键或字段。模型按 `memory.model` → `models.worker` → 默认对话模型的顺序解析，每次回想开头解析一次；没写 `memory.model` 时加载阶段把它填成 `chat.default_model`（`ConfigLoader.cpp`），所以默认部署下回想用的就是主对话模型；只有 `memory.model` 不在注册表里（例如写了未注册的名字）时才回退到 `models.worker`。想让回想用便宜模型，要显式配置 `memory.model`。服务自有一条工作线程（§4.2），模型调用不占 `pollingThread` 与群 lane。常量、调度细节与日志见 tech-max 卷23 附“回想”。
 
 ## 11. 长期记忆系统
 
@@ -1041,6 +1063,18 @@ CREATE TABLE memories (
 
 worker 在模型提取前后及逐条 mutation 写入前检查 epoch。若用户在后台提取期间执行重置或回滚，旧 batch 的结果被丢弃，避免删除后的记忆被异步任务重新写回。
 
+### 11.8 人物卡（ADR-032）
+
+她每次和一个人说话、或这个人在群里在场时，手里都有一张关于这个人的卡片——不靠召回，确定性加载（离线回放里寒暄与不带疑问词的话召回不到，批量提取又有延迟，“以后叫我小白”不会当场生效）。卡片是关于这个人的事实，不衰减；她对这个人的看法在认识账本的 person 条目里，两样分开。
+
+- **槽位**（`src/Memory/PersonCard`）：程序给出、谁也改不了的——QQ 号、昵称快照、是不是部署者（只由 `bot.manager_id` 算出）、建卡日期（第一次建卡时写一次，只存不显示）；她自己记的——`wanted_name`（对方希望被怎么叫）、`my_name`（她怎么叫对方）、`name_for_me`（对方怎么叫她）与几条 `note`。
+- **存储**：不建表、不加列，复用 §11.5 的结构化事实表：`subject_key='user:self'`、谓词带保留前缀 `card.`（`MemoryStore::cardSlots / setCardSlot`，经 `MemoryService` 对外）；批量提取跳过这个前缀（`isPersonCardPredicate`）；按人清除与按来源回滚沿用事实表，卡片一起清掉或回退。`PersonCards` 带缓存，`MemoryService::cardGeneration()` 在写槽位、按人清除、按来源回滚后前进，缓存据此失效。
+- **加载**：私聊里作为稳定文本接在 `situationNote` 里进 system（卡片改了才变一次）；群聊在本轮 user 侧，见 §10.8。
+- **更新**：工具 `update_person_card`（§12），私聊与群聊都开放、不要求管理员，当场写库并使缓存失效；护栏只有槽位白名单、单行与长度上限。
+- **开关**：`memory.enabled` 为真且记忆库可用；否则什么都不加、请求逐字不变，工具不出现。
+
+槽位与人数上限、渲染格式见 tech-max 卷14 附“人物卡”。
+
 ## 12. 工具调用体系
 
 `Tool` 通过名称、schema 和 `execute(arguments, ToolContext)` 提供模型工具。Action 能力通过通用 `ActionTool` 转换为 Tool：名称、描述、JSON Schema 和管理员要求来自 `ActionDescriptor`，实际执行委托给 Action。`expose_as_tool` 当前作为组合根注册决策的元数据保留，`main` 仍显式决定注册哪些 ActionTool。
@@ -1049,7 +1083,10 @@ worker 在模型提取前后及逐条 mutation 写入前检查 epoch。若用户
 
 - `get_current_model`：查询当前用户模型；
 - `send_voice`：把这句话用语音说出来（2026-11-16 起取代 `set_voice_mode`）。只在管理员语音总开关开着且语音服务可用时开放；schema 写明只在对方明确要求语音时调用，平时以文字为主；合成失败改发文字原话；
-- `admin_control`：管理员运行时控制和服务器网络查询。
+- `admin_control`：管理员运行时控制和服务器网络查询；
+- `remember_guidance` / `review_guidance` / `forget_guidance`：认识账本的记、翻看、忘掉（ADR-028）；只在管理员私聊里开放（`Action::managerPrivateOnly`，场合 `ToolVenue::ManagerPrivate`），`affect.enabled` 为假时不出现；
+- `reflect_now`：让她现在就回想（ADR-030），只把群排进回想服务的队列、在后台跑；开放规则同账本工具；
+- `update_person_card`：改人物卡上她自己记的槽位（ADR-032），私聊与群聊都开放、不要求管理员，长期记忆开着时才出现；话题会话轮也开放它。
 
 其他直接 Tool：
 
@@ -1590,6 +1627,9 @@ lock → 判断 empty → move front → pop → unlock
 | Memory SQLite connection | `MemoryStore::dbMutex` | memory worker、reset/undo 路径、recall |
 | Memory pending/epoch | `MemoryService::queueMutex` | 消息工作线程、memory worker、reset/undo |
 | 瞥视队列与 stopping | `GlanceService::queueMutex + condition_variable`（预算历史与去重表仅 worker 线程访问，无锁） | 消息工作线程（observe 入队）、瞥视 worker |
+| 回想队列与 started/stopping | `ReflectionService::queueMutex + condition_variable`（按群去重：每群至多排一次） | `pollingThread`（`pump` 入队）、执行 `reflect_now` 的消息工作线程、回想线程 |
+| 认识账本连接与打开状态 | `KnowledgeLedger::mutex`（读写与 `open()` 都在锁内；`apply` 在锁内经依据核对器查决策库） | 消息工作线程（账本工具、@ 路径取用）、群 lane（会话轮取用）、`pollingThread`（回想到期判断）、回想线程 |
+| 人物卡缓存 | `PersonCards` 的 mutex（只护缓存；读写库经记忆库自己的 `dbMutex`） | 消息工作线程、群 lane |
 | 群缓冲镜像 | `GroupContextStore::mutex`（SQLite 写在锁外） | 消息工作线程、定时线程、群 lane、瞥视 worker（findText/updateText） |
 | 定时提醒队列与 reminders 连接 | `ReminderService::queueMutex` + `ReminderStore::dbMutex` | 消息工作线程（工具调用）、定时线程 |
 | 日志队列 | `Log::mutex_ + condition_variable` | 所有线程、日志线程 |
@@ -1616,6 +1656,15 @@ Memory worker 的重要规则：
 
 禁止在持有全局会话锁时执行外部 HTTP 请求。当前聊天路径会在 `buildChatRequest` 返回后释放 USS 锁，再调用模型，这是必须保持的行为。
 
+回想写认识时另有一条存储锁套存储锁的链（ADR-030）：
+
+```text
+KnowledgeLedger mutex（apply 内已 BEGIN IMMEDIATE）
+  → DecisionStore mutex（依据核对器查决策 / 反馈是否存在）
+```
+
+`DecisionStore.mutex` 是叶子锁：持有它时除日志队列锁外不取任何别的锁，但可以在 `KnowledgeLedger.mutex` 之内被获取；决策库从不回调账本。两者在同一个 SQLite 文件上，SQLite 写锁的获取顺序与这条互斥锁链相反，靠 `busy_timeout` 不会永久卡死，最坏情况是一条决策 / 执行 / 反馈记录写入失败，见 tech-max 卷22 §4。
+
 ### 20.3 并发消息语义
 
 `KeyedTaskScheduler` 以 `user_id` 作为 lane key。每个 key 同时最多执行一个任务，任务完成后才把该 key 的下一项重新放入 ready queue，因此同一用户保持提交顺序；不同用户的 key 可以被不同 Worker 同时处理。调度器每轮只执行一个 key 的一项任务再重新排队，避免单个用户长期占用 Worker。
@@ -1626,7 +1675,7 @@ Memory worker 的重要规则：
 
 ### 20.4 关闭语义
 
-`KeyedTaskScheduler::shutdown()` 会拒绝新任务，丢弃各用户 lane 中尚未开始的任务，只等待已经被 Worker 取出的活动任务退出，然后 join 当前及已缩减的 Worker。活动模型请求会先收到进程停止状态并主动取消，因此退出不会继续处理用户积压消息，也不会把取消产生的空响应当作 JSON 错误。`MemoryService::shutdown()` 同样会清空 pending batch，不再提取尚未处理的记忆。`GlanceService::shutdown()` 丢弃尚未处理的瞥视任务（不写"未看"标记），进行中的视觉调用经 `CurlRequestControl` 取消，worker 返回后看到 stopping 不写回。
+`KeyedTaskScheduler::shutdown()` 会拒绝新任务，丢弃各用户 lane 中尚未开始的任务，只等待已经被 Worker 取出的活动任务退出，然后 join 当前及已缩减的 Worker。活动模型请求会先收到进程停止状态并主动取消，因此退出不会继续处理用户积压消息，也不会把取消产生的空响应当作 JSON 错误。`MemoryService::shutdown()` 同样会清空 pending batch，不再提取尚未处理的记忆。`GlanceService::shutdown()` 丢弃尚未处理的瞥视任务（不写"未看"标记），进行中的视觉调用经 `CurlRequestControl` 取消，worker 返回后看到 stopping 不写回。`ReflectionService::shutdown()` 丢弃排队的群并 join 回想线程；进行中的回想模型调用同样被取消，这次回想不写反馈与认识、游标不动。
 
 这种差异必须保留在文档和产品预期中：
 
@@ -1895,15 +1944,15 @@ Memory worker 的重要规则：
 - 先建立可替换策略、数据和执行合同，再渐进接入选定模型；支持关闭、冻结与回滚。v2.4.3 新行动沿用这些合同，仍需各自的样本和验证。
 - 2026-10-25 登记的进化阻塞：统一决策合同（B1）已由 M1 落地，出站真实 `message_id`（B2）已由 R0.2（2026-10-28）关闭；群级画像存储（B3）仍未解决，规划为 R4/ADR-018（群级派生状态，只存派生文本）。详见 进化设计阻塞清单（内部笔记）。
 
-**经历层（2026-11-16 设计）**：取代重规划中 R4“部署者写群手册”与 R5“提案默认人审”——每轮先定、再说、后核，事实卡，她从经历中整理认识并记在可回滚的账本里，见 经历层设计（内部笔记）。E0 事实卡与回复关系（ADR-026）、E1 先定再说后核（ADR-027）、E2 账本、当场察觉与教导（ADR-028）、E3 回想（ADR-030）已实施，E4 的取用一半（ADR-029）先于 E3 实施；后续阶段见经历层设计（内部笔记）。
+**经历层（2026-11-16 设计）**：取代重规划中 R4“部署者写群手册”与 R5“提案默认人审”——每轮先定、再说、后核，事实卡，她从经历中整理认识并记在可回滚的账本里，见 经历层设计（内部笔记）。E0 事实卡与回复关系（ADR-026）、E1 先定再说后核（ADR-027）、E2 账本、当场察觉与教导（ADR-028）、E3 回想（ADR-030）已实施，E4 的取用一半（ADR-029）先于 E3 实施，同期实施的还有去闸（ADR-031）与人物卡（ADR-032），现状见 §10.8、§11.8；后续阶段见经历层设计（内部笔记）。
 
-**M1 影子合同实况（2026-10-25）**：`src/Affect/` 已落地 `BehaviorPlan`（`schema_version`、`action`、`speech_act`、`tone`、`max_codepoints`、`tool_policy`、`allowed_tools`）、统一的决策/执行/反馈记录类型、`DecisionRecorder` 与 `DecisionStore`。配置 `affect.enabled` 默认 false；开启后普通聊天回复（群 @ / 私聊，`Message`）和 `EngagementService` 主动轮共用同一记录器，各产生一条 decision 和一条 execution，`queued` 只表示已交给出站队列；**2026-10-28 R0.2 起**传输层回执把它推进为 `sent`（含协议端返回的 `outbound_message_id`）/ `failed` / `unknown`（超时、断连），B2 关闭。群自消息也经同一关联键回填真实 `message_id`，`EngagementService::replyToSelf` 由此可用。M1 只记录，不改变实际回应、不接策略/状态/训练；`affect.enabled=false` 时完全保持 v2.4.1 行为。2026-11-15（ADR-023 L2.c）起 `affect.enabled`、`affect.policy`、`affect.judge_model` 重载即生效：记录器与决策库始终构造，决策库在第一次需要记录且开关为真时才打开建表（没启用过就没有这三张表，打开失败只试一次、之后降级为不记录），策略外壳 `SwitchingPolicy` 每次决策按当前配置选基线或 judge。三张表为 `affect_decisions`/`affect_executions`/`affect_feedback`，与其余 Store 共用主 SQLite 文件。`affect_feedback` 自 R0.3（2026-10-28）起由 `#好`/`#坏` 命令写入人工反馈，`source` 按标注人分 `manual_admin`（confidence 1.0）/ `manual_user`（0.6）。
+**M1 影子合同实况（2026-10-25）**：`src/Affect/` 已落地 `BehaviorPlan`（`schema_version`、`action`、`speech_act`、`tone`、`max_codepoints`、`tool_policy`、`allowed_tools`）、统一的决策/执行/反馈记录类型、`DecisionRecorder` 与 `DecisionStore`。配置 `affect.enabled` 默认 false；开启后普通聊天回复（群 @ / 私聊，`Message`）和 `EngagementService` 主动轮共用同一记录器，各产生一条 decision 和一条 execution，`queued` 只表示已交给出站队列；**2026-10-28 R0.2 起**传输层回执把它推进为 `sent`（含协议端返回的 `outbound_message_id`）/ `failed` / `unknown`（超时、断连），B2 关闭。群自消息也经同一关联键回填真实 `message_id`，`EngagementService::replyToSelf` 由此可用。M1 只记录，不改变实际回应、不接策略/状态/训练；`affect.enabled=false` 时完全保持 v2.4.1 行为。2026-11-15（ADR-023 L2.c）起 `affect.enabled`、`affect.policy`、`affect.judge_model` 重载即生效：记录器与决策库始终构造，决策库在第一次需要记录且开关为真时才打开建表（没启用过就没有这三张表，打开失败只试一次、之后降级为不记录），策略外壳 `SwitchingPolicy` 每次决策按当前配置选基线或 judge。三张表为 `affect_decisions`/`affect_executions`/`affect_feedback`，与其余 Store 共用主 SQLite 文件。`affect_feedback` 的人工反馈来自 R0.3（2026-10-28）的 `#好`/`#坏` 命令，`source` 按标注人分 `manual_admin`（confidence 1.0）/ `manual_user`（0.6）；这两个命令已随经历层 E2 移除（ADR-028），旧行照旧可读，现在的反馈来自当场察觉与回想（§10.8）。
 
-**认识账本与当场察觉（经历层 E2，ADR-028，2026-11-20）**：`src/Affect/KnowledgeLedger` 在决策库同一个 SQLite 文件里另开连接，多两张表 `affect_knowledge`（当前值）与 `affect_knowledge_history`（每次变化一行，只增不删；按人 / 按群清除是唯一会删历史的操作），同样延迟打开：只有管理员私聊里的账本工具（`remember_guidance`、`review_guidance`、`forget_guidance`，2026-11-20 晚取代原来的五个 `#` 命令）在 `affect.enabled` 为真时才建表，从没用过的库里没有这两张表。写入只经 `apply`（`KnowledgeGuard` 代码校验 + 教导不可被回想改写 + 每次 ≤ 8 条，一个事务一个运行号），回滚只追加 `rollback` 行，遗忘按 30 天半衰期、低于 0.15 记 faded（教导的不衰减），每作用域至多 200 条 active。`affect_feedback.source` 新增 `in_the_moment`（会话轮下一轮判定写的 `reaction_to_last`，挂到她上一句的决策上，不加调用）、`self_reflection` 与 `teaching`（E3 起用），表结构不变。E2 里账本不进判定器与表达请求；`candidatesFor(群, 在场的人)` 是留给 E4 取用的读接口。
+**认识账本与当场察觉（经历层 E2，ADR-028，2026-11-20）**：`src/Affect/KnowledgeLedger` 在决策库同一个 SQLite 文件里另开连接，多两张表 `affect_knowledge`（当前值）与 `affect_knowledge_history`（每次变化一行，只增不删；按人 / 按群清除是唯一会删历史的操作），同样延迟打开：只在 `affect.enabled` 为真时，由管理员私聊里的账本工具（`remember_guidance`、`review_guidance`、`forget_guidance`，2026-11-20 晚取代原来的五个 `#` 命令）、取用（ADR-029）或回想（ADR-030）第一次用到时建表，没启用过 affect 的库里没有这两张表。写入只经 `apply`（`KnowledgeGuard` 代码校验 + 教导不可被回想改写 + 每次 ≤ 8 条，一个事务一个运行号），回滚只追加 `rollback` 行，遗忘按 30 天半衰期、低于 0.15 记 faded（教导的不衰减），每作用域至多 200 条 active。`affect_feedback.source` 新增 `in_the_moment`（会话轮下一轮判定写的 `reaction_to_last`，挂到她上一句的决策上，不加调用）、`self_reflection`（回想写，E3）与 `teaching`（预留，目前没有写入方），表结构不变。E2 里账本不进判定器与表达请求；取用（ADR-029）起经只读的 `recallPool` 进入（§10.8），`candidatesFor(群, 在场的人)` 留给测试与排障。
 
 ```sql
 CREATE TABLE IF NOT EXISTS affect_knowledge (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,      -- 编号（命令里写 #编号）
+    id INTEGER PRIMARY KEY AUTOINCREMENT,      -- 编号（工具参数 id / replaces；翻看时显示为 #编号）
     kind TEXT NOT NULL,                        -- habit / group / person
     scope_group INTEGER NOT NULL DEFAULT 0,    -- 0 = 全局
     scope_user INTEGER NOT NULL DEFAULT 0,     -- 只有 person 非 0
