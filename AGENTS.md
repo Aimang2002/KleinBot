@@ -72,7 +72,7 @@ Documentation rules:
 - Remove or rewrite statements made obsolete by the implementation; do not only append new notes.
 - Keep `README.md` focused on user-facing setup and build commands; keep design rationale and invariants in `docs/technical-design.md`.
 - Keep `docs/tech-max/` (per-volume walkthrough docs) in sync with `docs/technical-design.md`: whenever a change touches behavior described in a tech-max volume, update that volume in the same change, including indirect details such as counts, enum lists, cross-volume references, and end-to-end walkthrough examples.
-- `AGENTS.md`, `docs/design-philosophy.md`, `docs/technical-design.md` and `docs/tech-max/` are tracked and public (since 2026-11-24). Everything else under `docs/` and `CLAUDE.md` are local working notes and stay Git-ignored; do not force-add them. Before committing anything under `docs/`, check it for secrets, real QQ/group IDs, chat excerpts and machine-specific paths.
+- `AGENTS.md`, `docs/design-philosophy.md`, `docs/technical-design.md`, `docs/adr/` and `docs/tech-max/` are tracked and public (since 2026-11-24). Everything else under `docs/` and `CLAUDE.md` are local working notes and stay Git-ignored; do not force-add them. Before committing anything under `docs/`, check it for secrets, real QQ/group IDs, chat excerpts and machine-specific paths.
 
 ### 关联点必须一次改全（2026-09-15 项目规则，起因：perception 节漏进配置骨架/示例致面板分区不渲染）
 
@@ -96,7 +96,7 @@ Documentation rules:
 对外接口与模块边界遵循沙漏/窄腰（narrow waist）模型：腰（契约）越窄越稳定，腰两侧（上层用法、下层实现与插件）越多样。后续插件化方向（推送门、MCP 门、外部脚本）一律以此裁决冲突。三条纪律：
 
 1. **稳定压倒聪明**：已定稿的契约默认不动；扩展必须版本化（新增类型/端点，旧路径保留一个版本周期），并同步 `supported` 类能力声明，绝不静默变更语义。
-2. **拒绝与接受同等重要**：接口的非目标（外部不主动、消息流/内部状态不出进程、只发消息不改行为）是承重墙；放宽任何一条视为架构变更，必须新增 ADR 并同步 technical-design。
+2. **拒绝与接受同等重要**：接口的非目标（外部不主动、消息流/内部状态不出进程、只发消息不改行为）是承重墙；放宽任何一条视为架构变更，必须新增 ADR（`docs/adr/`，一条一个文件，写法见该目录的 README）并同步 technical-design。
 3. **语法与语义分离**：契约只定义「怎么说」（Target + 类型化 ContentBlocks + 边界规则），不得编码「说什么/为什么说」——具体功能语义住在消费者/插件侧。禁止为单一用途在通用契约中增加专用字段。
 
 接口生命周期与兼容承诺：

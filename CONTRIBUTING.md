@@ -10,7 +10,8 @@
 | --- | --- |
 | 什么样的改动会被接受（评审标准） | [docs/design-philosophy.md](docs/design-philosophy.md) |
 | 怎么安装、配置、运行 | [README.md](README.md) |
-| 整体架构、设计决策（ADR）、不变量 | [docs/technical-design.md](docs/technical-design.md) |
+| 整体架构、不变量 | [docs/technical-design.md](docs/technical-design.md) |
+| 某个设计为什么是现在这样（决策记录 ADR） | [docs/adr/](docs/adr/README.md) |
 | 某个模块的实现细节 | [docs/tech-max/](docs/tech-max/README.md)，按卷查 |
 | 新功能该放在哪 | [docs/tech-max/20-扩展开发指南.md](docs/tech-max/20-扩展开发指南.md) |
 

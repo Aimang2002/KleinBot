@@ -67,6 +67,6 @@
 
 ## 与现有文档的关系
 
-- `docs/technical-design.md`：正式设计与实现事实来源，偏概览与决策记录（ADR）。本套文档是其深度展开版本，颗粒度细化至函数与字段。
+- `docs/technical-design.md`：正式设计与实现事实来源，偏概览；决策记录（ADR）在 `docs/adr/`，一条一个文件。本套文档是其深度展开版本，颗粒度细化至函数与字段。
 - `README.md`：用户视角的安装/配置说明。本套文档[卷04](04-配置系统.md) 的配置参考手册是其开发者视角的扩展。
 - 本套文档中发现的部分代码与 `technical-design.md` 的偏差已在各卷标注（例如：工具循环当前没有"证据综合阶段"状态机；`config.example.json` 残留已废弃的 `chat.private_action/group_action` 键）。
