@@ -94,22 +94,41 @@ while (running) {
 
 ## 4. 客户端模式 WebSocket（MyReverseWebSocket.cpp，reverse_websocket）
 
-Klein 当服务端，接受**一个**连接（单 socket 模型，无多客户端/广播）：
+Klein 当服务端，**同一时刻只服务一个连接**（单 socket 模型，无多客户端/广播）。监听器在传输线程存活期间常驻，只有监听本身失败才重建；单个连接的失败只结束这一个连接：
 
 ```
-while (running) {
-    acceptor: open(v4) + reuse_address + bind(bindHost,bindPort) + listen()
-    async_accept（100ms 泵等待，退出时 cancel+close）
-    async_read HTTP 升级请求（同样可取消）
-    ① Bearer 校验：isAuthorization 不匹配 → 写 401 (WWW-Authenticate: Bearer) → 关连接 → continue 重新监听
-    ② 路径校验：request.target() != path → 404 → continue
-    websocket::stream ws{move(socket)}; ws.accept(request);     // 完成 WS 升级
-    runOneBotWebSocketSession(...);
+while (running) {                                        // 一个监听周期
+    try {
+        io_context acceptorIoc;                          // acceptor 专用，长寿命
+        acceptor: open(v4) + reuse_address + bind(bindHost,bindPort) + listen()
+        while (running) {                                // 每圈接一个连接
+            io_context ioc; tcp::socket socket{ioc};     // 每个连接一个新的 io_context
+            acceptor.async_accept(socket)（泵 acceptorIoc，100ms 一拍；停止时 cancel+close 后退出两层循环）
+            accept 出错 → throw，交给外层重建监听
+            try {
+                async_read HTTP 升级请求（泵 ioc，同样可取消）
+                ① Bearer 校验：isAuthorized 不匹配 → 写 401 (WWW-Authenticate: Bearer) → 关连接 → Warning → continue
+                ② 路径校验：request.target() != path → 404 → Warning → continue
+                websocket::stream ws{move(socket)}; ws.accept(request);     // 完成 WS 升级
+                runOneBotWebSocketSession(ws, ioc, ...);
+            } catch (连接级错误，系统错误同样单独 catch 并转码) {
+                握手完成前（连上即断、非 HTTP 数据、读请求出错、ws.accept 失败）→ Warning "连接在握手完成前失败，已断开该连接（监听 bind:port）"
+                会话中 → Error 原因 + Fatal "已失联（监听 bind:port），继续监听，等待协议端重新连接..."
+            }
+            // 立即回到内层接下一个连接：不销毁 acceptor、不等待
+        }
+    } catch (监听失败：open/bind/listen/accept) {
+        系统错误转码并带 bind:port 记日志（address_in_use 单独文案）
+    }
+    if (running) { LOG_FATAL("…监听已中断（监听 bind:port），10秒后将重新监听..."); waitForReconnect(10s); }
 }
-// 会话/监听异常 → 系统错误 catch 转码并带 bind:port 记日志 → "WebSocket（客户端模式）已失联（监听 bind:port），10秒后将重新连接" → waitForReconnect(10s)
 ```
 
-细节：鉴权先于路径（401 优先于 404）；`Server: KleinBot` 响应头；keep_alive(false)。`bind()` 抛 `address_in_use` 时单独走一条日志，明确写出被占用的 `bind:port` 并提示协议端服务器模式与 Klein 监听不能共用同一地址；该分支仍保持 10 秒重试，不退出进程。
+**为什么监听器常驻**（2026-11-26）：旧实现每个连接都新建 acceptor、连接结束即析构。协议端收到 401 后立即重连时，新连接可能已排进旧 acceptor 的积压队列，析构时被内核 RST，对端读响应头得到 connection reset（契约测试在 CI 上偶发失败，绑单核可复现）；握手前出错和会话结束后还要停听 10 秒。现在 10 秒等待只留给监听本身失败。
+
+**io_context 生命周期**：acceptor 用自己的长寿命 io_context，每个连接仍用新的 io_context 构造 socket（Asio 允许 accept 到属于另一个执行上下文的 socket）。读请求和会话循环（§2）的回调按引用捕获局部变量，连接异常退出时可能留下已取消、未执行的回调；连接作用域结束时它的 io_context 一并析构，这些回调只被销毁、不被调用。若与 acceptor 共用一个长寿命 io_context，它们会在下一个连接的 `run_for` 里对着已销毁的变量执行。
+
+细节：鉴权先于路径（401 优先于 404）；`Server: KleinBot` 响应头；keep_alive(false)。`bind()` 抛 `address_in_use` 时单独走一条日志，明确写出被占用的 `bind:port` 并提示协议端服务器模式与 Klein 监听不能共用同一地址；该分支仍保持 10 秒重试，不退出进程。停止（`running=false`）时取消等待中的 accept 或请求读取、关闭后退出；会话中途停止由会话循环自行取消收尾。握手阶段没有超时，见 §10。
 
 ## 5. HTTP 传输（OneBotHttpTransport.cpp）
 
@@ -259,7 +278,7 @@ v2.4.1 T1 落地的"问了要拿答案"地基。`OneBotApiChannel` 是纯虚接�
 | 边界 | 说明 |
 | --- | --- |
 | 业务出站无重试无对账 | 投递离队后失败即丢（HTTP sender 记日志；WS 写失败断线重连但那条消息已消费）；API 通道（§9）有对账，但业务投递不走它 |
-| 客户端模式单连接 | acceptor 与会话同处一个 try 块：会话期间监听 socket 仍开着但无人 accept，第二个协议端连上来只会滞留内核 backlog；会话结束、acceptor 析构时排队连接被丢弃，随后重新 bind（reuse_address）监听。即"一次只服务一个客户端" |
+| 客户端模式单连接 | 同一时刻只服务一个连接：监听器常驻，会话期间第二个协议端连上来只会滞留内核 backlog，当前连接结束后按序被接受（不再因 acceptor 析构被重置）。握手阶段无超时：连上不发数据的连接会占住唯一的服务位，直到对端断开或进程停止 |
 | 入站多图简化 | 一条消息多张图只留最后一张的 URL |
 | 事件服务明文 HTTP | 无 TLS；公网部署须由反向代理终止 TLS |
 | 心跳/notice/request 进队列 | decode 只滤 meta_event；notice/request 进入队列后在 `workingThread` 交给 `EventRouter` 路由（v2.4.1 起，无订阅者静默丢弃） |
@@ -279,7 +298,7 @@ v2.4.1 T1 落地的"问了要拿答案"地基。`OneBotApiChannel` 是纯虚接�
 | `src/Network/WebSocketHead.h` | Boost.Beast/Asio 统一 include 与命名空间别名 |
 | `src/Network/OneBotWebSocketSession.h/.cpp` | 共享 WS 会话循环 |
 | `src/Network/MyWebSocket.h/.cpp` | 服务器模式（Klein 作为客户端连出）+ 5s 重连 |
-| `src/Network/MyReverseWebSocket.h/.cpp` | 客户端模式（Klein 作为服务端监听）+ 401/404 + 10s 重监听 |
+| `src/Network/MyReverseWebSocket.h/.cpp` | 客户端模式（Klein 作为服务端监听）+ 401/404 + 常驻监听（仅监听失败时 10s 后重建） |
 | `src/Network/OneBotHttpTransport.h/.cpp` | API sender + 事件服务 |
 | `src/Network/DeliveryReceiptRegistry.h/.cpp` | 业务投递回执：echo 高段分配、超时/断连按 unknown 兑现、sink 扇出 |
 | `src/Network/BearerAuth.h/.cpp` | Bearer 构造/常数时间校验 |

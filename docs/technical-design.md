@@ -433,7 +433,7 @@ flowchart TB
 | 模块 | 输入 | 输出 | 允许修改的状态 | 失败语义 |
 | --- | --- | --- | --- | --- |
 | `MyWebSocket` | Universal WebSocket frame、两类队列、OneBot codec | `InboundMessage` 入队或 OneBot action write | 连接状态和两类队列 | 系统错误消息转 UTF-8 后记录并 5 秒后重连 |
-| `MyReverseWebSocket` | Upgrade 请求、两类队列、OneBot codec | `InboundMessage` 入队或 OneBot action write | 连接状态和两类队列 | 401/404 拒绝握手；断线后 10 秒重新监听 |
+| `MyReverseWebSocket` | Upgrade 请求、两类队列、OneBot codec | `InboundMessage` 入队或 OneBot action write | 连接状态和两类队列 | 401/404 拒绝握手；连接失败或断线后立即接受下一个连接，仅监听失败时 10 秒后重建监听 |
 | `OneBotHttpTransport` | HTTP API/Webhook、两类队列、OneBot codec | HTTP action 或 `InboundMessage` | 连接状态和两类队列 | 协议/鉴权错误返回状态码，网络错误记录日志 |
 | `OneBotEventDecoder` | OneBot JSON | `InboundMessage` 或忽略结果 | 无 | 非法 JSON 抛异常，由传输边缘捕获；标量字段类型宽容（数字字段字符串化可解析、垃圾值回退默认值，JS 系实现端差异不丢事件） |
 | `CapabilityBroker` | `poll(now)` 周期调用 | 能力位（`supports(BotFeature)`）与端点摘要 | 探测状态机（互斥锁） | 探测失败 60s 冷却重试；未就绪/不支持一律 false（保守关闭） |
@@ -555,7 +555,7 @@ flowchart TB
 
 ### 5.2 客户端模式 WebSocket（reverse_websocket）
 
-`MyReverseWebSocket` 绑定配置中的地址、端口和路径，监听一个 Universal 连接。TCP 建立后先读取 Upgrade 请求；路径不匹配返回 `404`，Bearer Token 不匹配返回 `401`。升级成功后复用与服务器模式相同的 `OneBotWebSocketSession`，在同一连接收事件和发动作；连接断开后等待 10 秒重新监听。
+`MyReverseWebSocket` 绑定配置中的地址、端口和路径，监听一个 Universal 连接。TCP 建立后先读取 Upgrade 请求；路径不匹配返回 `404`，Bearer Token 不匹配返回 `401`。升级成功后复用与服务器模式相同的 `OneBotWebSocketSession`，在同一连接收事件和发动作。监听器在传输线程存活期间常驻：拒绝握手、握手前出错或会话断开都只结束这一个连接，随即接受下一个；只有监听本身（bind/listen/accept）失败才在 10 秒后重建。
 
 监听失败时日志必须包含 `bind:port`；`Address already in use` 单独识别并提示“协议端的服务器模式是否也使用了同一地址”，随后仍按 10 秒节奏重试。`ConfigLoader` 在加载期还会扫描全部 transport 档案：服务器模式目标与客户端模式监听地址重合（回环别名、通配地址按重叠处理）时发 Warning，但只告警不阻断启动——非活动档案不参与监听，用户可能保留多套档案按需切换。
 

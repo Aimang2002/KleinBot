@@ -162,9 +162,7 @@ def connect_with_retry(port):
     raise RuntimeError("reverse websocket server did not start")
 
 
-def reverse_handshake(port, token):
-    connection = connect_with_retry(port)
-    connection.settimeout(10)
+def send_upgrade_request(connection, port, token):
     key = base64.b64encode(os.urandom(16)).decode()
     connection.sendall(
         (
@@ -177,7 +175,60 @@ def reverse_handshake(port, token):
             f"Authorization: Bearer {token}\r\n\r\n"
         ).encode()
     )
+
+
+def reverse_handshake(port, token):
+    connection = connect_with_retry(port)
+    connection.settimeout(10)
+    send_upgrade_request(connection, port, token)
     return connection, receive_headers(connection)
+
+
+def assert_rejected(port):
+    connection, response = reverse_handshake(port, "wrong-token")
+    with connection:
+        assert response.startswith("HTTP/1.1 401"), response
+
+
+# 监听器必须常驻：单个连接失败只结束这一个连接，不重建 acceptor、不停摆。
+# 监听器若随每个连接重建，已排进旧 acceptor 积压队列的连接会在它析构时被内核 RST，
+# 握手前出错的连接还会让端口停听 10 秒。
+def assert_listener_survives_failed_connections(port):
+    # 被拒后立即重连，连续多轮
+    for _ in range(20):
+        assert_rejected(port)
+
+    # 让竞争必现：下一个连接在上一个拿到 401 之前就完成 TCP 握手、排进积压队列
+    first = connect_with_retry(port)
+    queued = connect_with_retry(port)
+    with first, queued:
+        first.settimeout(10)
+        queued.settimeout(10)
+        send_upgrade_request(first, port, "wrong-token")
+        response = receive_headers(first)
+        assert response.startswith("HTTP/1.1 401"), response
+        send_upgrade_request(queued, port, "wrong-token")
+        response = receive_headers(queued)
+        assert response.startswith("HTTP/1.1 401"), response
+
+    # 连上就断开：下一个连接必须马上被服务
+    silent = connect_with_retry(port)
+    silent.close()
+    started = time.monotonic()
+    assert_rejected(port)
+    elapsed = time.monotonic() - started
+    assert elapsed < 2, f"listener stalled {elapsed:.2f}s after a silent disconnect"
+
+    # 非 HTTP 数据：服务端应直接放弃这个连接（读到 EOF 或被重置），不回任何内容
+    garbage = connect_with_retry(port)
+    with garbage:
+        garbage.settimeout(2)
+        garbage.sendall(b"\x16\x03\x01 not an http request\r\n\r\n")
+        try:
+            leftover = garbage.recv(1)
+        except ConnectionResetError:
+            leftover = b""
+        assert leftover == b"", leftover
 
 
 def run_reverse(driver):
@@ -188,16 +239,25 @@ def run_reverse(driver):
         stderr=subprocess.PIPE,
         text=True,
     )
-    unauthorized, response = reverse_handshake(port, "wrong-token")
-    with unauthorized:
-        assert response.startswith("HTTP/1.1 401"), response
+    try:
+        # 驱动处理完一个事件就退出，监听器的检查必须放在成功会话之前
+        assert_listener_survives_failed_connections(port)
 
-    connection, response = reverse_handshake(port, TOKEN)
-    with connection:
-        assert response.startswith("HTTP/1.1 101"), response
-        assert_action(json.loads(receive_websocket_frame(connection)))
-        connection.sendall(websocket_frame(json.dumps(EVENT), masked=True))
-        assert_driver_result(process, "reverse_websocket")
+        # 时间自己量：connect_with_retry 会重试 10 秒，掩盖端口停听
+        started = time.monotonic()
+        connection, response = reverse_handshake(port, TOKEN)
+        elapsed = time.monotonic() - started
+        with connection:
+            assert response.startswith("HTTP/1.1 101"), response
+            assert elapsed < 2, f"listener stalled {elapsed:.2f}s after a non-HTTP connection"
+            assert_action(json.loads(receive_websocket_frame(connection)))
+            connection.sendall(websocket_frame(json.dumps(EVENT), masked=True))
+            assert_driver_result(process, "reverse_websocket")
+    finally:
+        # 断言失败时驱动仍在等事件，收掉它以免残留到下一轮
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
 
 
 class ApiHandler(BaseHTTPRequestHandler):
