@@ -2,10 +2,13 @@
 
 感谢你愿意为 KleinBot 出力。这份文档说明怎么搭环境、怎么提改动、改动要满足什么要求。完整的工作规范在 [AGENTS.md](AGENTS.md)（人和 AI 编码代理共用同一份），本文是它的入门版；两者不一致时以 `AGENTS.md` 为准。
 
+动手之前请先读[设计哲学](docs/design-philosophy.md)：功能住在边缘，核心只长机制。它同时是评审标准——一个改动该不该进、该放在哪，都按它判断。
+
 ## 先读什么
 
 | 想了解 | 看这里 |
 | --- | --- |
+| 什么样的改动会被接受（评审标准） | [docs/design-philosophy.md](docs/design-philosophy.md) |
 | 怎么安装、配置、运行 | [README.md](README.md) |
 | 整体架构、设计决策（ADR）、不变量 | [docs/technical-design.md](docs/technical-design.md) |
 | 某个模块的实现细节 | [docs/tech-max/](docs/tech-max/README.md)，按卷查 |
@@ -47,11 +50,11 @@ Windows（MinGW-w64）与发布构建的命令见 `AGENTS.md`。自动化测试�
 
 ## 改动要满足什么
 
+**符合设计哲学。** 这是评审的第一道：功能的特殊性留在它自己的模块里，不渗进核心；先找能复用的机制（Action → Tool/Command 适配、Port 加组合根注入），不为单次需求另开一条平行的通路；确实要动核心时，加的是与这个功能无关的通用能力。详见[设计哲学](docs/design-philosophy.md)。
+
 **关联点一次改全。** 同一个事实常常写在好几个文件里（配置键、消息字段、数据库表、线程、模块清单、各种计数）。只改手头那一处，会留下“代码能跑，但面板看不见 / 示例配置报未知字段 / 文档和代码对不上”的半成品。动手前先全仓搜索这个标识符，列出要改的地方再逐项改完。常见的几类关联点和各自的清单在 `AGENTS.md` 的“关联点必须一次改全”一节，PR 模板里也有一份自查表。
 
 **守住依赖方向。** 例如业务模块不能直接读配置文件，SQL 只能出现在各个 Store 里，OneBot 协议的概念只能出现在 `Network/` 与 `Protocol/`。其中一部分由 `tests/architecture_dependency_test.py` 自动检查，完整的规则在 `docs/technical-design.md` 第 19 节。
-
-**先扩展已有机制。** 新功能优先落在既有的分层和模式上（Action → Tool/Command 适配、Port 加组合根注入），不为单次需求另起一套平行的机制。
 
 **行为变了就补测试。** 已有公开接缝的地方，为改动补上有针对性的测试。
 

@@ -6,6 +6,14 @@
 
 <!-- 起因、现象或数据；有取舍的话写明选了什么、放弃了什么。 -->
 
+## 设计自查
+
+评审按 `docs/design-philosophy.md` 进行，先自己过一遍。
+
+- [ ] 删除测试：把这次加的功能整个删掉，核心（`Message`、`ChatService`、`Application/ToolLoop`、`UserSessionService`、`Port/` 等）不需要跟着改
+- [ ] 复用了现有的机制 <!-- 写出是哪个；没有复用的话，说明现有机制为什么装不下 -->
+- [ ] 如果改了核心：加的是与这个功能无关的通用能力 <!-- 说明谁还会用到 -->
+
 ## 怎么验证的
 
 - [ ] `ctest --preset linux-debug` 全部通过

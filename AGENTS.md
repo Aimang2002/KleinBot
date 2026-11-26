@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## Design Philosophy & Review Standard
+
+Read [`docs/design-philosophy.md`](docs/design-philosophy.md) before designing or reviewing any change. In one line: features live at the edge, the core only grows mechanisms, and the closer code is to the core, the more abstract and reusable it must be. It is also the review standard: decide whether a change belongs, and where it belongs, by that document first; only then look at the implementation. When the rules below conflict or do not cover a case, that document decides.
+
 ## Project Structure & Module Organization
 
 KleinBot is a C++17 QQ bot built with CMake. Core source lives in `src/`, grouped by responsibility: `Action/` for reusable business actions, `Command/` for explicit command adapters and dispatch, `Tool/` for model-callable tools, `ChatService/` for chat/tool orchestration, `Asset/` for image resources, `Persistence/` and `Memory/` for SQLite-backed state, `Network/` for WebSocket clients, and `ModelApiCaller/` for model/image/voice adapters. Runtime resources and secrets live under `build/` and must not be committed.
@@ -68,7 +72,7 @@ Documentation rules:
 - Remove or rewrite statements made obsolete by the implementation; do not only append new notes.
 - Keep `README.md` focused on user-facing setup and build commands; keep design rationale and invariants in `docs/technical-design.md`.
 - Keep `docs/tech-max/` (per-volume walkthrough docs) in sync with `docs/technical-design.md`: whenever a change touches behavior described in a tech-max volume, update that volume in the same change, including indirect details such as counts, enum lists, cross-volume references, and end-to-end walkthrough examples.
-- `AGENTS.md`, `docs/technical-design.md` and `docs/tech-max/` are tracked and public (since 2026-11-24). Everything else under `docs/` and `CLAUDE.md` are local working notes and stay Git-ignored; do not force-add them. Before committing anything under `docs/`, check it for secrets, real QQ/group IDs, chat excerpts and machine-specific paths.
+- `AGENTS.md`, `docs/design-philosophy.md`, `docs/technical-design.md` and `docs/tech-max/` are tracked and public (since 2026-11-24). Everything else under `docs/` and `CLAUDE.md` are local working notes and stay Git-ignored; do not force-add them. Before committing anything under `docs/`, check it for secrets, real QQ/group IDs, chat excerpts and machine-specific paths.
 
 ### 关联点必须一次改全（2026-09-15 项目规则，起因：perception 节漏进配置骨架/示例致面板分区不渲染）
 

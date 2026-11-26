@@ -8,8 +8,9 @@ logs/
 CLAUDE.md
 mermaid.md
 重构任务.md
-# docs/ 下只公开技术设计与 tech-max；其余是本地工作笔记
+# docs/ 下只公开设计哲学、技术设计与 tech-max；其余是本地工作笔记
 docs/*
+!docs/design-philosophy.md
 !docs/technical-design.md
 !docs/tech-max/
 会话交接_*.md
