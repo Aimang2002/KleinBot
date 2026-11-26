@@ -1,6 +1,6 @@
 # 卷 05 · 网络与 OneBot 传输层
 
-> 源码基准：`src/Network/`（18 文件 1230 行）+ `src/Protocol/OneBot/`（5 文件 221 行）。本层位于系统边缘：将 QQ 侧的 OneBot JSON 转换为内部 `InboundMessage`，将内部 `OutboundDelivery` 转换回 OneBot action。
+> 源码基准：`src/Network/` + `src/Protocol/OneBot/`。本层位于系统边缘：将 QQ 侧的 OneBot JSON 转换为内部 `InboundMessage`，将内部 `OutboundDelivery` 转换回 OneBot action。
 
 ## 1. 全景：三种传输模式
 

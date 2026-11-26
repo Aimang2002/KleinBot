@@ -1,6 +1,6 @@
 # 卷 10 · ChatService 与 Agent 循环：一次回复的全部逻辑
 
-> 源码基准：`src/ChatService/ChatService.cpp`（324 行）、`src/Application/`（CurrentImageRouting、RecallContextInjection、ToolLoop、ToolGuidance、BotIdentity）、`src/Port/ToolNames.h`、`src/utils/LocalDate.h`。这是全项目的心脏：`reply()` 把"一句用户消息"变成"最终回复"的全过程。
+> 源码基准：`src/ChatService/ChatService.cpp`、`src/Application/`（CurrentImageRouting、RecallContextInjection、ToolLoop、ToolGuidance、BotIdentity）、`src/Port/ToolNames.h`、`src/utils/LocalDate.h`。这是全项目的心脏：`reply()` 把"一句用户消息"变成"最终回复"的全过程。
 
 ## 0. 与 technical-design.md 的差异声明
 
@@ -49,7 +49,7 @@ flowchart TD
 
 ## 3. 系统提示词的组装规则（工具自带规则 + composeToolGuidance，掌握 Agent 行为的关键）
 
-`bundle.request.system_prompt` = 用户人格（soul.md 或 #设置人格）+ `composeToolGuidance(tools, tools.names(), GuidanceScene::Conversation, {currentLocalDateIso()})`（`src/Application/ToolGuidance.h/.cpp`，ADR-022）。规则文本由各工具自带（`Tool::usageGuidance`，ActionTool 转发 `Action::usageGuidance`，见[卷09 §3](09-Action与Tool体系.md)），ChatService 不再按工具名 if；组装器按固定顺序拼接（顺序清单写在 `ToolGuidance.h` 头注释），生产工具集下结果与重构前手写的文本**逐字节一致**（`tests/ToolGuidanceTests.cpp` 以 5dfab6a 原文作金样）。按内容等价于下表四段：
+`bundle.request.system_prompt` = 用户人格（soul.md 或 #设置人格）+ `composeToolGuidance(tools, tools.names(), GuidanceScene::Conversation, {currentLocalDateIso()})`（`src/Application/ToolGuidance.h/.cpp`，ADR-022）。规则文本由各工具自带（`Tool::usageGuidance`，ActionTool 转发 `Action::usageGuidance`，见[卷09 §3](09-Action与Tool体系.md)），ChatService 不再按工具名 if；组装器按固定顺序拼接（顺序清单写在 `ToolGuidance.h` 头注释），生产工具集下结果与重构前手写的文本**逐字节一致**（`tests/ToolGuidanceTests.cpp` 以重构前的原文作金样）。按内容等价于下表四段：
 
 | 触发条件 | 追加内容要点 |
 | --- | --- |
