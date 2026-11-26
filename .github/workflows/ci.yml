@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 45
     steps:
       # 默认浅克隆（fetch-depth: 1）即可：版本头只需要 git rev-parse HEAD
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Linux 预设不打包依赖（KLEINBOT_USE_BUNDLED_DEPS=OFF），全部取自系统包：
       #   g++ / make / cmake  编译器、Unix Makefiles 生成器、CMake ≥ 3.21（22.04 为 3.22）
